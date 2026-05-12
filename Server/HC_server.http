@@ -1,0 +1,6 @@
+@HC_server_HostAddress = http://localhost:5045
+
+GET {{HC_server_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

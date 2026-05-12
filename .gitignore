@@ -1,0 +1,49 @@
+# Workspace-only Codex/project notes
+Workspace/
+
+# Project-local tools and downloaded runtimes
+.tools/
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/
+*.iml
+
+# Local secrets/config
+local.properties
+*.local
+*.user
+*.suo
+*.rsuser
+appsettings.*.local.json
+
+# Android / Gradle
+AndroidClient/.gradle/
+AndroidClient/build/
+AndroidClient/app/build/
+AndroidClient/**/build/
+AndroidClient/local.properties
+AndroidClient/.idea/
+*.apk
+*.aab
+
+# .NET / Visual Studio
+Server/.vs/
+Server/bin/
+Server/obj/
+Server/**/bin/
+Server/**/obj/
+Server/*.csproj.user
+Server/*.db
+Server/*.db-*
+Server/debug.txt
+
+# Logs and temporary output
+*.log
+logs/
+tmp/
+temp/

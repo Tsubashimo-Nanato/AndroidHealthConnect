@@ -1,0 +1,106 @@
+﻿<!doctype html>
+<meta charset="utf-8" />
+<title>Health Connect Graph</title>
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<style>
+    body {
+        font-family: system-ui,sans-serif;
+        margin: 24px
+    }
+
+    #plot {
+        height: 70vh
+    }
+
+    .row {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        margin-bottom: 12px
+    }
+
+    input[type="text"] {
+        width: 220px
+    }
+</style>
+
+<h1>Health Connect Graph</h1>
+
+<div class="row">
+    <label>Metric</label>
+    <select id="metric">
+        <option value="heart_rate">heart_rate</option>
+        <option value="steps">steps</option>
+        <option value="calories">calories</option>
+        <option value="sleep_stage">sleep_stage</option>
+    </select>
+
+    <label>Date</label>
+    <input id="date" type="date" />
+
+    <button id="go">Show</button>
+</div>
+
+<div class="row">
+    <label>API Key</label>
+    <input id="apikey" type="text" placeholder="X-API-Key (e.g. 123)" />
+    <button id="saveKey">Save</button>
+    <small id="keyStatus"></small>
+</div>
+
+<div id="plot"></div>
+
+<script>
+    const keyInput = document.getElementById('apikey');
+    const keyStatus = document.getElementById('keyStatus');
+
+    function getKey() {
+        return (keyInput.value || localStorage.getItem('hc_api_key') || '').trim();
+    }
+    function setKey(k) {
+        localStorage.setItem('hc_api_key', k.trim());
+        keyStatus.textContent = '✓ saved';
+        setTimeout(() => keyStatus.textContent = '', 1500);
+    }
+
+    document.getElementById('saveKey').onclick = () => setKey(keyInput.value);
+
+    async function draw() {
+        const metric = document.getElementById('metric').value;
+        const d = document.getElementById('date').value;
+        if (!d) { alert('Pick a date'); return; }
+
+        const tzOffsetMinutes = -new Date().getTimezoneOffset();
+        const url = `/samples/dayLocal?metric=${encodeURIComponent(metric)}&date=${d}&tzOffsetMinutes=${tzOffsetMinutes}`;
+
+        const res = await fetch(url, { headers: { 'X-API-Key': getKey() } });
+        if (!res.ok) {
+            const t = await res.text();
+            alert(`Query failed (${res.status}). ${t}`);
+            return;
+        }
+        const rows = await res.json();
+        const x = rows.map(v => new Date(v.t * 1000));
+        const y = rows.map(v => v.vF ?? v.vI ?? 0);
+
+        Plotly.newPlot('plot', [{ x, y, mode: 'lines+markers', name: metric }], {
+            margin: { t: 20 },
+            xaxis: { title: 'Time (local)' },
+            yaxis: { title: metric }
+        });
+
+        console.log(`Plotted ${rows.length} points`);
+    }
+
+    document.getElementById('go').onclick = draw;
+
+    // On load: restore key, default date=today, and auto-show
+    window.addEventListener('DOMContentLoaded', () => {
+        const savedKey = localStorage.getItem('hc_api_key') || '';
+        if (savedKey) keyInput.value = savedKey;
+        if (!document.getElementById('date').value) {
+            document.getElementById('date').valueAsDate = new Date();
+        }
+        document.getElementById('go').click();
+    });
+</script>
