@@ -28,6 +28,9 @@ interface HealthRecordDao {
     @Query("DELETE FROM health_values WHERE recordLocalId = :recordLocalId")
     suspend fun deleteValuesForRecord(recordLocalId: Long)
 
+    @Query("SELECT COUNT(*) FROM health_values WHERE recordLocalId = :recordLocalId")
+    suspend fun countValuesForRecord(recordLocalId: Long): Int
+
     @Query(
         """
         DELETE FROM health_values
@@ -93,6 +96,52 @@ interface HealthRecordDao {
 
     @Query("SELECT COUNT(*) FROM health_records WHERE recordType = :recordType")
     suspend fun countRecordsForType(recordType: String): Int
+
+    @Query(
+        """
+        SELECT DISTINCT COALESCE(v.localDate, r.localDate)
+        FROM health_records r
+        LEFT JOIN health_values v ON v.recordLocalId = r.localId
+        WHERE r.recordType = :recordType
+          AND COALESCE(v.startEpochMillis, v.sampleEpochMillis, r.startEpochMillis) < :endEpochMillis
+          AND COALESCE(
+              v.endEpochMillis,
+              v.startEpochMillis,
+              v.sampleEpochMillis,
+              r.endEpochMillis,
+              r.startEpochMillis
+          ) >= :startEpochMillis
+          AND COALESCE(v.localDate, r.localDate) IS NOT NULL
+        ORDER BY COALESCE(v.localDate, r.localDate) ASC
+        """
+    )
+    suspend fun localDatesForTypeRange(
+        recordType: String,
+        startEpochMillis: Long,
+        endEpochMillis: Long
+    ): List<String>
+
+    @Query(
+        """
+        SELECT DISTINCT COALESCE(v.startEpochMillis, v.sampleEpochMillis, r.startEpochMillis)
+        FROM health_records r
+        LEFT JOIN health_values v ON v.recordLocalId = r.localId
+        WHERE r.recordType = :recordType
+          AND COALESCE(v.startEpochMillis, v.sampleEpochMillis, r.startEpochMillis) < :endEpochMillis
+          AND COALESCE(
+              v.endEpochMillis,
+              v.startEpochMillis,
+              v.sampleEpochMillis,
+              r.endEpochMillis,
+              r.startEpochMillis
+          ) >= :startEpochMillis
+        """
+    )
+    suspend fun localDateEpochsForTypeRange(
+        recordType: String,
+        startEpochMillis: Long,
+        endEpochMillis: Long
+    ): List<Long>
 
     @Query(
         """
@@ -515,8 +564,8 @@ interface HealthRecordDao {
         FROM health_records r
         INNER JOIN health_values v ON v.recordLocalId = r.localId
         WHERE r.recordType = :recordType
-          AND r.startEpochMillis < :endEpochMillis
-          AND COALESCE(r.endEpochMillis, r.startEpochMillis) >= :startEpochMillis
+          AND COALESCE(v.startEpochMillis, v.sampleEpochMillis, r.startEpochMillis) < :endEpochMillis
+          AND COALESCE(v.endEpochMillis, v.startEpochMillis, v.sampleEpochMillis, r.endEpochMillis, r.startEpochMillis) >= :startEpochMillis
         ORDER BY COALESCE(v.startEpochMillis, v.sampleEpochMillis, r.startEpochMillis) DESC,
             COALESCE(v.sequence, 2147483647) ASC,
             v.metric ASC
@@ -537,8 +586,8 @@ interface HealthRecordDao {
         FROM health_records r
         INNER JOIN health_values v ON v.recordLocalId = r.localId
         WHERE r.recordType = :recordType
-          AND r.startEpochMillis < :endEpochMillis
-          AND COALESCE(r.endEpochMillis, r.startEpochMillis) >= :startEpochMillis
+          AND COALESCE(v.startEpochMillis, v.sampleEpochMillis, r.startEpochMillis) < :endEpochMillis
+          AND COALESCE(v.endEpochMillis, v.startEpochMillis, v.sampleEpochMillis, r.endEpochMillis, r.startEpochMillis) >= :startEpochMillis
         """
     )
     suspend fun countInspectorRowsForTypeRange(
@@ -614,8 +663,8 @@ interface HealthRecordDao {
         FROM health_records r
         INNER JOIN health_values v ON v.recordLocalId = r.localId
         WHERE r.recordType = :recordType
-          AND r.startEpochMillis < :endEpochMillis
-          AND COALESCE(r.endEpochMillis, r.startEpochMillis) >= :startEpochMillis
+          AND COALESCE(v.startEpochMillis, v.sampleEpochMillis, r.startEpochMillis) < :endEpochMillis
+          AND COALESCE(v.endEpochMillis, v.startEpochMillis, v.sampleEpochMillis, r.endEpochMillis, r.startEpochMillis) >= :startEpochMillis
         ORDER BY COALESCE(v.startEpochMillis, v.sampleEpochMillis, r.startEpochMillis) DESC,
             COALESCE(v.sequence, 2147483647) ASC,
             v.metric ASC
@@ -743,8 +792,8 @@ interface HealthRecordDao {
         FROM health_records r
         INNER JOIN health_values v ON v.recordLocalId = r.localId
         WHERE r.recordType = :recordType
-          AND r.startEpochMillis < :endEpochMillis
-          AND COALESCE(r.endEpochMillis, r.startEpochMillis) >= :startEpochMillis
+          AND COALESCE(v.startEpochMillis, v.sampleEpochMillis, r.startEpochMillis) < :endEpochMillis
+          AND COALESCE(v.endEpochMillis, v.startEpochMillis, v.sampleEpochMillis, r.endEpochMillis, r.startEpochMillis) >= :startEpochMillis
           AND v.numericValue IS NOT NULL
         ORDER BY COALESCE(v.startEpochMillis, v.sampleEpochMillis, r.startEpochMillis) DESC,
             COALESCE(v.sequence, 2147483647) ASC
@@ -765,8 +814,8 @@ interface HealthRecordDao {
                 MAX(COALESCE(v.startEpochMillis, v.sampleEpochMillis, r.startEpochMillis)) AS latestEpochMillis
             FROM health_records r
             INNER JOIN health_values v ON v.recordLocalId = r.localId
-            WHERE r.startEpochMillis < :endEpochMillis
-              AND COALESCE(r.endEpochMillis, r.startEpochMillis) >= :startEpochMillis
+            WHERE COALESCE(v.startEpochMillis, v.sampleEpochMillis, r.startEpochMillis) < :endEpochMillis
+              AND COALESCE(v.endEpochMillis, v.startEpochMillis, v.sampleEpochMillis, r.endEpochMillis, r.startEpochMillis) >= :startEpochMillis
               AND v.numericValue IS NOT NULL
             GROUP BY r.recordType
         )
@@ -799,8 +848,8 @@ interface HealthRecordDao {
         INNER JOIN health_values v ON v.recordLocalId = r.localId
         INNER JOIN latest l ON l.recordType = r.recordType
             AND l.latestEpochMillis = COALESCE(v.startEpochMillis, v.sampleEpochMillis, r.startEpochMillis)
-        WHERE r.startEpochMillis < :endEpochMillis
-          AND COALESCE(r.endEpochMillis, r.startEpochMillis) >= :startEpochMillis
+        WHERE COALESCE(v.startEpochMillis, v.sampleEpochMillis, r.startEpochMillis) < :endEpochMillis
+          AND COALESCE(v.endEpochMillis, v.startEpochMillis, v.sampleEpochMillis, r.endEpochMillis, r.startEpochMillis) >= :startEpochMillis
           AND v.numericValue IS NOT NULL
         ORDER BY r.recordType ASC, COALESCE(v.sequence, 2147483647) ASC
         """

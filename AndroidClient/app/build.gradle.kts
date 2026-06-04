@@ -55,6 +55,9 @@ dependencies {
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 
+    // Network upload
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+
     // Material (for theme parent)
     implementation("com.google.android.material:material:1.12.0")
 

@@ -29,6 +29,7 @@ import com.example.healthconnectandroid.hc.HealthDisplayFormatter
 import com.example.healthconnectandroid.hc.ReadableHealthRecord
 import com.example.healthconnectandroid.ui.EmptyStateText
 import com.example.healthconnectandroid.ui.format.MetricDisplayFormatter
+import com.example.healthconnectandroid.ui.i18n.uiText
 import java.time.Duration
 import java.time.Instant
 import java.time.ZoneId
@@ -163,7 +164,7 @@ fun SleepStagePlot(
 
     selectedBlock?.let { block ->
         Text(
-            "${block.label}: ${formatEpoch(block.startEpochMillis, zoneId)} to ${formatEpoch(block.endEpochMillis, zoneId)} (${block.durationText})",
+            uiText("${block.label}: ${formatEpoch(block.startEpochMillis, zoneId)} to ${formatEpoch(block.endEpochMillis, zoneId)} (${block.durationText})"),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )

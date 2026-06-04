@@ -1,6 +1,7 @@
 package com.example.healthconnectandroid.ui
 
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
@@ -25,6 +26,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.example.healthconnectandroid.ui.i18n.uiText
+
+private val StudioEase = CubicBezierEasing(0.16f, 1f, 0.3f, 1f)
 
 @Composable
 fun <T> SegmentedSwitch(
@@ -39,9 +43,9 @@ fun <T> SegmentedSwitch(
 
     Surface(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(999.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.42f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.12f))
+        shape = RoundedCornerShape(topStart = 26.dp, topEnd = 32.dp, bottomEnd = 22.dp, bottomStart = 28.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.48f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.16f))
     ) {
         BoxWithConstraints(
             modifier = Modifier
@@ -52,7 +56,7 @@ fun <T> SegmentedSwitch(
             val segmentWidth = maxWidth / options.size
             val selectedOffset by animateDpAsState(
                 targetValue = segmentWidth * selectedIndex,
-                animationSpec = tween(durationMillis = 180),
+                animationSpec = tween(durationMillis = 260, easing = StudioEase),
                 label = "segmented-switch-offset"
             )
             Surface(
@@ -60,7 +64,7 @@ fun <T> SegmentedSwitch(
                     .offset(x = selectedOffset)
                     .width(segmentWidth)
                     .fillMaxHeight(),
-                shape = RoundedCornerShape(999.dp),
+                shape = RoundedCornerShape(topStart = 20.dp, topEnd = 26.dp, bottomEnd = 18.dp, bottomStart = 22.dp),
                 color = MaterialTheme.colorScheme.primaryContainer
             ) {}
             Row(Modifier.fillMaxWidth()) {
@@ -72,7 +76,7 @@ fun <T> SegmentedSwitch(
                         } else {
                             MaterialTheme.colorScheme.onSurfaceVariant
                         },
-                        animationSpec = tween(durationMillis = 140),
+                        animationSpec = tween(durationMillis = 180, easing = StudioEase),
                         label = "segmented-switch-text"
                     )
                     Box(
@@ -83,7 +87,7 @@ fun <T> SegmentedSwitch(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = label(option),
+                            text = uiText(label(option)),
                             style = MaterialTheme.typography.labelLarge,
                             color = textColor,
                             maxLines = 1,

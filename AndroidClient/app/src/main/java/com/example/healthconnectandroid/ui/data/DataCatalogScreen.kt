@@ -55,6 +55,7 @@ import com.example.healthconnectandroid.ui.StatusTone
 import com.example.healthconnectandroid.ui.animation.rowFadeIn
 import com.example.healthconnectandroid.ui.format.DisplayPreferences
 import com.example.healthconnectandroid.ui.format.MetricDisplayFormatter
+import com.example.healthconnectandroid.ui.i18n.uiText
 import java.time.Instant
 
 @Composable
@@ -180,9 +181,9 @@ private fun DataStatusStrip(
                 }
                 Text(
                     if (loading && categories.isEmpty()) {
-                        "Loading local cache"
+                        uiText("Loading local cache")
                     } else {
-                        "Last sync ${MetricDisplayFormatter.formatShortInstant(latestSync, displayPreferences.zoneId)}"
+                        uiText("Last sync ${MetricDisplayFormatter.formatShortInstant(latestSync, displayPreferences.zoneId)}")
                     },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -200,7 +201,7 @@ private fun DataStatusStrip(
                 if (loading) {
                     CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
                 } else {
-                    Icon(Icons.Default.Refresh, contentDescription = "Refresh local data")
+                    Icon(Icons.Default.Refresh, contentDescription = uiText("Refresh local data"))
                 }
             }
         }
@@ -298,13 +299,13 @@ private fun HealthMetricCard(
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(
-                    summary.descriptor.displayName,
+                    uiText(summary.descriptor.displayName),
                     style = MaterialTheme.typography.titleSmall,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    categoryLabel(summary.descriptor.category),
+                    uiText(categoryLabel(summary.descriptor.category)),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
@@ -312,13 +313,13 @@ private fun HealthMetricCard(
                 )
             }
             Text(
-                cardPrimaryText(summary, displayPreferences.unitSystem),
+                uiText(cardPrimaryText(summary, displayPreferences.unitSystem)),
                 style = MaterialTheme.typography.titleMedium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
             Text(
-                cardSecondaryText(summary),
+                uiText(cardSecondaryText(summary)),
                 style = MaterialTheme.typography.bodySmall,
                 color = cardSecondaryColor(summary),
                 maxLines = 1,

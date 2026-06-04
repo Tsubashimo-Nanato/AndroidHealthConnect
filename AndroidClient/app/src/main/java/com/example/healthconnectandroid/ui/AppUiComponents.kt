@@ -2,7 +2,6 @@ package com.example.healthconnectandroid.ui
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -13,8 +12,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -36,6 +37,9 @@ import androidx.compose.ui.unit.dp
 import com.example.healthconnectandroid.hc.sync.SyncProgress
 import com.example.healthconnectandroid.hc.sync.SyncRangePolicy
 import com.example.healthconnectandroid.ui.format.MetricDisplayFormatter
+import com.example.healthconnectandroid.ui.i18n.LocalAppLanguage
+import com.example.healthconnectandroid.ui.i18n.translateUiText
+import com.example.healthconnectandroid.ui.i18n.uiText
 import java.time.Instant
 
 enum class StatusTone {
@@ -53,60 +57,44 @@ private data class ToneColors(
     val border: Color
 )
 
+private val StudioEase = CubicBezierEasing(0.16f, 1f, 0.3f, 1f)
+private val SheetShape = RoundedCornerShape(topStart = 28.dp, topEnd = 22.dp, bottomEnd = 32.dp, bottomStart = 24.dp)
+private val ControlShape = RoundedCornerShape(topStart = 22.dp, topEnd = 28.dp, bottomEnd = 18.dp, bottomStart = 24.dp)
+private val ChipShape = RoundedCornerShape(topStart = 18.dp, topEnd = 22.dp, bottomEnd = 16.dp, bottomStart = 20.dp)
+
 @Composable
 private fun toneColors(tone: StatusTone): ToneColors {
     val scheme = MaterialTheme.colorScheme
-    val dark = isSystemInDarkTheme()
     return when (tone) {
         StatusTone.Neutral -> ToneColors(
             container = scheme.surfaceVariant.copy(alpha = 0.58f),
             content = scheme.onSurfaceVariant,
             border = scheme.outline.copy(alpha = 0.24f)
         )
-        StatusTone.Success -> if (dark) ToneColors(
-            container = Color(0xFF183327),
-            content = Color(0xFFC5E7D2),
-            border = Color(0xFF3F7759)
-        ) else ToneColors(
-            container = Color(0xFFE7F4EC),
-            content = Color(0xFF24563A),
-            border = Color(0xFF8BB99E)
+        StatusTone.Success -> ToneColors(
+            container = scheme.secondaryContainer.copy(alpha = 0.72f),
+            content = scheme.onSecondaryContainer,
+            border = scheme.secondary.copy(alpha = 0.50f)
         )
-        StatusTone.Warning -> if (dark) ToneColors(
-            container = Color(0xFF3A2D14),
-            content = Color(0xFFF3D79A),
-            border = Color(0xFF8A6A2E)
-        ) else ToneColors(
-            container = Color(0xFFFFF3D8),
-            content = Color(0xFF73510B),
-            border = Color(0xFFDAB66C)
+        StatusTone.Warning -> ToneColors(
+            container = scheme.tertiaryContainer.copy(alpha = 0.72f),
+            content = scheme.onTertiaryContainer,
+            border = scheme.tertiary.copy(alpha = 0.46f)
         )
-        StatusTone.Info -> if (dark) ToneColors(
-            container = Color(0xFF173040),
-            content = Color(0xFFBFE0EE),
-            border = Color(0xFF49778C)
-        ) else ToneColors(
-            container = Color(0xFFE8F1F8),
-            content = Color(0xFF244B66),
-            border = Color(0xFF8EAFC6)
+        StatusTone.Info -> ToneColors(
+            container = scheme.primary.copy(alpha = 0.13f),
+            content = scheme.primary,
+            border = scheme.primary.copy(alpha = 0.38f)
         )
-        StatusTone.Error -> if (dark) ToneColors(
-            container = Color(0xFF3E1F1C),
-            content = Color(0xFFF2C0B9),
-            border = Color(0xFF91554D)
-        ) else ToneColors(
-            container = Color(0xFFFCE8E6),
-            content = Color(0xFF8A2D24),
-            border = Color(0xFFD49A92)
+        StatusTone.Error -> ToneColors(
+            container = scheme.error.copy(alpha = 0.14f),
+            content = scheme.error,
+            border = scheme.error.copy(alpha = 0.42f)
         )
-        StatusTone.Destructive -> if (dark) ToneColors(
-            container = Color(0xFF431F19),
-            content = Color(0xFFFFC9BE),
-            border = Color(0xFF9B5B50)
-        ) else ToneColors(
-            container = Color(0xFFFFECE8),
-            content = Color(0xFF8B2F21),
-            border = Color(0xFFE0A194)
+        StatusTone.Destructive -> ToneColors(
+            container = scheme.error.copy(alpha = 0.20f),
+            content = scheme.error,
+            border = scheme.error.copy(alpha = 0.55f)
         )
     }
 }
@@ -120,19 +108,20 @@ fun AppSection(
 ) {
     Card(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.10f))
+        shape = SheetShape,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.14f)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
     ) {
         Column(
             Modifier.padding(18.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                Text(title, style = MaterialTheme.typography.titleMedium)
+                Text(uiText(title), style = MaterialTheme.typography.titleMedium)
                 subtitle?.let {
                     Text(
-                        it,
+                        uiText(it),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -154,7 +143,7 @@ fun MetricCard(
     val colors = toneColors(tone)
     Surface(
         modifier = modifier,
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(topStart = 20.dp, topEnd = 16.dp, bottomEnd = 24.dp, bottomStart = 18.dp),
         color = colors.container,
         border = BorderStroke(1.dp, colors.border)
     ) {
@@ -162,10 +151,10 @@ fun MetricCard(
             Modifier.padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            Text(label, style = MaterialTheme.typography.labelMedium, color = colors.content)
+            Text(uiText(label), style = MaterialTheme.typography.labelMedium, color = colors.content)
             Text(value, style = MaterialTheme.typography.titleLarge, color = colors.content)
             supporting?.let {
-                Text(it, style = MaterialTheme.typography.bodySmall, color = colors.content.copy(alpha = 0.76f))
+                Text(uiText(it), style = MaterialTheme.typography.bodySmall, color = colors.content.copy(alpha = 0.76f))
             }
         }
     }
@@ -180,12 +169,12 @@ fun StatusBadge(
     val colors = toneColors(tone)
     Surface(
         modifier = modifier,
-        shape = RoundedCornerShape(999.dp),
+        shape = ChipShape,
         color = colors.container,
         border = BorderStroke(1.dp, colors.border)
     ) {
         Text(
-            text = text,
+            text = uiText(text),
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
             style = MaterialTheme.typography.labelMedium,
             color = colors.content,
@@ -204,7 +193,7 @@ fun EmptyState(
 ) {
     Surface(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(22.dp),
+        shape = SheetShape,
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.42f),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.12f))
     ) {
@@ -212,10 +201,10 @@ fun EmptyState(
             Modifier.padding(18.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Text(title, style = MaterialTheme.typography.titleMedium)
-            Text(message, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(uiText(title), style = MaterialTheme.typography.titleMedium)
+            Text(uiText(message), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (primaryActionLabel != null && onPrimaryAction != null) {
-                Button(onClick = onPrimaryAction) { Text(primaryActionLabel) }
+                Button(onClick = onPrimaryAction) { Text(uiText(primaryActionLabel)) }
             }
         }
     }
@@ -231,11 +220,17 @@ fun PrimaryActionButton(
     Button(
         modifier = modifier
             .fillMaxWidth()
-            .animateContentSize(animationSpec = tween(150)),
+            .animateContentSize(animationSpec = tween(260, easing = StudioEase)),
         enabled = enabled,
-        onClick = onClick
+        onClick = onClick,
+        shape = ControlShape,
+        colors = ButtonDefaults.buttonColors(
+            containerColor = MaterialTheme.colorScheme.primary,
+            contentColor = MaterialTheme.colorScheme.onPrimary
+        ),
+        elevation = ButtonDefaults.buttonElevation(defaultElevation = 3.dp, pressedElevation = 1.dp)
     ) {
-        Text(label)
+        Text(uiText(label))
     }
 }
 
@@ -249,11 +244,17 @@ fun SecondaryActionButton(
     OutlinedButton(
         modifier = modifier
             .fillMaxWidth()
-            .animateContentSize(animationSpec = tween(150)),
+            .animateContentSize(animationSpec = tween(260, easing = StudioEase)),
         enabled = enabled,
-        onClick = onClick
+        onClick = onClick,
+        shape = ControlShape,
+        colors = ButtonDefaults.outlinedButtonColors(
+            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.62f),
+            contentColor = MaterialTheme.colorScheme.onSurface
+        ),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.22f))
     ) {
-        Text(label)
+        Text(uiText(label))
     }
 }
 
@@ -264,16 +265,16 @@ fun StatusMessageCard(
     tone: StatusTone = statusToneForMessage(message)
 ) {
     val colors = toneColors(tone)
-    val expandable = message.length > 96 || message.contains('\n')
-    var expanded by remember(message) { mutableStateOf(!expandable) }
+    val expandable = message.length > 72 || message.contains('\n')
+    var expanded by remember(message, tone) { mutableStateOf(!expandable || tone == StatusTone.Error) }
     val title = if (message.startsWith("Sync note:", ignoreCase = true)) "Sync note" else "Latest result"
     val busy = isBusyMessage(message)
     Surface(
         modifier = modifier
             .fillMaxWidth()
-            .animateContentSize(animationSpec = tween(180))
+            .animateContentSize(animationSpec = tween(260, easing = StudioEase))
             .clickable(enabled = expandable) { expanded = !expanded },
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(topStart = 20.dp, topEnd = 26.dp, bottomEnd = 18.dp, bottomStart = 23.dp),
         color = colors.container,
         border = BorderStroke(1.dp, colors.border)
     ) {
@@ -290,21 +291,21 @@ fun StatusMessageCard(
                     )
                 }
                 Text(
-                    title,
+                    uiText(title),
                     modifier = Modifier.weight(1f),
                     style = MaterialTheme.typography.labelMedium,
                     color = colors.content
                 )
                 if (expandable) {
                     Text(
-                        if (expanded) "Collapse" else "Expand",
+                        uiText(if (expanded) "Collapse" else "Expand"),
                         style = MaterialTheme.typography.labelSmall,
                         color = colors.content.copy(alpha = 0.72f)
                     )
                 }
             }
             Text(
-                message,
+                uiText(message),
                 style = MaterialTheme.typography.bodyMedium,
                 color = colors.content,
                 maxLines = if (expanded) Int.MAX_VALUE else 1,
@@ -322,7 +323,7 @@ fun LoadingStateCard(
 ) {
     Surface(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(22.dp),
+        shape = SheetShape,
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.34f),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.12f))
     ) {
@@ -332,9 +333,9 @@ fun LoadingStateCard(
         ) {
             CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(title, style = MaterialTheme.typography.titleSmall)
+                Text(uiText(title), style = MaterialTheme.typography.titleSmall)
                 Text(
-                    message,
+                    uiText(message),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -349,9 +350,14 @@ fun SyncProgressCard(
     modifier: Modifier = Modifier
 ) {
     if (progress == null) return
+    val progressMessage = progress.message.orEmpty()
+    val messageExpandable = progressMessage.length > 72 || progressMessage.contains('\n')
+    var messageExpanded by remember(progressMessage, progress.phase) {
+        mutableStateOf(!messageExpandable || progress.phase.name == "FAILED")
+    }
     Surface(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(18.dp),
+        shape = SheetShape,
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.34f),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.12f))
     ) {
@@ -361,12 +367,12 @@ fun SyncProgressCard(
         ) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    progress.mode.label,
+                    uiText(progress.mode.label),
                     modifier = Modifier.weight(1f),
                     style = MaterialTheme.typography.labelLarge
                 )
                 Text(
-                    "${progress.completedTypes}/${progress.totalTypes}",
+                    syncProgressCounterText(progress, LocalAppLanguage.current),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -379,7 +385,7 @@ fun SyncProgressCard(
             } ?: LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             progress.currentType?.let {
                 Text(
-                    it,
+                    uiText(it),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
@@ -387,7 +393,7 @@ fun SyncProgressCard(
                 )
             }
             Text(
-                "Inserted ${progress.inserted}, updated ${progress.updated}, duplicates ${progress.duplicates}, errors ${progress.errors}",
+                syncProgressStatsText(progress),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
@@ -396,7 +402,7 @@ fun SyncProgressCard(
             val range = syncProgressRangeText(progress.rangeStart, progress.rangeEnd)
             if (range.isNotBlank()) {
                 Text(
-                    range,
+                    uiText(range),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
@@ -404,13 +410,28 @@ fun SyncProgressCard(
                 )
             }
             progress.message?.takeIf { it.isNotBlank() }?.let {
-                Text(
-                    it,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .animateContentSize(animationSpec = tween(180, easing = StudioEase))
+                        .clickable(enabled = messageExpandable) { messageExpanded = !messageExpanded },
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    if (messageExpandable) {
+                        Text(
+                            uiText(if (messageExpanded) "Collapse" else "Expand"),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Text(
+                        uiText(it),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = if (messageExpanded) Int.MAX_VALUE else 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
         }
     }
@@ -431,7 +452,7 @@ fun AppActionRow(
 @Composable
 fun EmptyStateText(message: String) {
     Text(
-        message,
+        uiText(message),
         style = MaterialTheme.typography.bodyMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant
     )
@@ -446,6 +467,32 @@ private fun syncProgressRangeText(start: Instant?, end: Instant?): String {
     }
     return "Range $startText-${MetricDisplayFormatter.formatShortInstant(end)}"
 }
+
+@Composable
+private fun syncProgressStatsText(progress: SyncProgress): String =
+    uiText(
+        "Read ${progress.read} (${formatBytesMb(progress.sourceBytesRead)}), " +
+            "wrote ${formatBytesMb(progress.localBytesWritten)}, " +
+            "inserted ${progress.inserted}, updated ${progress.updated}, " +
+            "duplicates ${progress.duplicates}, errors ${progress.errors}"
+    )
+
+private fun formatBytesMb(bytes: Long): String {
+    if (bytes <= 0L) return "0 MB"
+    val mb = bytes.toDouble() / (1024.0 * 1024.0)
+    return if (mb < 0.01) "<0.01 MB" else String.format(java.util.Locale.US, "%.2f MB", mb)
+}
+
+private fun syncProgressCounterText(
+    progress: SyncProgress,
+    language: com.example.healthconnectandroid.AppLanguagePreference
+): String =
+    when {
+        progress.totalTypes <= 0 -> translateUiText(progress.phase.label, language)
+        progress.currentType != null -> translateUiText(progress.phase.label, language)
+        progress.totalTypes == 1 -> translateUiText(progress.phase.label, language)
+        else -> "${progress.completedTypes}/${progress.totalTypes}"
+    }
 
 fun statusToneForMessage(message: String): StatusTone {
     val lower = message.lowercase()

@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -25,9 +26,12 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.example.healthconnectandroid.AgeCalculator
+import com.example.healthconnectandroid.AppLanguagePreference
 import com.example.healthconnectandroid.AppThemeMode
+import com.example.healthconnectandroid.AppThemePalette
 import com.example.healthconnectandroid.ProfileSex
 import com.example.healthconnectandroid.TimeZonePreferenceMode
 import com.example.healthconnectandroid.UnitSystemPreference
@@ -40,16 +44,26 @@ import com.example.healthconnectandroid.debug.MatrixGestureDiagnostic
 import com.example.healthconnectandroid.debug.SyncDiagnostic
 import com.example.healthconnectandroid.hc.sync.SyncMode
 import com.example.healthconnectandroid.hc.sync.SyncProgress
+import com.example.healthconnectandroid.hc.upload.UploadEndpointPolicy
+import com.example.healthconnectandroid.hc.upload.UploadEndpointValidation
+import com.example.healthconnectandroid.hc.upload.UploadPendingCounts
+import com.example.healthconnectandroid.hc.upload.UploadProgress
+import com.example.healthconnectandroid.hc.upload.UploadResultSeverity
+import com.example.healthconnectandroid.hc.upload.UploadServerMode
+import com.example.healthconnectandroid.hc.upload.UploadSettings
+import com.example.healthconnectandroid.hc.upload.UploadStatus
 import com.example.healthconnectandroid.ui.AppActionRow
 import com.example.healthconnectandroid.ui.AppSection
 import com.example.healthconnectandroid.ui.PrimaryActionButton
 import com.example.healthconnectandroid.ui.QueryCard
 import com.example.healthconnectandroid.ui.SecondaryActionButton
+import com.example.healthconnectandroid.ui.SegmentedSwitch
 import com.example.healthconnectandroid.ui.StatusBadge
 import com.example.healthconnectandroid.ui.StatusMessageCard
 import com.example.healthconnectandroid.ui.StatusTone
 import com.example.healthconnectandroid.ui.SyncProgressCard
 import com.example.healthconnectandroid.ui.animation.rowFadeIn
+import com.example.healthconnectandroid.ui.i18n.uiText
 import java.time.LocalDate
 import java.time.Instant
 import java.time.ZoneId
@@ -63,6 +77,7 @@ fun SettingsScreen(
     onOpenPreferences: () -> Unit,
     onOpenPermissions: () -> Unit,
     onOpenSync: () -> Unit,
+    onOpenUpload: () -> Unit,
     onOpenDataSettings: () -> Unit,
     onOpenAppearance: () -> Unit,
     onOpenDebug: () -> Unit,
@@ -75,15 +90,16 @@ fun SettingsScreen(
             .padding(18.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Text("Settings", modifier = Modifier.rowFadeIn(0), style = MaterialTheme.typography.headlineSmall)
+        Text(uiText("Settings"), modifier = Modifier.rowFadeIn(0), style = MaterialTheme.typography.headlineSmall)
         SettingsNavCard("Profile", profileBrief(userProfile), onOpenProfile, Modifier.rowFadeIn(1))
         SettingsNavCard("Preferences", "Units, week, timezone", onOpenPreferences, Modifier.rowFadeIn(2))
         SettingsNavCard("Permissions", "Health Connect access", onOpenPermissions, Modifier.rowFadeIn(3))
         SettingsNavCard("Sync", if (periodicEnabled) "Periodic on" else "Periodic off", onOpenSync, Modifier.rowFadeIn(4))
-        SettingsNavCard("Data Settings", "Exports and local data", onOpenDataSettings, Modifier.rowFadeIn(5))
-        SettingsNavCard("Appearance", "System, light, dark", onOpenAppearance, Modifier.rowFadeIn(6))
-        SettingsNavCard("Debug", "Legacy tools", onOpenDebug, Modifier.rowFadeIn(7))
-        StatusMessageCard(status, modifier = Modifier.rowFadeIn(8))
+        SettingsNavCard("Upload", "Server upload", onOpenUpload, Modifier.rowFadeIn(5))
+        SettingsNavCard("Data Settings", "Exports and local data", onOpenDataSettings, Modifier.rowFadeIn(6))
+        SettingsNavCard("Appearance", "Mode and palette", onOpenAppearance, Modifier.rowFadeIn(7))
+        SettingsNavCard("Debug", "Legacy tools", onOpenDebug, Modifier.rowFadeIn(8))
+        StatusMessageCard(status, modifier = Modifier.rowFadeIn(9))
     }
 }
 
@@ -93,9 +109,7 @@ private fun SettingsNavCard(title: String, subtitle: String, onClick: () -> Unit
         title = title,
         subtitle = subtitle,
         modifier = modifier.clickable(onClick = onClick)
-    ) {
-        Text("Open", color = MaterialTheme.colorScheme.primary)
-    }
+    ) {}
 }
 
 @Composable
@@ -107,6 +121,7 @@ fun SettingsPreferencesScreen(
     var weekStart by rememberSaveable(userPreferences) { mutableStateOf(userPreferences.weekStart) }
     var unitSystem by rememberSaveable(userPreferences) { mutableStateOf(userPreferences.unitSystem) }
     var timeZoneMode by rememberSaveable(userPreferences) { mutableStateOf(userPreferences.timeZoneMode) }
+    var language by rememberSaveable(userPreferences) { mutableStateOf(userPreferences.language) }
     var customTimeZoneText by rememberSaveable(userPreferences) {
         mutableStateOf(userPreferences.customTimeZoneId.orEmpty())
     }
@@ -123,7 +138,30 @@ fun SettingsPreferencesScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         AppSection(title = "Preferences", subtitle = "Display only", modifier = Modifier.rowFadeIn(0)) {
-            Text("Week starts on", style = MaterialTheme.typography.titleSmall)
+            Text(uiText("Language"), style = MaterialTheme.typography.titleSmall)
+            AppActionRow {
+                AppLanguagePreference.values().forEach { option ->
+                    val label = when (option) {
+                        AppLanguagePreference.ENGLISH -> "English"
+                        AppLanguagePreference.CHINESE_SIMPLIFIED -> "Simplified Chinese"
+                    }
+                    if (option == language) {
+                        PrimaryActionButton(
+                            modifier = Modifier.weight(1f),
+                            label = label,
+                            onClick = { language = option }
+                        )
+                    } else {
+                        SecondaryActionButton(
+                            modifier = Modifier.weight(1f),
+                            label = label,
+                            onClick = { language = option }
+                        )
+                    }
+                }
+            }
+
+            Text(uiText("Week starts on"), style = MaterialTheme.typography.titleSmall)
             AppActionRow {
                 WeekStartPreference.values().forEach { option ->
                     if (option == weekStart) {
@@ -142,7 +180,7 @@ fun SettingsPreferencesScreen(
                 }
             }
 
-            Text("Units", style = MaterialTheme.typography.titleSmall)
+            Text(uiText("Units"), style = MaterialTheme.typography.titleSmall)
             AppActionRow {
                 UnitSystemPreference.values().forEach { option ->
                     if (option == unitSystem) {
@@ -161,7 +199,7 @@ fun SettingsPreferencesScreen(
                 }
             }
 
-            Text("Timezone", style = MaterialTheme.typography.titleSmall)
+            Text(uiText("Timezone"), style = MaterialTheme.typography.titleSmall)
             AppActionRow {
                 TimeZonePreferenceMode.values().forEach { option ->
                     if (option == timeZoneMode) {
@@ -184,10 +222,10 @@ fun SettingsPreferencesScreen(
                     modifier = Modifier.fillMaxWidth(),
                     value = customTimeZoneText,
                     onValueChange = { customTimeZoneText = it.trim().take(64) },
-                    label = { Text("Timezone ID") },
+                    label = { Text(uiText("Timezone ID")) },
                     placeholder = { Text("Asia/Tokyo") },
                     supportingText = {
-                        Text(if (customTimeZoneValid) "Current: ${userPreferences.zoneId}" else "Use a valid IANA timezone.")
+                        Text(if (customTimeZoneValid) uiText("Current: ${userPreferences.zoneId}") else uiText("Use a valid IANA timezone."))
                     },
                     isError = !customTimeZoneValid,
                     singleLine = true
@@ -202,6 +240,7 @@ fun SettingsPreferencesScreen(
                             weekStart = weekStart,
                             unitSystem = unitSystem,
                             timeZoneMode = timeZoneMode,
+                            language = language,
                             customTimeZoneId = customTimeZoneText
                                 .trim()
                                 .takeIf { timeZoneMode == TimeZonePreferenceMode.CUSTOM && it.isNotBlank() }
@@ -210,7 +249,7 @@ fun SettingsPreferencesScreen(
                 }
             )
             Text(
-                "Preferences change display grouping and units only. Stored data and CSV export remain canonical.",
+                uiText("Preferences change display grouping and units only. Stored data and CSV export remain canonical."),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -250,7 +289,7 @@ fun SettingsProfileScreen(
         AppSection(title = "Profile", subtitle = "Saved locally", modifier = Modifier.rowFadeIn(0)) {
             if (editing) {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("Sex", style = MaterialTheme.typography.titleSmall)
+                    Text(uiText("Sex"), style = MaterialTheme.typography.titleSmall)
                     ProfileSex.values().toList().chunked(2).forEach { rowOptions ->
                         AppActionRow {
                             rowOptions.forEach { option ->
@@ -275,15 +314,15 @@ fun SettingsProfileScreen(
                         modifier = Modifier.fillMaxWidth(),
                         value = dobText,
                         onValueChange = { dobText = it.filter { ch -> ch.isDigit() || ch == '-' }.take(10) },
-                        label = { Text("Date of birth") },
+                        label = { Text(uiText("Date of birth")) },
                         placeholder = { Text("YYYY-MM-DD") },
                         supportingText = {
                             Text(
-                                when {
+                                uiText(when {
                                     dobInvalid -> "Use YYYY-MM-DD, not a future date."
                                     derivedAge != null -> "Age $derivedAge"
                                     else -> "Optional"
-                                }
+                                })
                             )
                         },
                         isError = dobInvalid,
@@ -293,8 +332,8 @@ fun SettingsProfileScreen(
                         modifier = Modifier.fillMaxWidth(),
                         value = weightText,
                         onValueChange = { raw -> weightText = raw.filter { it.isDigit() || it == '.' }.take(6) },
-                        label = { Text("Weight (kg)") },
-                        supportingText = { Text(if (weightInvalid) "Enter 20-350 kg." else "Optional") },
+                        label = { Text(uiText("Weight (kg)")) },
+                        supportingText = { Text(uiText(if (weightInvalid) "Enter 20-350 kg." else "Optional")) },
                         isError = weightInvalid,
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
@@ -335,7 +374,7 @@ fun SettingsProfileScreen(
                 PrimaryActionButton("Edit", onClick = { editing = true })
             }
             Text(
-                "DOB-derived age affects HR reference bands. Other values are saved for later.",
+                uiText("DOB-derived age affects HR reference bands. Other values are saved for later."),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -367,7 +406,7 @@ fun SettingsPermissionsScreen(
     ) {
         AppSection(title = "Permissions", subtitle = "Local read access", modifier = Modifier.rowFadeIn(0)) {
             StatusBadge(if (hcGranted) "Ready" else "Needs access", if (hcGranted) StatusTone.Success else StatusTone.Warning)
-            Text(dataPermissionSummary, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(uiText(dataPermissionSummary), color = MaterialTheme.colorScheme.onSurfaceVariant)
             PrimaryActionButton(if (hcGranted) "Review Access" else "Grant Access", onClick = onRequestDataPermissions)
             StatusBadge(
                 if (platformGranted) "Platform HR ready" else "Platform HR missing",
@@ -423,7 +462,7 @@ fun SettingsSyncScreen(
                 StatusBadge(if (backgroundReadGranted) "Background ready" else "Manual only", if (backgroundReadGranted) StatusTone.Success else StatusTone.Warning)
             }
             Text(
-                periodicSyncStatusText(periodicEnabled, lastPeriodicSync, lastPeriodicStatus, lastPeriodicSummary),
+                uiText(periodicSyncStatusText(periodicEnabled, lastPeriodicSync, lastPeriodicStatus, lastPeriodicSummary)),
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             PrimaryActionButton(
@@ -440,11 +479,151 @@ fun SettingsSyncScreen(
                 SecondaryActionButton("Cancel Full Resync", onClick = onCancelFullResync)
             }
             Text(
-                "Full resync reads from the full historical floor to now and can be slow. Periodic sync uses WorkManager smart sync; Android may delay it, so it is not real-time.",
+                uiText("Full resync reads from the full historical floor to now and can be slow. Periodic sync uses WorkManager smart sync; Android may delay it, so it is not real-time."),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             StatusMessageCard(status)
+        }
+    }
+}
+
+@Composable
+fun SettingsUploadScreen(
+    settings: UploadSettings,
+    uploadStatus: UploadStatus,
+    pendingCounts: UploadPendingCounts,
+    busy: Boolean,
+    progress: UploadProgress?,
+    onSaveSettings: (UploadSettings) -> Unit,
+    onTestConnection: (UploadSettings) -> Unit,
+    onUploadNow: (UploadSettings) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var serverMode by rememberSaveable(settings) { mutableStateOf(settings.serverMode) }
+    var localUrl by rememberSaveable(settings) { mutableStateOf(settings.localBaseUrl) }
+    var apiKey by rememberSaveable(settings) { mutableStateOf(settings.apiKey) }
+    val editedSettings = remember(serverMode, localUrl, apiKey, settings.deviceId) {
+        UploadSettings(
+            serverMode = serverMode,
+            localBaseUrl = localUrl,
+            apiKey = apiKey,
+            deviceId = settings.deviceId
+        )
+    }
+    val validation = remember(editedSettings) { UploadEndpointPolicy.validate(editedSettings) }
+    val validationMessage = when (validation) {
+        is UploadEndpointValidation.Valid -> "Endpoint ready"
+        is UploadEndpointValidation.Invalid -> validation.reason
+    }
+    val canRun = validation is UploadEndpointValidation.Valid && !busy
+
+    Column(
+        modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(18.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        AppSection(title = "Upload", subtitle = "Server destination", modifier = Modifier.rowFadeIn(0)) {
+            SegmentedSwitch(
+                options = UploadServerMode.values().toList(),
+                selected = serverMode,
+                label = { it.label },
+                onSelected = { serverMode = it }
+            )
+            OutlinedTextField(
+                modifier = Modifier.fillMaxWidth(),
+                value = UploadEndpointPolicy.PRODUCTION_BASE_URL,
+                onValueChange = {},
+                label = { Text(uiText("Production URL")) },
+                enabled = false,
+                singleLine = true
+            )
+            if (serverMode == UploadServerMode.LOCAL_DEBUG) {
+                OutlinedTextField(
+                    modifier = Modifier.fillMaxWidth(),
+                    value = localUrl,
+                    onValueChange = { localUrl = it.trim().take(160) },
+                    label = { Text(uiText("Local URL")) },
+                    placeholder = { Text(UploadEndpointPolicy.DEFAULT_LOCAL_BASE_URL) },
+                    singleLine = true
+                )
+            }
+            OutlinedTextField(
+                modifier = Modifier.fillMaxWidth(),
+                value = apiKey,
+                onValueChange = { apiKey = it.take(256) },
+                label = { Text(uiText("API key")) },
+                visualTransformation = PasswordVisualTransformation(),
+                singleLine = true
+            )
+            AppActionRow {
+                StatusBadge(serverMode.label, StatusTone.Info)
+                StatusBadge(validationMessage, if (validation is UploadEndpointValidation.Valid) StatusTone.Success else StatusTone.Warning)
+            }
+            Text(
+                uiText("Device ${settings.deviceId.take(8)}"),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            PrimaryActionButton("Save", enabled = !busy, onClick = { onSaveSettings(editedSettings) })
+        }
+
+        AppSection(title = "Upload Status", subtitle = "Pending local rows", modifier = Modifier.rowFadeIn(1)) {
+            AppActionRow {
+                StatusBadge("${pendingCounts.records} records", StatusTone.Neutral)
+                StatusBadge("${pendingCounts.values} values", StatusTone.Neutral)
+                StatusBadge("${pendingCounts.aggregates} summaries", StatusTone.Neutral)
+            }
+            Text(
+                uiText(uploadLastTimeText(uploadStatus)),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            StatusMessageCard(
+                message = uploadStatus.lastResult,
+                tone = uploadStatus.severity.toStatusTone()
+            )
+            uploadStatus.connectionResult?.let {
+                StatusMessageCard(
+                    message = it,
+                    tone = uploadStatus.severity.toStatusTone()
+                )
+            }
+            progress?.let {
+                Text(
+                    uiText("${it.phase} ${it.currentType ?: ""}".trim()),
+                    style = MaterialTheme.typography.labelMedium
+                )
+                if (it.determinate) {
+                    LinearProgressIndicator(
+                        progress = { it.fraction.coerceIn(0f, 1f) },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                } else {
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                }
+                Text(
+                    uiText("${it.uploadedItems}/${it.totalPendingItems} rows"),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            AppActionRow {
+                SecondaryActionButton(
+                    modifier = Modifier.weight(1f),
+                    label = if (busy) "Testing..." else "Test",
+                    enabled = canRun,
+                    onClick = { onTestConnection(editedSettings) }
+                )
+                PrimaryActionButton(
+                    modifier = Modifier.weight(1f),
+                    label = if (busy) "Uploading..." else "Upload",
+                    enabled = canRun,
+                    onClick = { onUploadNow(editedSettings) }
+                )
+            }
         }
     }
 }
@@ -472,7 +651,7 @@ fun SettingsDataScreen(
             SecondaryActionButton("Export HR CSV", enabled = !busy, onClick = onExportHrCsv)
             SecondaryActionButton("Remove Local Data", enabled = !busy, onClick = onRequestClear)
             Text(
-                "Remove Local Data clears this app's cached records, summaries, and sync history. Health Connect data is not deleted.",
+                uiText("Remove Local Data clears this app's cached records, summaries, and sync history. Health Connect data is not deleted."),
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             StatusMessageCard(status)
@@ -483,7 +662,9 @@ fun SettingsDataScreen(
 @Composable
 fun SettingsAppearanceScreen(
     themeMode: AppThemeMode,
+    themePalette: AppThemePalette,
     onThemeModeChange: (AppThemeMode) -> Unit,
+    onThemePaletteChange: (AppThemePalette) -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -494,13 +675,43 @@ fun SettingsAppearanceScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         AppSection(title = "Appearance", subtitle = "Saved locally", modifier = Modifier.rowFadeIn(0)) {
-            AppThemeMode.values().forEach { mode ->
-                if (mode == themeMode) {
-                    PrimaryActionButton(mode.label, onClick = { onThemeModeChange(mode) })
-                } else {
-                    SecondaryActionButton(mode.label, onClick = { onThemeModeChange(mode) })
+            Text(uiText("Mode"), style = MaterialTheme.typography.titleSmall)
+            SegmentedSwitch(
+                options = AppThemeMode.values().toList(),
+                selected = themeMode,
+                label = { it.label },
+                onSelected = onThemeModeChange
+            )
+
+            Text(uiText("Palette"), style = MaterialTheme.typography.titleSmall)
+            AppThemePalette.values().toList().chunked(2).forEach { rowOptions ->
+                AppActionRow {
+                    rowOptions.forEach { palette ->
+                        val selected = palette == themePalette
+                        if (selected) {
+                            PrimaryActionButton(
+                                modifier = Modifier.weight(1f),
+                                label = palette.label,
+                                onClick = { onThemePaletteChange(palette) }
+                            )
+                        } else {
+                            SecondaryActionButton(
+                                modifier = Modifier.weight(1f),
+                                label = palette.label,
+                                onClick = { onThemePaletteChange(palette) }
+                            )
+                        }
+                    }
+                    if (rowOptions.size == 1) {
+                        Text("", modifier = Modifier.weight(1f))
+                    }
                 }
             }
+            Text(
+                uiText(themePalette.description),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
@@ -546,7 +757,7 @@ fun DebugScreen(
             modifier = Modifier.rowFadeIn(1)
         ) {
             Text(
-                "Requires platform and Health Connect heart-rate access.",
+                uiText("Requires platform and Health Connect heart-rate access."),
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             AppActionRow {
@@ -554,12 +765,12 @@ fun DebugScreen(
                     modifier = Modifier.weight(1f),
                     enabled = platformGranted && hrHcGranted,
                     onClick = { onSyncHours(6) }
-                ) { Text("Sync 6h") }
+                ) { Text(uiText("Sync 6h")) }
                 OutlinedButton(
                     modifier = Modifier.weight(1f),
                     enabled = platformGranted && hrHcGranted,
                     onClick = { onSyncHours(24) }
-                ) { Text("Sync 24h") }
+                ) { Text(uiText("Sync 24h")) }
             }
         }
 
@@ -571,8 +782,10 @@ fun DebugScreen(
             modifier = Modifier.rowFadeIn(3)
         ) {
             Text(
-                "Sleep tags and quality colors currently use simple duration, nap, and extreme stage-churn rules only. " +
-                    "They are not medical advice or a validated sleep score.",
+                uiText(
+                    "Sleep tags and quality colors currently use simple duration, nap, and extreme stage-churn rules only. " +
+                        "They are not medical advice or a validated sleep score."
+                ),
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
@@ -583,11 +796,11 @@ fun DebugScreen(
             modifier = Modifier.rowFadeIn(4)
         ) {
             Text(
-                "Removing local data clears app rows and sync history. Health Connect data is not deleted.",
+                uiText("Removing local data clears app rows and sync history. Health Connect data is not deleted."),
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             OutlinedButton(onClick = onRequestClear, modifier = Modifier.fillMaxWidth()) {
-                Text("Remove Local Data")
+                Text(uiText("Remove Local Data"))
             }
         }
 
@@ -598,8 +811,8 @@ fun DebugScreen(
 @Composable
 private fun DiagnosticMatrixBlock(value: MatrixGestureDiagnostic) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text("Matrix Gesture", style = MaterialTheme.typography.titleSmall)
-        Text(value.updatedAt?.toString() ?: "No event", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(uiText("Matrix Gesture"), style = MaterialTheme.typography.titleSmall)
+        Text(uiText(value.updatedAt?.toString() ?: "No event"), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         DiagnosticRow("Type", value.matrixType)
         DiagnosticRow("Action", value.action)
         DiagnosticRow("Delta / snap", value.deltaSnap)
@@ -611,8 +824,8 @@ private fun DiagnosticMatrixBlock(value: MatrixGestureDiagnostic) {
 @Composable
 private fun DiagnosticSyncBlock(value: SyncDiagnostic) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text("Sync", style = MaterialTheme.typography.titleSmall)
-        Text(value.updatedAt?.toString() ?: "No event", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(uiText("Sync"), style = MaterialTheme.typography.titleSmall)
+        Text(uiText(value.updatedAt?.toString() ?: "No event"), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         DiagnosticRow("Mode", value.mode)
         DiagnosticRow("Type", value.currentType ?: "None")
         DiagnosticRow("Range", value.requestedRange)
@@ -624,8 +837,8 @@ private fun DiagnosticSyncBlock(value: SyncDiagnostic) {
 @Composable
 private fun DiagnosticDetailBlock(value: DetailQueryDiagnostic) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text("Detail Query", style = MaterialTheme.typography.titleSmall)
-        Text(value.updatedAt?.toString() ?: "No event", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(uiText("Detail Query"), style = MaterialTheme.typography.titleSmall)
+        Text(uiText(value.updatedAt?.toString() ?: "No event"), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         DiagnosticRow("Type", value.dataType)
         DiagnosticRow("Range", value.queryRange)
         DiagnosticRow("Chart points", value.chartPointCount.toString())
@@ -643,18 +856,31 @@ private fun DiagnosticRow(label: String, value: String) {
         horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         Text(
-            label,
+            uiText(label),
             modifier = Modifier.weight(0.42f),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         Text(
-            value,
+            uiText(value),
             modifier = Modifier.weight(0.58f),
             style = MaterialTheme.typography.bodySmall
         )
     }
 }
+
+private fun UploadResultSeverity.toStatusTone(): StatusTone =
+    when (this) {
+        UploadResultSeverity.IDLE -> StatusTone.Neutral
+        UploadResultSeverity.SUCCESS -> StatusTone.Success
+        UploadResultSeverity.WARNING -> StatusTone.Warning
+        UploadResultSeverity.ERROR -> StatusTone.Error
+    }
+
+private fun uploadLastTimeText(status: UploadStatus): String =
+    status.lastUploadEpochMillis
+        ?.let { "Last upload: ${Instant.ofEpochMilli(it)}" }
+        ?: "Last upload: never"
 
 @Composable
 private fun ProfileValueRow(label: String, value: String) {
@@ -663,13 +889,13 @@ private fun ProfileValueRow(label: String, value: String) {
         horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Text(
-            label,
+            uiText(label),
             modifier = Modifier.weight(1f),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         Text(
-            value,
+            uiText(value),
             modifier = Modifier.weight(1f),
             style = MaterialTheme.typography.bodyMedium
         )

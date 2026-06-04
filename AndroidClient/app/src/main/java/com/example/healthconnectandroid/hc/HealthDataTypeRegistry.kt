@@ -114,6 +114,16 @@ interface HealthConnectRecordReader {
         start: Instant,
         end: Instant
     ): List<NormalizedHealthRecord>
+
+    suspend fun readPages(
+        client: HealthConnectClient,
+        start: Instant,
+        end: Instant,
+        onPage: suspend (List<NormalizedHealthRecord>) -> Unit
+    ) {
+        val records = read(client, start, end)
+        if (records.isNotEmpty()) onPage(records)
+    }
 }
 
 interface HealthConnectAggregateReader {
@@ -173,6 +183,18 @@ object HeartRateRecordReader : HealthConnectRecordReader {
         start: Instant,
         end: Instant
     ): List<NormalizedHealthRecord> = readRecords(client, start, end).map { it.toNormalizedHeartRate() }
+
+    override suspend fun readPages(
+        client: HealthConnectClient,
+        start: Instant,
+        end: Instant,
+        onPage: suspend (List<NormalizedHealthRecord>) -> Unit
+    ) {
+        client.readRecordPages<HeartRateRecord>(start, end, DEFAULT_PAGE_SIZE) { records ->
+            val normalized = records.map { it.toNormalizedHeartRate() }
+            if (normalized.isNotEmpty()) onPage(normalized)
+        }
+    }
 
     suspend fun readRecords(
         client: HealthConnectClient,

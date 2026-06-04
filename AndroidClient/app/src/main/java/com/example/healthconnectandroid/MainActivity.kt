@@ -33,13 +33,16 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -47,6 +50,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.health.connect.client.HealthConnectClient
@@ -74,6 +78,11 @@ import com.example.healthconnectandroid.hc.sync.SyncRangePolicy
 import com.example.healthconnectandroid.hc.sync.SyncResultSeverity
 import com.example.healthconnectandroid.hc.sync.SyncResultSeverityPolicy
 import com.example.healthconnectandroid.hc.sync.SyncRunStatus
+import com.example.healthconnectandroid.hc.upload.HealthUploadService
+import com.example.healthconnectandroid.hc.upload.HealthUploadWorker
+import com.example.healthconnectandroid.hc.upload.UploadPendingCounts
+import com.example.healthconnectandroid.hc.upload.UploadProgress
+import com.example.healthconnectandroid.hc.upload.toStatus
 import com.example.healthconnectandroid.navigation.AppDestination
 import com.example.healthconnectandroid.navigation.AppNavigationState
 import com.example.healthconnectandroid.navigation.AppTab
@@ -89,7 +98,10 @@ import com.example.healthconnectandroid.ui.settings.SettingsPreferencesScreen
 import com.example.healthconnectandroid.ui.settings.SettingsProfileScreen
 import com.example.healthconnectandroid.ui.settings.SettingsScreen
 import com.example.healthconnectandroid.ui.settings.SettingsSyncScreen
+import com.example.healthconnectandroid.ui.settings.SettingsUploadScreen
 import com.example.healthconnectandroid.ui.format.toDisplayPreferences
+import com.example.healthconnectandroid.ui.i18n.LocalAppLanguage
+import com.example.healthconnectandroid.ui.i18n.uiText
 import com.example.healthconnectandroid.ui.theme.HealthConnectAndroidTheme
 import com.example.healthconnectandroid.ui.StatusTone
 import java.time.Instant
@@ -248,6 +260,7 @@ class MainActivity : ComponentActivity() {
         val recordQueries = HealthRecordDetailQueryService(db)
         val localDataService = LocalDataService(db)
         val syncService = HealthSyncService(this, db)
+        val uploadService = HealthUploadService(db)
         setContent {
             App(
                 dashboardQueries = dashboardQueries,
@@ -256,6 +269,7 @@ class MainActivity : ComponentActivity() {
                 recordQueries = recordQueries,
                 localDataService = localDataService,
                 syncService = syncService,
+                uploadService = uploadService,
                 manifestDeclares = ::manifestDeclaresHr,
                 hasPlatformPerm = ::hasHrPermission
             )
@@ -270,6 +284,7 @@ class MainActivity : ComponentActivity() {
         recordQueries: HealthRecordDetailQueryService,
         localDataService: LocalDataService,
         syncService: HealthSyncService,
+        uploadService: HealthUploadService,
         manifestDeclares: () -> Boolean,
         hasPlatformPerm: () -> Boolean
     ) {
@@ -303,8 +318,13 @@ class MainActivity : ComponentActivity() {
         var fullSyncJob by remember { mutableStateOf<Job?>(null) }
         var showClearConfirm by remember { mutableStateOf(false) }
         var themeMode by remember { mutableStateOf(AppPreferences.themeMode(this@MainActivity)) }
+        var themePalette by remember { mutableStateOf(AppPreferences.themePalette(this@MainActivity)) }
         var userProfile by remember { mutableStateOf(AppPreferences.userProfile(this@MainActivity)) }
         var userPreferences by remember { mutableStateOf(AppPreferences.userPreferences(this@MainActivity)) }
+        var uploadSettings by remember { mutableStateOf(AppPreferences.uploadSettings(this@MainActivity)) }
+        var uploadStatus by remember { mutableStateOf(AppPreferences.uploadStatus(this@MainActivity)) }
+        var uploadPendingCounts by remember { mutableStateOf(UploadPendingCounts.Empty) }
+        var uploadProgress by remember { mutableStateOf<UploadProgress?>(null) }
         val diagnostics = remember { DeviceSmokeDiagnostics() }
         val userAge = userProfile.age
         val displayPreferences = remember(userPreferences) { userPreferences.toDisplayPreferences() }
@@ -330,6 +350,14 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        fun refreshUploadStatus() {
+            uploadStatus = AppPreferences.uploadStatus(this@MainActivity)
+            scope.launch {
+                uploadPendingCounts = runCatching { uploadService.pendingCounts(uploadSettings) }
+                    .getOrDefault(UploadPendingCounts.Empty)
+            }
+        }
+
         LaunchedEffect(Unit) {
             val granted = grantedHealthConnectPermissions()
             grantedPermissions = granted
@@ -338,6 +366,8 @@ class MainActivity : ComponentActivity() {
             backgroundReadAvailable = syncService.backgroundReadFeatureAvailable()
             backgroundReadGranted = HealthDataTypeRegistry.backgroundReadPermission in granted
             demoStatus = runCatching { dashboardQueries.demoStatus() }.getOrNull()
+            uploadPendingCounts = runCatching { uploadService.pendingCounts(uploadSettings) }
+                .getOrDefault(UploadPendingCounts.Empty)
         }
 
         DisposableEffect(lifecycleOwner) {
@@ -348,6 +378,7 @@ class MainActivity : ComponentActivity() {
                     lastPeriodicSync = PeriodicSyncPreferences.lastFinishedAt(this@MainActivity)
                     lastPeriodicStatus = PeriodicSyncPreferences.lastStatus(this@MainActivity)
                     lastPeriodicSummary = PeriodicSyncPreferences.lastSummary(this@MainActivity)
+                    uploadStatus = AppPreferences.uploadStatus(this@MainActivity)
                     scope.launch {
                         val granted = grantedHealthConnectPermissions()
                         grantedPermissions = granted
@@ -356,6 +387,8 @@ class MainActivity : ComponentActivity() {
                         backgroundReadAvailable = syncService.backgroundReadFeatureAvailable()
                         backgroundReadGranted = HealthDataTypeRegistry.backgroundReadPermission in granted
                         demoStatus = runCatching { dashboardQueries.demoStatus() }.getOrNull()
+                        uploadPendingCounts = runCatching { uploadService.pendingCounts(uploadSettings) }
+                            .getOrDefault(UploadPendingCounts.Empty)
                     }
                 }
             }
@@ -369,7 +402,8 @@ class MainActivity : ComponentActivity() {
             nav.goBack()
         }
 
-        HealthConnectAndroidTheme(darkTheme = darkTheme) {
+        HealthConnectAndroidTheme(darkTheme = darkTheme, palette = themePalette) {
+            CompositionLocalProvider(LocalAppLanguage provides userPreferences.language) {
             Scaffold(
                 containerColor = MaterialTheme.colorScheme.background,
                 topBar = {
@@ -397,6 +431,7 @@ class MainActivity : ComponentActivity() {
                             onOpenPreferences = { nav.openSettingsSection(SettingsDestination.Preferences) },
                             onOpenPermissions = { nav.openSettingsSection(SettingsDestination.Permissions) },
                             onOpenSync = { nav.openSettingsSection(SettingsDestination.Sync) },
+                            onOpenUpload = { nav.openSettingsSection(SettingsDestination.Upload) },
                             onOpenDataSettings = { nav.openSettingsSection(SettingsDestination.DataSettings) },
                             onOpenAppearance = { nav.openSettingsSection(SettingsDestination.Appearance) },
                             onOpenDebug = { nav.openSettingsSection(SettingsDestination.Debug) },
@@ -503,6 +538,7 @@ class MainActivity : ComponentActivity() {
                                         diagnostics.recordSyncResults(SyncMode.FULL_HISTORY, results)
                                         status = syncAllStatusText(results, "Full resync")
                                         demoStatus = runCatching { dashboardQueries.demoStatus() }.getOrNull()
+                                        refreshUploadStatus()
                                         actionInProgress = null
                                         fullSyncJob = null
                                     }
@@ -546,6 +582,61 @@ class MainActivity : ComponentActivity() {
                                         lastPeriodicSummary = PeriodicSyncPreferences.lastSummary(this@MainActivity)
                                         status = summary
                                         demoStatus = runCatching { dashboardQueries.demoStatus() }.getOrNull()
+                                        refreshUploadStatus()
+                                        actionInProgress = null
+                                    }
+                                },
+                                modifier = Modifier.padding(pad)
+                            )
+                            SettingsDestination.Upload -> SettingsUploadScreen(
+                                settings = uploadSettings,
+                                uploadStatus = uploadStatus,
+                                pendingCounts = uploadPendingCounts,
+                                busy = actionInProgress == "upload" || actionInProgress == "upload_test",
+                                progress = uploadProgress,
+                                onSaveSettings = { settings ->
+                                    uploadSettings = settings
+                                    AppPreferences.setUploadSettings(this@MainActivity, settings)
+                                    uploadStatus = uploadStatus.copy(serverMode = settings.serverMode)
+                                    AppPreferences.setUploadStatus(this@MainActivity, uploadStatus)
+                                    status = "Upload settings saved"
+                                    refreshUploadStatus()
+                                },
+                                onTestConnection = { settings ->
+                                    scope.launch {
+                                        actionInProgress = "upload_test"
+                                        uploadSettings = settings
+                                        AppPreferences.setUploadSettings(this@MainActivity, settings)
+                                        status = "Testing upload server..."
+                                        val counts = runCatching { uploadService.pendingCounts(settings) }
+                                            .getOrDefault(UploadPendingCounts.Empty)
+                                        uploadPendingCounts = counts
+                                        val result = uploadService.testConnection(settings)
+                                        uploadStatus = result.toStatus(uploadStatus, counts.total)
+                                        AppPreferences.setUploadStatus(this@MainActivity, uploadStatus)
+                                        status = result.message
+                                        actionInProgress = null
+                                    }
+                                },
+                                onUploadNow = { settings ->
+                                    scope.launch {
+                                        actionInProgress = "upload"
+                                        uploadProgress = null
+                                        uploadSettings = settings
+                                        AppPreferences.setUploadSettings(this@MainActivity, settings)
+                                        status = "Uploading local data..."
+                                        val result = uploadService.uploadPending(settings) { progress ->
+                                            uploadProgress = progress
+                                        }
+                                        uploadStatus = result.toStatus()
+                                        AppPreferences.setUploadStatus(this@MainActivity, uploadStatus)
+                                        uploadPendingCounts = result.pendingCounts
+                                        status = result.message
+                                        if (!result.success && result.retryable) {
+                                            HealthUploadWorker.enqueue(this@MainActivity)
+                                            status = "${result.message}. Retry queued."
+                                        }
+                                        uploadProgress = null
                                         actionInProgress = null
                                     }
                                 },
@@ -574,9 +665,14 @@ class MainActivity : ComponentActivity() {
                             )
                             SettingsDestination.Appearance -> SettingsAppearanceScreen(
                                 themeMode = themeMode,
+                                themePalette = themePalette,
                                 onThemeModeChange = { mode ->
                                     themeMode = mode
                                     AppPreferences.setThemeMode(this@MainActivity, mode)
+                                },
+                                onThemePaletteChange = { palette ->
+                                    themePalette = palette
+                                    AppPreferences.setThemePalette(this@MainActivity, palette)
                                 },
                                 modifier = Modifier.padding(pad)
                             )
@@ -647,7 +743,10 @@ class MainActivity : ComponentActivity() {
                                 createTypeCsv.launch("${key}_${exportFileStamp()}.csv")
                             },
                             runSelectedTypeSync = syncService::runSelectedTypeSync,
-                            onLocalDataChanged = { refreshLocalStatus() },
+                            onLocalDataChanged = {
+                                refreshLocalStatus()
+                                refreshUploadStatus()
+                            },
                             modifier = Modifier.padding(pad)
                         )
                     }
@@ -687,6 +786,7 @@ class MainActivity : ComponentActivity() {
                                     status = syncAllStatusText(results, "Smart sync")
                                     dashboardStatusTone = syncResultsStatusTone(results)
                                     demoStatus = runCatching { dashboardQueries.demoStatus() }.getOrNull()
+                                    refreshUploadStatus()
                                     actionInProgress = null
                                 }
                             }
@@ -698,11 +798,13 @@ class MainActivity : ComponentActivity() {
             if (showClearConfirm) {
                 AlertDialog(
                     onDismissRequest = { showClearConfirm = false },
-                    title = { Text("Remove local data?") },
+                    title = { Text(uiText("Remove local data?")) },
                     text = {
                         Text(
-                            "This removes cached records, aggregates, legacy heart-rate rows, and sync history " +
-                                "from this app. Health Connect data itself is not deleted."
+                            uiText(
+                                "This removes cached records, aggregates, legacy heart-rate rows, and sync history " +
+                                    "from this app. Health Connect data itself is not deleted."
+                            )
                         )
                     },
                     confirmButton = {
@@ -713,14 +815,17 @@ class MainActivity : ComponentActivity() {
                                     val removed = localDataService.clearDb()
                                     status = "Removed local data ($removed legacy heart-rate rows)"
                                     demoStatus = runCatching { dashboardQueries.demoStatus() }.getOrNull()
+                                    uploadPendingCounts = runCatching { uploadService.pendingCounts(uploadSettings) }
+                                        .getOrDefault(UploadPendingCounts.Empty)
                                 }
                             }
-                        ) { Text("Remove") }
+                        ) { Text(uiText("Remove")) }
                     },
                     dismissButton = {
-                        TextButton(onClick = { showClearConfirm = false }) { Text("Cancel") }
+                        TextButton(onClick = { showClearConfirm = false }) { Text(uiText("Cancel")) }
                     }
                 )
+            }
             }
         }
     }
@@ -732,7 +837,7 @@ class MainActivity : ComponentActivity() {
     ) {
         TopAppBar(
             title = {
-                Text(nav.title())
+                Text(uiText(nav.title()), fontWeight = FontWeight.SemiBold)
             },
             navigationIcon = {
                 if (nav.destination != AppDestination.Dashboard) {
@@ -741,7 +846,13 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             },
-            actions = {}
+            actions = {},
+            colors = TopAppBarDefaults.topAppBarColors(
+                containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
+                scrolledContainerColor = MaterialTheme.colorScheme.surface,
+                titleContentColor = MaterialTheme.colorScheme.onSurface,
+                navigationIconContentColor = MaterialTheme.colorScheme.onSurface
+            )
         )
     }
 
@@ -750,14 +861,18 @@ class MainActivity : ComponentActivity() {
         selectedTab: AppTab,
         onSelectTab: (AppTab) -> Unit
     ) {
-        NavigationBar {
+        NavigationBar(
+            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
+            tonalElevation = 10.dp
+        ) {
             NavigationBarItem(
                 selected = selectedTab == AppTab.Dashboard,
                 onClick = { onSelectTab(AppTab.Dashboard) },
                 icon = { AnimatedNavIcon(selected = selectedTab == AppTab.Dashboard) {
                     Icon(Icons.Default.Home, contentDescription = null)
                 } },
-                label = { Text(AppTab.Dashboard.label) }
+                label = { Text(uiText(AppTab.Dashboard.label)) },
+                colors = studioNavigationItemColors()
             )
             NavigationBarItem(
                 selected = selectedTab == AppTab.Data,
@@ -765,7 +880,8 @@ class MainActivity : ComponentActivity() {
                 icon = { AnimatedNavIcon(selected = selectedTab == AppTab.Data) {
                     Icon(Icons.AutoMirrored.Filled.List, contentDescription = null)
                 } },
-                label = { Text(AppTab.Data.label) }
+                label = { Text(uiText(AppTab.Data.label)) },
+                colors = studioNavigationItemColors()
             )
             NavigationBarItem(
                 selected = selectedTab == AppTab.Settings,
@@ -773,10 +889,20 @@ class MainActivity : ComponentActivity() {
                 icon = { AnimatedNavIcon(selected = selectedTab == AppTab.Settings) {
                     Icon(Icons.Default.Settings, contentDescription = null)
                 } },
-                label = { Text(AppTab.Settings.label) }
+                label = { Text(uiText(AppTab.Settings.label)) },
+                colors = studioNavigationItemColors()
             )
         }
     }
+
+    @Composable
+    private fun studioNavigationItemColors() = NavigationBarItemDefaults.colors(
+        selectedIconColor = MaterialTheme.colorScheme.primary,
+        selectedTextColor = MaterialTheme.colorScheme.primary,
+        indicatorColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f),
+        unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
+    )
 
     @Composable
     private fun AnimatedNavIcon(

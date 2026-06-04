@@ -9,16 +9,20 @@ class LocalDataService(
     private val dao = db.heartRateDao()
     private val healthDao = db.healthRecordDao()
     private val syncDao = db.healthSyncRunDao()
+    private val coverageDao = db.healthSyncCoverageDao()
     private val aggregateDao = db.healthAggregateDao()
+    private val uploadDao = db.healthUploadDao()
 
-    /** Clear local normalized data, aggregates, sync metadata, and legacy heart-rate rows. */
+    /** Clear local normalized data, aggregates, sync/upload metadata, and legacy heart-rate rows. */
     suspend fun clearDb(): Int {
         val before = dao.count()
         db.withTransaction {
+            uploadDao.clearAll()
             aggregateDao.clearAll()
             healthDao.clearValues()
             healthDao.clearRecords()
             syncDao.clearAll()
+            coverageDao.clearAll()
         }
         dao.clearAll()
         return before

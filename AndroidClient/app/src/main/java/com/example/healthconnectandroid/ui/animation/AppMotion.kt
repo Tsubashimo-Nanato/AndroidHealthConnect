@@ -1,6 +1,7 @@
 package com.example.healthconnectandroid.ui.animation
 
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
@@ -13,6 +14,8 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
+private val StudioEase = CubicBezierEasing(0.16f, 1f, 0.3f, 1f)
+
 @Composable
 fun Modifier.rowFadeIn(
     index: Int,
@@ -24,13 +27,13 @@ fun Modifier.rowFadeIn(
     val alpha = remember(index) { Animatable(0f) }
     val offset = remember(index) { Animatable(1f) }
     LaunchedEffect(index) {
-        delay((index * 28L).coerceAtMost(180L))
+        delay((index * 32L).coerceAtMost(220L))
         coroutineScope {
-            launch { alpha.animateTo(1f, tween(170)) }
-            launch { offset.animateTo(0f, tween(170)) }
+            launch { alpha.animateTo(1f, tween(260, easing = StudioEase)) }
+            launch { offset.animateTo(0f, tween(260, easing = StudioEase)) }
         }
     }
-    val offsetPx = with(density) { 8.dp.toPx() }
+    val offsetPx = with(density) { 10.dp.toPx() }
     return graphicsLayer {
         this.alpha = alpha.value
         translationY = offset.value * offsetPx

@@ -13,16 +13,20 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         HealthRecordEntity::class,
         HealthValueEntity::class,
         HealthSyncRunEntity::class,
-        HealthAggregateEntity::class
+        HealthSyncCoverageEntity::class,
+        HealthAggregateEntity::class,
+        HealthUploadAckEntity::class
     ],
-    version = 5,
+    version = 7,
     exportSchema = false
 )
 abstract class AppDb : RoomDatabase() {
     abstract fun heartRateDao(): HeartRateDao
     abstract fun healthRecordDao(): HealthRecordDao
     abstract fun healthSyncRunDao(): HealthSyncRunDao
+    abstract fun healthSyncCoverageDao(): HealthSyncCoverageDao
     abstract fun healthAggregateDao(): HealthAggregateDao
+    abstract fun healthUploadDao(): HealthUploadDao
 
     companion object {
         @Volatile private var INSTANCE: AppDb? = null
@@ -257,13 +261,75 @@ abstract class AppDb : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `health_upload_ack` (
+                        `serverKey` TEXT NOT NULL,
+                        `itemKind` TEXT NOT NULL,
+                        `localId` INTEGER NOT NULL,
+                        `batchId` TEXT NOT NULL,
+                        `uploadedAtEpochMillis` INTEGER NOT NULL,
+                        PRIMARY KEY(`serverKey`, `itemKind`, `localId`)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_health_upload_ack_serverKey_batchId` " +
+                        "ON `health_upload_ack` (`serverKey`, `batchId`)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_health_upload_ack_serverKey_uploadedAtEpochMillis` " +
+                        "ON `health_upload_ack` (`serverKey`, `uploadedAtEpochMillis`)"
+                )
+            }
+        }
+
+        private val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `health_sync_coverage` (
+                        `localId` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `recordType` TEXT NOT NULL,
+                        `coveredStartEpochMillis` INTEGER NOT NULL,
+                        `coveredEndEpochMillis` INTEGER NOT NULL,
+                        `status` TEXT NOT NULL,
+                        `mode` TEXT NOT NULL,
+                        `updatedAtEpochMillis` INTEGER NOT NULL,
+                        `recordsRead` INTEGER NOT NULL,
+                        `recordsInserted` INTEGER NOT NULL,
+                        `recordsSkippedDuplicate` INTEGER NOT NULL,
+                        `errorMessage` TEXT
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_health_sync_coverage_recordType_coveredStartEpochMillis_coveredEndEpochMillis` " +
+                        "ON `health_sync_coverage` (`recordType`, `coveredStartEpochMillis`, `coveredEndEpochMillis`)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_health_sync_coverage_recordType_status` " +
+                        "ON `health_sync_coverage` (`recordType`, `status`)"
+                )
+            }
+        }
+
         fun get(context: Context): AppDb =
             INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(
                     context.applicationContext,
                     AppDb::class.java, "hc_demo.db"
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                    .addMigrations(
+                        MIGRATION_1_2,
+                        MIGRATION_2_3,
+                        MIGRATION_3_4,
+                        MIGRATION_4_5,
+                        MIGRATION_5_6,
+                        MIGRATION_6_7
+                    )
                     .build()
                     .also { INSTANCE = it }
             }

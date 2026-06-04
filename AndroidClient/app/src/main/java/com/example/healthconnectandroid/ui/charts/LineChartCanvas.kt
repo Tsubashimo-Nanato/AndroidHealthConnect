@@ -31,6 +31,7 @@ import com.example.healthconnectandroid.hc.HeartRateReferenceZones
 import com.example.healthconnectandroid.hc.HeartRateZoneTone
 import com.example.healthconnectandroid.hc.InspectorChartPoint
 import com.example.healthconnectandroid.ui.EmptyStateText
+import com.example.healthconnectandroid.ui.i18n.uiText
 import java.time.Instant
 import java.time.ZoneId
 import kotlin.math.abs
@@ -160,13 +161,13 @@ fun LineChart(
     zoneLabelPaint.textAlign = Paint.Align.RIGHT
 
     Text(
-        "Range: ${compactEpochRange(xBounds.min.roundToLong(), xBounds.max.roundToLong(), zoneId)}",
+        uiText("Range: ${compactEpochRange(xBounds.min.roundToLong(), xBounds.max.roundToLong(), zoneId)}"),
         style = MaterialTheme.typography.bodySmall,
         maxLines = 1,
         overflow = TextOverflow.Ellipsis
     )
     Text(
-        "Y: ${formatNumber(yBounds.min)}-${formatNumber(yBounds.max)} $unit".trim(),
+        uiText("Y: ${formatNumber(yBounds.min)}-${formatNumber(yBounds.max)} $unit".trim()),
         style = MaterialTheme.typography.bodySmall,
         maxLines = 1,
         overflow = TextOverflow.Ellipsis

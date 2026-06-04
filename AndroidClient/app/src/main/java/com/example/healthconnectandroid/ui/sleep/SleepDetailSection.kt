@@ -31,6 +31,7 @@ import com.example.healthconnectandroid.ui.StatusTone
 import com.example.healthconnectandroid.ui.animation.rowFadeIn
 import com.example.healthconnectandroid.ui.format.MetricDisplayFormatter
 import com.example.healthconnectandroid.ui.gesture.horizontalWindowSwipe
+import com.example.healthconnectandroid.ui.i18n.uiText
 import java.time.LocalDate
 import java.time.ZoneId
 
@@ -124,7 +125,7 @@ fun SleepVisualizationSection(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 TextButton(onClick = { onPanCells(-1) }) {
-                    Text("Prev", maxLines = 1)
+                    Text(uiText("Prev"), maxLines = 1)
                 }
                 Text(
                     windowLabel,
@@ -133,7 +134,7 @@ fun SleepVisualizationSection(
                     maxLines = 1
                 )
                 TextButton(onClick = { onPanCells(1) }) {
-                    Text("Next", maxLines = 1)
+                    Text(uiText("Next"), maxLines = 1)
                 }
             }
             SleepMatrixPicker(
@@ -148,7 +149,7 @@ fun SleepVisualizationSection(
             )
             selectedSleepLabel(model, selectedBoxIds)?.let { label ->
                 Text(
-                    label,
+                    uiText(label),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,

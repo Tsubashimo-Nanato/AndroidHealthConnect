@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.healthconnectandroid.data.HealthDailyAggregateRow
 import com.example.healthconnectandroid.ui.EmptyStateText
+import com.example.healthconnectandroid.ui.i18n.uiText
 import kotlin.math.roundToInt
 
 @Composable
@@ -92,13 +93,13 @@ fun DailyBarChart(
     axisLabelPaint.isFakeBoldText = true
 
     Text(
-        "Range: ${compactLocalDateRange(visibleRows.firstOrNull()?.localDate, visibleRows.lastOrNull()?.localDate)}",
+        uiText("Range: ${compactLocalDateRange(visibleRows.firstOrNull()?.localDate, visibleRows.lastOrNull()?.localDate)}"),
         style = MaterialTheme.typography.bodySmall,
         maxLines = 1,
         overflow = TextOverflow.Ellipsis
     )
     Text(
-        "Y: ${formatNumber(yBounds.min)}-${formatNumber(yBounds.max)} ${visibleRows.firstOrNull()?.unit.orEmpty()}".trim(),
+        uiText("Y: ${formatNumber(yBounds.min)}-${formatNumber(yBounds.max)} ${visibleRows.firstOrNull()?.unit.orEmpty()}".trim()),
         style = MaterialTheme.typography.bodySmall,
         maxLines = 1,
         overflow = TextOverflow.Ellipsis

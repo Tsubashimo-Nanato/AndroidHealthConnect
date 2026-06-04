@@ -8,6 +8,8 @@ import com.example.healthconnectandroid.hc.HealthDataTypeSyncResult
 import com.example.healthconnectandroid.hc.HrSample
 import java.time.Duration
 import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.ensureActive
@@ -21,6 +23,7 @@ class HealthSyncService(
 ) {
     private val appContext = context.applicationContext
     private val syncer = HealthDataTypeSyncer(appContext, db)
+    private val healthDao = db.healthRecordDao()
     private val syncDao = db.healthSyncRunDao()
 
     suspend fun runSmartSync(
@@ -70,15 +73,23 @@ class HealthSyncService(
         key: String,
         start: Instant,
         end: Instant,
+        zoneId: ZoneId = ZoneId.systemDefault(),
         onProgress: (SyncProgress) -> Unit = {}
     ): HealthDataTypeSyncResult {
         val descriptor = HealthDataTypeRegistry.require(key)
+        val coveredLocalDates = localDatesForRange(key, start, end, zoneId)
+        val missingWindows = SyncWindowPlanner.missingDailyWindows(
+            requestedStart = start,
+            requestedEnd = end,
+            zoneId = zoneId,
+            coveredLocalDates = coveredLocalDates
+        )
         onProgress(
             SyncProgress(
                 mode = SyncMode.SELECTED_TYPE,
                 currentType = descriptor.displayName,
                 completedTypes = 0,
-                totalTypes = 1,
+                totalTypes = missingWindows.size.coerceAtLeast(1),
                 inserted = 0,
                 updated = 0,
                 duplicates = 0,
@@ -87,16 +98,88 @@ class HealthSyncService(
                 rangeEnd = end,
                 isCancellable = true,
                 isIndeterminate = false,
-                message = "Syncing ${descriptor.displayName}"
+                phase = SyncProgressPhase.PREPARING,
+                message = "Checking local coverage: ${coveredLocalDates.size} days already local"
             )
         )
-        val result = runOneTypeWithTimeout(
-            mode = SyncMode.SELECTED_TYPE,
-            descriptor = descriptor,
-            start = start,
-            end = end,
-            requireBackgroundReadPermission = false,
-            timeout = timeoutConfig.selectedSyncTimeout
+        if (missingWindows.isEmpty()) {
+            val result = syncer.recordSyntheticSyncResult(
+                result = HealthDataTypeSyncResult(
+                    key = descriptor.key,
+                    requestedStart = start,
+                    requestedEnd = end,
+                    localDaysChecked = coveredLocalDates.size,
+                    localDaysRequested = 0
+                ),
+                startedAt = Instant.now()
+            )
+            onProgress(
+                progressForResults(
+                    mode = SyncMode.SELECTED_TYPE,
+                    currentType = null,
+                    completedTypes = 1,
+                    totalTypes = 1,
+                    results = listOf(result),
+                    rangeStart = start,
+                    rangeEnd = end,
+                    isCancellable = false,
+                    phase = SyncProgressPhase.NO_NEW_DATA,
+                    message = "Selected sync found no missing local days"
+                )
+            )
+            return result
+        }
+
+        val results = mutableListOf<HealthDataTypeSyncResult>()
+        missingWindows.forEachIndexed { index, window ->
+            coroutineContext.ensureActive()
+            val result = runOneTypeWithTimeout(
+                mode = SyncMode.SELECTED_TYPE,
+                descriptor = descriptor,
+                start = window.start,
+                end = window.end,
+                requireBackgroundReadPermission = false,
+                timeout = timeoutConfig.selectedSyncTimeout,
+                onTypeProgress = { typeProgress ->
+                    onProgress(
+                        progressForTypeStep(
+                            mode = SyncMode.SELECTED_TYPE,
+                            descriptor = descriptor,
+                            completedTypes = index,
+                            totalTypes = missingWindows.size,
+                            previousResults = results,
+                            typeProgress = typeProgress,
+                            rangeStart = start,
+                            rangeEnd = end,
+                            isCancellable = true,
+                            messagePrefix = "Day ${index + 1}/${missingWindows.size}: "
+                        )
+                    )
+                }
+            )
+            results += result
+            onProgress(
+                progressForResults(
+                    mode = SyncMode.SELECTED_TYPE,
+                    currentType = null,
+                    completedTypes = results.size,
+                    totalTypes = missingWindows.size,
+                    results = results,
+                    rangeStart = start,
+                    rangeEnd = end,
+                    isCancellable = true,
+                    phase = terminalPhase(result),
+                    message = typeCompletionMessage(descriptor, result)
+                )
+            )
+        }
+        val result = combineSelectedTypeResults(
+            key = descriptor.key,
+            requestedStart = start,
+            requestedEnd = end,
+            localDaysChecked = coveredLocalDates.size + missingWindows.size,
+            localDaysRequested = missingWindows.size,
+            results = results
         )
         onProgress(
             progressForResults(
@@ -108,6 +191,7 @@ class HealthSyncService(
                 rangeStart = start,
                 rangeEnd = end,
                 isCancellable = false,
+                phase = terminalPhase(result),
                 message = selectedCompletionMessage(result)
             )
         )
@@ -200,6 +284,7 @@ class HealthSyncService(
                         rangeStart = results.mapNotNull { it.requestedStart }.minOrNull(),
                         rangeEnd = end,
                         isCancellable = false,
+                        phase = SyncProgressPhase.TIMEOUT,
                         message = "${mode.label} timed out"
                     )
                 )
@@ -216,6 +301,7 @@ class HealthSyncService(
                     rangeStart = start,
                     rangeEnd = end,
                     isCancellable = isCancellable,
+                    phase = SyncProgressPhase.PREPARING,
                     message = "Syncing ${descriptor.displayName}"
                 )
             )
@@ -225,7 +311,22 @@ class HealthSyncService(
                 start = start,
                 end = end,
                 requireBackgroundReadPermission = requireBackgroundReadPermission,
-                timeout = perTypeTimeout
+                timeout = perTypeTimeout,
+                onTypeProgress = { typeProgress ->
+                    onProgress(
+                        progressForTypeStep(
+                            mode = mode,
+                            descriptor = descriptor,
+                            completedTypes = index,
+                            totalTypes = descriptors.size,
+                            previousResults = results,
+                            typeProgress = typeProgress,
+                            rangeStart = start,
+                            rangeEnd = end,
+                            isCancellable = isCancellable
+                        )
+                    )
+                }
             )
             results += result
             onProgress(
@@ -238,7 +339,8 @@ class HealthSyncService(
                     rangeStart = results.mapNotNull { it.requestedStart }.minOrNull(),
                     rangeEnd = end,
                     isCancellable = isCancellable,
-                    message = "${descriptor.displayName} ${result.terminalStatus?.id ?: "done"}"
+                    phase = terminalPhase(result),
+                    message = typeCompletionMessage(descriptor, result)
                 )
             )
         }
@@ -251,7 +353,8 @@ class HealthSyncService(
         start: Instant,
         end: Instant,
         requireBackgroundReadPermission: Boolean,
-        timeout: Duration
+        timeout: Duration,
+        onTypeProgress: (SyncTypeProgress) -> Unit = {}
     ): HealthDataTypeSyncResult {
         val startedAt = Instant.now()
         return try {
@@ -260,7 +363,8 @@ class HealthSyncService(
                     key = descriptor.key,
                     start = start,
                     end = end,
-                    requireBackgroundReadPermission = requireBackgroundReadPermission
+                    requireBackgroundReadPermission = requireBackgroundReadPermission,
+                    onProgress = onTypeProgress
                 )
             }
         } catch (t: TimeoutCancellationException) {
@@ -298,6 +402,7 @@ class HealthSyncService(
         rangeStart: Instant?,
         rangeEnd: Instant?,
         isCancellable: Boolean,
+        phase: SyncProgressPhase = if (currentType != null) SyncProgressPhase.PREPARING else SyncProgressPhase.COMPLETE,
         message: String?
     ): SyncProgress =
         SyncProgress(
@@ -305,23 +410,150 @@ class HealthSyncService(
             currentType = currentType,
             completedTypes = completedTypes,
             totalTypes = totalTypes,
+            read = results.sumOf { it.recordsRead + it.aggregateRowsRead },
             inserted = results.sumOf { it.recordsInserted },
             updated = results.sumOf { it.recordsUpdated },
             duplicates = results.sumOf { it.recordsSkippedDuplicate },
             errors = results.count { it.errorMessage != null || it.terminalStatus == SyncRunStatus.TIMEOUT },
+            sourceBytesRead = results.sumOf { it.sourceBytesRead },
+            localBytesWritten = results.sumOf { it.localBytesWritten },
             rangeStart = rangeStart,
             rangeEnd = rangeEnd,
             isCancellable = isCancellable,
             isIndeterminate = totalTypes <= 0,
+            phase = phase,
             message = message
         )
+
+    private suspend fun localDatesForRange(
+        key: String,
+        start: Instant,
+        end: Instant,
+        zoneId: ZoneId
+    ): Set<LocalDate> =
+        healthDao.localDateEpochsForTypeRange(
+            recordType = key,
+            startEpochMillis = start.toEpochMilli(),
+            endEpochMillis = end.toEpochMilli()
+        ).map { epochMillis ->
+            Instant.ofEpochMilli(epochMillis).atZone(zoneId).toLocalDate()
+        }.toSet()
+
+    private fun combineSelectedTypeResults(
+        key: String,
+        requestedStart: Instant,
+        requestedEnd: Instant,
+        localDaysChecked: Int,
+        localDaysRequested: Int,
+        results: List<HealthDataTypeSyncResult>
+    ): HealthDataTypeSyncResult {
+        val terminalStatus = when {
+            results.any { it.terminalStatus == SyncRunStatus.TIMEOUT } -> SyncRunStatus.TIMEOUT
+            results.any { it.terminalStatus == SyncRunStatus.CANCELLED } -> SyncRunStatus.CANCELLED
+            results.any { it.errorMessage != null } -> SyncRunStatus.ERROR
+            else -> null
+        }
+        val errorMessage = results.mapNotNull { it.errorMessage }.distinct().joinToString("; ")
+            .ifBlank { null }
+        val aggregateErrorMessage = results.mapNotNull { it.aggregateErrorMessage }.distinct().joinToString("; ")
+            .ifBlank { null }
+
+        return HealthDataTypeSyncResult(
+            key = key,
+            requestedStart = requestedStart,
+            requestedEnd = requestedEnd,
+            recordsRead = results.sumOf { it.recordsRead },
+            recordsInserted = results.sumOf { it.recordsInserted },
+            recordsUpdated = results.sumOf { it.recordsUpdated },
+            recordsSkippedDuplicate = results.sumOf { it.recordsSkippedDuplicate },
+            valuesStored = results.sumOf { it.valuesStored },
+            aggregateRowsRead = results.sumOf { it.aggregateRowsRead },
+            aggregateRowsStored = results.sumOf { it.aggregateRowsStored },
+            sourceBytesRead = results.sumOf { it.sourceBytesRead },
+            localBytesWritten = results.sumOf { it.localBytesWritten },
+            sourceStart = results.mapNotNull { it.sourceStart }.minOrNull(),
+            sourceEnd = results.mapNotNull { it.sourceEnd }.maxOrNull(),
+            localDaysChecked = localDaysChecked,
+            localDaysRequested = localDaysRequested,
+            aggregateErrorMessage = aggregateErrorMessage,
+            errorMessage = errorMessage,
+            terminalStatus = terminalStatus
+        )
+    }
+
+    private fun progressForTypeStep(
+        mode: SyncMode,
+        descriptor: HealthDataTypeDescriptor,
+        completedTypes: Int,
+        totalTypes: Int,
+        previousResults: List<HealthDataTypeSyncResult>,
+        typeProgress: SyncTypeProgress,
+        rangeStart: Instant?,
+        rangeEnd: Instant?,
+        isCancellable: Boolean,
+        messagePrefix: String = ""
+    ): SyncProgress =
+        SyncProgress(
+            mode = mode,
+            currentType = descriptor.displayName,
+            completedTypes = completedTypes,
+            totalTypes = totalTypes,
+            read = previousResults.sumOf { it.recordsRead + it.aggregateRowsRead } + typeProgress.recordsRead,
+            inserted = previousResults.sumOf { it.recordsInserted } + typeProgress.inserted,
+            updated = previousResults.sumOf { it.recordsUpdated } + typeProgress.updated,
+            duplicates = previousResults.sumOf { it.recordsSkippedDuplicate } + typeProgress.duplicates,
+            errors = previousResults.count { it.errorMessage != null || it.terminalStatus == SyncRunStatus.TIMEOUT } +
+                typeProgress.errors,
+            sourceBytesRead = previousResults.sumOf { it.sourceBytesRead } + typeProgress.sourceBytesRead,
+            localBytesWritten = previousResults.sumOf { it.localBytesWritten } + typeProgress.localBytesWritten,
+            rangeStart = rangeStart,
+            rangeEnd = rangeEnd,
+            isCancellable = isCancellable,
+            isIndeterminate = totalTypes <= 0,
+            phase = typeProgress.phase,
+            message = messagePrefix + (typeProgress.message ?: typeProgress.phase.label)
+        )
+
+    private fun terminalPhase(result: HealthDataTypeSyncResult): SyncProgressPhase =
+        when {
+            result.terminalStatus == SyncRunStatus.TIMEOUT -> SyncProgressPhase.TIMEOUT
+            result.terminalStatus == SyncRunStatus.CANCELLED -> SyncProgressPhase.CANCELLED
+            result.errorMessage != null -> SyncProgressPhase.FAILED
+            result.skippedReason != null -> SyncProgressPhase.SKIPPED
+            result.recordsInserted + result.recordsUpdated + result.aggregateRowsStored + result.valuesStored > 0 ->
+                SyncProgressPhase.INSERTED_DATA
+            result.localDaysChecked > 0 && result.localDaysRequested == 0 -> SyncProgressPhase.NO_NEW_DATA
+            result.recordsRead + result.aggregateRowsRead == 0 -> SyncProgressPhase.NO_SOURCE_DATA
+            result.recordsSkippedDuplicate > 0 -> SyncProgressPhase.NO_NEW_DATA
+            else -> SyncProgressPhase.COMPLETE
+        }
 
     private fun selectedCompletionMessage(result: HealthDataTypeSyncResult): String =
         when {
             result.terminalStatus == SyncRunStatus.TIMEOUT -> "Selected sync timed out"
             result.terminalStatus == SyncRunStatus.CANCELLED -> "Selected sync cancelled"
-            result.errorMessage != null -> "Selected sync failed"
+            result.errorMessage != null -> "Selected sync failed: ${result.errorMessage}"
             result.skippedReason != null -> "Selected sync skipped"
+            result.localDaysChecked > 0 && result.localDaysRequested == 0 ->
+                "Selected sync found no missing local days"
+            terminalPhase(result) == SyncProgressPhase.INSERTED_DATA -> "Selected sync inserted data"
+            terminalPhase(result) == SyncProgressPhase.NO_SOURCE_DATA -> "Selected sync found no source data"
+            terminalPhase(result) == SyncProgressPhase.NO_NEW_DATA -> "Selected sync found no new data"
             else -> "Selected sync complete"
+        }
+
+    private fun typeCompletionMessage(
+        descriptor: HealthDataTypeDescriptor,
+        result: HealthDataTypeSyncResult
+    ): String =
+        when (terminalPhase(result)) {
+            SyncProgressPhase.INSERTED_DATA -> "${descriptor.displayName} inserted data"
+            SyncProgressPhase.NO_SOURCE_DATA -> "${descriptor.displayName} no source data"
+            SyncProgressPhase.NO_NEW_DATA -> "${descriptor.displayName} no new data"
+            SyncProgressPhase.FAILED -> "${descriptor.displayName} failed"
+            SyncProgressPhase.SKIPPED -> "${descriptor.displayName} skipped"
+            SyncProgressPhase.TIMEOUT -> "${descriptor.displayName} timed out"
+            SyncProgressPhase.CANCELLED -> "${descriptor.displayName} cancelled"
+            else -> "${descriptor.displayName} complete"
         }
 }

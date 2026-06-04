@@ -10,6 +10,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.example.healthconnectandroid.ui.i18n.uiText
 
 @Composable
 fun SelectedPointCard(
@@ -23,14 +24,14 @@ fun SelectedPointCard(
 ) {
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(title, style = MaterialTheme.typography.titleSmall)
-            Text("Record type: $recordTypeLabel")
-            Text(primaryText)
-            Text("Time: $timeText")
-            sourceText?.let { Text(it) }
-            secondaryText?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+            Text(uiText(title), style = MaterialTheme.typography.titleSmall)
+            Text(uiText("Record type: $recordTypeLabel"))
+            Text(uiText(primaryText))
+            Text(uiText("Time: $timeText"))
+            sourceText?.let { Text(uiText(it)) }
+            secondaryText?.let { Text(uiText(it), style = MaterialTheme.typography.bodySmall) }
             if (rawDetailsText != null) {
-                Text("Complete data is available in Records.", style = MaterialTheme.typography.bodySmall)
+                Text(uiText("Complete data is available in Records."), style = MaterialTheme.typography.bodySmall)
             }
         }
     }

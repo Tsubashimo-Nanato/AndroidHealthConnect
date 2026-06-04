@@ -1,15 +1,29 @@
 package com.example.healthconnectandroid
 
 import android.content.Context
+import com.example.healthconnectandroid.hc.upload.UploadEndpointPolicy
+import com.example.healthconnectandroid.hc.upload.UploadResultSeverity
+import com.example.healthconnectandroid.hc.upload.UploadServerMode
+import com.example.healthconnectandroid.hc.upload.UploadSettings
+import com.example.healthconnectandroid.hc.upload.UploadStatus
 import java.time.LocalDate
 import java.time.Period
 import java.time.ZoneId
 import java.time.DayOfWeek
+import java.util.UUID
 
 enum class AppThemeMode(val label: String) {
     SYSTEM("System"),
     LIGHT("Light"),
     DARK("Dark")
+}
+
+enum class AppThemePalette(val label: String, val description: String) {
+    PAPER("Paper", "Soft paper and teal"),
+    RAIN("Rain", "Blue-gray glass"),
+    MILK("Milk", "Cream and tea warmth"),
+    HOODIE("Hoodie", "Soft gray-brown"),
+    SAGE("Sage", "Oatmeal and green")
 }
 
 enum class ProfileSex(val label: String) {
@@ -34,11 +48,17 @@ enum class TimeZonePreferenceMode(val label: String) {
     CUSTOM("Custom timezone")
 }
 
+enum class AppLanguagePreference(val label: String) {
+    ENGLISH("English"),
+    CHINESE_SIMPLIFIED("简体中文")
+}
+
 data class UserPreferences(
     val weekStart: WeekStartPreference = WeekStartPreference.SUNDAY,
     val unitSystem: UnitSystemPreference = UnitSystemPreference.METRIC,
     val timeZoneMode: TimeZonePreferenceMode = TimeZonePreferenceMode.SYSTEM,
-    val customTimeZoneId: String? = null
+    val customTimeZoneId: String? = null,
+    val language: AppLanguagePreference = AppLanguagePreference.ENGLISH
 ) {
     val zoneId: ZoneId
         get() = if (timeZoneMode == TimeZonePreferenceMode.CUSTOM) {
@@ -73,6 +93,7 @@ data class UserProfile(
 object AppPreferences {
     private const val PREFS_NAME = "health_connect_app_preferences"
     private const val KEY_THEME_MODE = "theme_mode"
+    private const val KEY_THEME_PALETTE = "theme_palette"
     private const val KEY_USER_AGE = "user_age"
     private const val KEY_USER_DOB = "user_date_of_birth"
     private const val KEY_USER_SEX = "user_sex"
@@ -81,6 +102,17 @@ object AppPreferences {
     private const val KEY_UNIT_SYSTEM = "unit_system"
     private const val KEY_TIMEZONE_MODE = "timezone_mode"
     private const val KEY_CUSTOM_TIMEZONE = "custom_timezone"
+    private const val KEY_LANGUAGE = "language"
+    private const val KEY_UPLOAD_SERVER_MODE = "upload_server_mode"
+    private const val KEY_UPLOAD_LOCAL_URL = "upload_local_url"
+    private const val KEY_UPLOAD_API_KEY = "upload_api_key"
+    private const val KEY_UPLOAD_DEVICE_ID = "upload_device_id"
+    private const val KEY_UPLOAD_LAST_TIME = "upload_last_time"
+    private const val KEY_UPLOAD_LAST_RESULT = "upload_last_result"
+    private const val KEY_UPLOAD_LAST_SEVERITY = "upload_last_severity"
+    private const val KEY_UPLOAD_PENDING_COUNT = "upload_pending_count"
+    private const val KEY_UPLOAD_STATUS_SERVER_MODE = "upload_status_server_mode"
+    private const val KEY_UPLOAD_CONNECTION_RESULT = "upload_connection_result"
 
     fun themeMode(context: Context): AppThemeMode {
         val raw = prefs(context).getString(KEY_THEME_MODE, AppThemeMode.SYSTEM.name)
@@ -89,6 +121,23 @@ object AppPreferences {
 
     fun setThemeMode(context: Context, mode: AppThemeMode) {
         prefs(context).edit().putString(KEY_THEME_MODE, mode.name).apply()
+    }
+
+    fun themePalette(context: Context): AppThemePalette {
+        val raw = prefs(context).getString(KEY_THEME_PALETTE, AppThemePalette.PAPER.name)
+        val normalized = when (raw) {
+            "NANATO", "WARM_PAPER", "PAPER_STAR" -> AppThemePalette.PAPER.name
+            "RAIN_GLASS" -> AppThemePalette.RAIN.name
+            "MILK_TEA" -> AppThemePalette.MILK.name
+            "NIGHT_ROOM", "HOODIE_NIGHT" -> AppThemePalette.HOODIE.name
+            "CARDIGAN_SAGE" -> AppThemePalette.SAGE.name
+            else -> raw
+        }
+        return AppThemePalette.values().firstOrNull { it.name == normalized } ?: AppThemePalette.PAPER
+    }
+
+    fun setThemePalette(context: Context, palette: AppThemePalette) {
+        prefs(context).edit().putString(KEY_THEME_PALETTE, palette.name).apply()
     }
 
     fun userAge(context: Context): Int? {
@@ -144,11 +193,15 @@ object AppPreferences {
             ?: TimeZonePreferenceMode.SYSTEM
         val customTimeZone = prefs.getString(KEY_CUSTOM_TIMEZONE, null)
             ?.takeIf { runCatching { ZoneId.of(it) }.isSuccess }
+        val language = prefs.getString(KEY_LANGUAGE, AppLanguagePreference.ENGLISH.name)
+            ?.let { raw -> AppLanguagePreference.values().firstOrNull { it.name == raw } }
+            ?: AppLanguagePreference.ENGLISH
         return UserPreferences(
             weekStart = weekStart,
             unitSystem = unitSystem,
             timeZoneMode = timeZoneMode,
-            customTimeZoneId = customTimeZone
+            customTimeZoneId = customTimeZone,
+            language = language
         )
     }
 
@@ -157,10 +210,83 @@ object AppPreferences {
             putString(KEY_WEEK_START, preferences.weekStart.name)
             putString(KEY_UNIT_SYSTEM, preferences.unitSystem.name)
             putString(KEY_TIMEZONE_MODE, preferences.timeZoneMode.name)
+            putString(KEY_LANGUAGE, preferences.language.name)
             val normalizedZone = preferences.customTimeZoneId
                 ?.takeIf { runCatching { ZoneId.of(it) }.isSuccess }
             if (normalizedZone == null) remove(KEY_CUSTOM_TIMEZONE) else putString(KEY_CUSTOM_TIMEZONE, normalizedZone)
         }.apply()
+    }
+
+    fun uploadSettings(context: Context): UploadSettings {
+        val prefs = prefs(context)
+        val mode = prefs.getString(KEY_UPLOAD_SERVER_MODE, UploadServerMode.PRODUCTION.name)
+            ?.let { raw -> UploadServerMode.values().firstOrNull { it.name == raw } }
+            ?: UploadServerMode.PRODUCTION
+        val localUrl = prefs.getString(KEY_UPLOAD_LOCAL_URL, UploadEndpointPolicy.DEFAULT_LOCAL_BASE_URL)
+            ?: UploadEndpointPolicy.DEFAULT_LOCAL_BASE_URL
+        val apiKey = prefs.getString(KEY_UPLOAD_API_KEY, "") ?: ""
+        return UploadSettings(
+            serverMode = mode,
+            localBaseUrl = localUrl,
+            apiKey = apiKey,
+            deviceId = uploadDeviceId(context)
+        )
+    }
+
+    fun setUploadSettings(context: Context, settings: UploadSettings) {
+        prefs(context).edit().apply {
+            putString(KEY_UPLOAD_SERVER_MODE, settings.serverMode.name)
+            putString(KEY_UPLOAD_LOCAL_URL, settings.localBaseUrl.trim())
+            putString(KEY_UPLOAD_API_KEY, settings.apiKey)
+            putString(KEY_UPLOAD_DEVICE_ID, settings.deviceId)
+        }.apply()
+    }
+
+    fun uploadStatus(context: Context): UploadStatus {
+        val prefs = prefs(context)
+        val severity = prefs.getString(KEY_UPLOAD_LAST_SEVERITY, UploadResultSeverity.IDLE.name)
+            ?.let { raw -> UploadResultSeverity.values().firstOrNull { it.name == raw } }
+            ?: UploadResultSeverity.IDLE
+        val mode = prefs.getString(KEY_UPLOAD_STATUS_SERVER_MODE, UploadServerMode.PRODUCTION.name)
+            ?.let { raw -> UploadServerMode.values().firstOrNull { it.name == raw } }
+            ?: UploadServerMode.PRODUCTION
+        return UploadStatus(
+            lastUploadEpochMillis = prefs.getLong(KEY_UPLOAD_LAST_TIME, 0L).takeIf { it > 0L },
+            lastResult = prefs.getString(KEY_UPLOAD_LAST_RESULT, "No upload yet") ?: "No upload yet",
+            severity = severity,
+            pendingCount = prefs.getInt(KEY_UPLOAD_PENDING_COUNT, 0),
+            serverMode = mode,
+            connectionResult = prefs.getString(KEY_UPLOAD_CONNECTION_RESULT, null)
+        )
+    }
+
+    fun setUploadStatus(context: Context, status: UploadStatus) {
+        prefs(context).edit().apply {
+            if (status.lastUploadEpochMillis == null) {
+                remove(KEY_UPLOAD_LAST_TIME)
+            } else {
+                putLong(KEY_UPLOAD_LAST_TIME, status.lastUploadEpochMillis)
+            }
+            putString(KEY_UPLOAD_LAST_RESULT, status.lastResult)
+            putString(KEY_UPLOAD_LAST_SEVERITY, status.severity.name)
+            putInt(KEY_UPLOAD_PENDING_COUNT, status.pendingCount)
+            putString(KEY_UPLOAD_STATUS_SERVER_MODE, status.serverMode.name)
+            if (status.connectionResult == null) {
+                remove(KEY_UPLOAD_CONNECTION_RESULT)
+            } else {
+                putString(KEY_UPLOAD_CONNECTION_RESULT, status.connectionResult)
+            }
+        }.apply()
+    }
+
+    private fun uploadDeviceId(context: Context): String {
+        val prefs = prefs(context)
+        val existing = prefs.getString(KEY_UPLOAD_DEVICE_ID, null)
+            ?.takeIf { it.isNotBlank() }
+        if (existing != null) return existing
+        val generated = UUID.randomUUID().toString()
+        prefs.edit().putString(KEY_UPLOAD_DEVICE_ID, generated).apply()
+        return generated
     }
 
     private fun prefs(context: Context) =

@@ -47,6 +47,42 @@ internal suspend inline fun <reified T : Record> HealthConnectClient.readPagedRe
     return rows
 }
 
+internal suspend inline fun <reified T : Record> HealthConnectClient.readRecordPages(
+    start: Instant,
+    end: Instant,
+    pageSize: Int = DEFAULT_PAGE_SIZE,
+    crossinline onPage: suspend (List<T>) -> Unit
+) {
+    var token: String? = null
+    do {
+        val response = readRecords(
+            ReadRecordsRequest(
+                recordType = T::class,
+                timeRangeFilter = TimeRangeFilter.between(start, end),
+                ascendingOrder = true,
+                pageSize = pageSize,
+                pageToken = token
+            )
+        )
+        if (response.records.isNotEmpty()) {
+            onPage(response.records)
+        }
+        token = response.pageToken
+    } while (token != null)
+}
+
+private suspend inline fun <reified T : Record> HealthConnectClient.readNormalizedPages(
+    start: Instant,
+    end: Instant,
+    crossinline mapper: (T) -> NormalizedHealthRecord,
+    crossinline onPage: suspend (List<NormalizedHealthRecord>) -> Unit
+) {
+    readRecordPages<T>(start, end) { page ->
+        val normalized = page.map(mapper)
+        if (normalized.isNotEmpty()) onPage(normalized)
+    }
+}
+
 object WeightRecordReader : HealthConnectRecordReader {
     override val dataTypeKey: String = HealthDataTypeKeys.WEIGHT
 
@@ -56,6 +92,13 @@ object WeightRecordReader : HealthConnectRecordReader {
         end: Instant
     ): List<NormalizedHealthRecord> =
         client.readPagedRecords<WeightRecord>(start, end).map { it.toNormalizedWeight() }
+
+    override suspend fun readPages(
+        client: HealthConnectClient,
+        start: Instant,
+        end: Instant,
+        onPage: suspend (List<NormalizedHealthRecord>) -> Unit
+    ) = client.readNormalizedPages<WeightRecord>(start, end, WeightRecord::toNormalizedWeight, onPage)
 }
 
 object BodyFatRecordReader : HealthConnectRecordReader {
@@ -67,6 +110,13 @@ object BodyFatRecordReader : HealthConnectRecordReader {
         end: Instant
     ): List<NormalizedHealthRecord> =
         client.readPagedRecords<BodyFatRecord>(start, end).map { it.toNormalizedBodyFat() }
+
+    override suspend fun readPages(
+        client: HealthConnectClient,
+        start: Instant,
+        end: Instant,
+        onPage: suspend (List<NormalizedHealthRecord>) -> Unit
+    ) = client.readNormalizedPages<BodyFatRecord>(start, end, BodyFatRecord::toNormalizedBodyFat, onPage)
 }
 
 object OxygenSaturationRecordReader : HealthConnectRecordReader {
@@ -79,6 +129,18 @@ object OxygenSaturationRecordReader : HealthConnectRecordReader {
     ): List<NormalizedHealthRecord> =
         client.readPagedRecords<OxygenSaturationRecord>(start, end)
             .map { it.toNormalizedOxygenSaturation() }
+
+    override suspend fun readPages(
+        client: HealthConnectClient,
+        start: Instant,
+        end: Instant,
+        onPage: suspend (List<NormalizedHealthRecord>) -> Unit
+    ) = client.readNormalizedPages<OxygenSaturationRecord>(
+        start,
+        end,
+        OxygenSaturationRecord::toNormalizedOxygenSaturation,
+        onPage
+    )
 }
 
 object SleepSessionRecordReader : HealthConnectRecordReader {
@@ -90,6 +152,13 @@ object SleepSessionRecordReader : HealthConnectRecordReader {
         end: Instant
     ): List<NormalizedHealthRecord> =
         client.readPagedRecords<SleepSessionRecord>(start, end).map { it.toNormalizedSleepSession() }
+
+    override suspend fun readPages(
+        client: HealthConnectClient,
+        start: Instant,
+        end: Instant,
+        onPage: suspend (List<NormalizedHealthRecord>) -> Unit
+    ) = client.readNormalizedPages<SleepSessionRecord>(start, end, SleepSessionRecord::toNormalizedSleepSession, onPage)
 }
 
 object StepsRecordReader : HealthConnectRecordReader {
@@ -101,6 +170,13 @@ object StepsRecordReader : HealthConnectRecordReader {
         end: Instant
     ): List<NormalizedHealthRecord> =
         client.readPagedRecords<StepsRecord>(start, end).map { it.toNormalizedSteps() }
+
+    override suspend fun readPages(
+        client: HealthConnectClient,
+        start: Instant,
+        end: Instant,
+        onPage: suspend (List<NormalizedHealthRecord>) -> Unit
+    ) = client.readNormalizedPages<StepsRecord>(start, end, StepsRecord::toNormalizedSteps, onPage)
 }
 
 object ActiveCaloriesRecordReader : HealthConnectRecordReader {
@@ -113,6 +189,18 @@ object ActiveCaloriesRecordReader : HealthConnectRecordReader {
     ): List<NormalizedHealthRecord> =
         client.readPagedRecords<ActiveCaloriesBurnedRecord>(start, end)
             .map { it.toNormalizedActiveCalories() }
+
+    override suspend fun readPages(
+        client: HealthConnectClient,
+        start: Instant,
+        end: Instant,
+        onPage: suspend (List<NormalizedHealthRecord>) -> Unit
+    ) = client.readNormalizedPages<ActiveCaloriesBurnedRecord>(
+        start,
+        end,
+        ActiveCaloriesBurnedRecord::toNormalizedActiveCalories,
+        onPage
+    )
 }
 
 object TotalCaloriesRecordReader : HealthConnectRecordReader {
@@ -125,6 +213,18 @@ object TotalCaloriesRecordReader : HealthConnectRecordReader {
     ): List<NormalizedHealthRecord> =
         client.readPagedRecords<TotalCaloriesBurnedRecord>(start, end)
             .map { it.toNormalizedTotalCalories() }
+
+    override suspend fun readPages(
+        client: HealthConnectClient,
+        start: Instant,
+        end: Instant,
+        onPage: suspend (List<NormalizedHealthRecord>) -> Unit
+    ) = client.readNormalizedPages<TotalCaloriesBurnedRecord>(
+        start,
+        end,
+        TotalCaloriesBurnedRecord::toNormalizedTotalCalories,
+        onPage
+    )
 }
 
 object DistanceRecordReader : HealthConnectRecordReader {
@@ -136,6 +236,13 @@ object DistanceRecordReader : HealthConnectRecordReader {
         end: Instant
     ): List<NormalizedHealthRecord> =
         client.readPagedRecords<DistanceRecord>(start, end).map { it.toNormalizedDistance() }
+
+    override suspend fun readPages(
+        client: HealthConnectClient,
+        start: Instant,
+        end: Instant,
+        onPage: suspend (List<NormalizedHealthRecord>) -> Unit
+    ) = client.readNormalizedPages<DistanceRecord>(start, end, DistanceRecord::toNormalizedDistance, onPage)
 }
 
 object BloodPressureRecordReader : HealthConnectRecordReader {
@@ -147,6 +254,13 @@ object BloodPressureRecordReader : HealthConnectRecordReader {
         end: Instant
     ): List<NormalizedHealthRecord> =
         client.readPagedRecords<BloodPressureRecord>(start, end).map { it.toNormalizedBloodPressure() }
+
+    override suspend fun readPages(
+        client: HealthConnectClient,
+        start: Instant,
+        end: Instant,
+        onPage: suspend (List<NormalizedHealthRecord>) -> Unit
+    ) = client.readNormalizedPages<BloodPressureRecord>(start, end, BloodPressureRecord::toNormalizedBloodPressure, onPage)
 }
 
 object BodyTemperatureRecordReader : HealthConnectRecordReader {
@@ -159,6 +273,18 @@ object BodyTemperatureRecordReader : HealthConnectRecordReader {
     ): List<NormalizedHealthRecord> =
         client.readPagedRecords<BodyTemperatureRecord>(start, end)
             .map { it.toNormalizedBodyTemperature() }
+
+    override suspend fun readPages(
+        client: HealthConnectClient,
+        start: Instant,
+        end: Instant,
+        onPage: suspend (List<NormalizedHealthRecord>) -> Unit
+    ) = client.readNormalizedPages<BodyTemperatureRecord>(
+        start,
+        end,
+        BodyTemperatureRecord::toNormalizedBodyTemperature,
+        onPage
+    )
 }
 
 object RespiratoryRateRecordReader : HealthConnectRecordReader {
@@ -171,6 +297,18 @@ object RespiratoryRateRecordReader : HealthConnectRecordReader {
     ): List<NormalizedHealthRecord> =
         client.readPagedRecords<RespiratoryRateRecord>(start, end)
             .map { it.toNormalizedRespiratoryRate() }
+
+    override suspend fun readPages(
+        client: HealthConnectClient,
+        start: Instant,
+        end: Instant,
+        onPage: suspend (List<NormalizedHealthRecord>) -> Unit
+    ) = client.readNormalizedPages<RespiratoryRateRecord>(
+        start,
+        end,
+        RespiratoryRateRecord::toNormalizedRespiratoryRate,
+        onPage
+    )
 }
 
 object RestingHeartRateRecordReader : HealthConnectRecordReader {
@@ -183,6 +321,18 @@ object RestingHeartRateRecordReader : HealthConnectRecordReader {
     ): List<NormalizedHealthRecord> =
         client.readPagedRecords<RestingHeartRateRecord>(start, end)
             .map { it.toNormalizedRestingHeartRate() }
+
+    override suspend fun readPages(
+        client: HealthConnectClient,
+        start: Instant,
+        end: Instant,
+        onPage: suspend (List<NormalizedHealthRecord>) -> Unit
+    ) = client.readNormalizedPages<RestingHeartRateRecord>(
+        start,
+        end,
+        RestingHeartRateRecord::toNormalizedRestingHeartRate,
+        onPage
+    )
 }
 
 internal fun HeartRateRecord.toNormalizedHeartRate(): NormalizedHealthRecord {

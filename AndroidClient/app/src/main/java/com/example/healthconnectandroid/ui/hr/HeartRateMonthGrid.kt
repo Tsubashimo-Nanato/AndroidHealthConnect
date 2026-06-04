@@ -17,6 +17,7 @@ import androidx.compose.ui.unit.dp
 import com.example.healthconnectandroid.hc.HeartRateDateAnalysis
 import com.example.healthconnectandroid.hc.HrDateQuality
 import com.example.healthconnectandroid.ui.gesture.horizontalWindowSwipe
+import com.example.healthconnectandroid.ui.i18n.uiText
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.YearMonth
@@ -53,7 +54,7 @@ internal fun HeartRateMonthGrid(
                 enabled = canGoPrevious,
                 onClick = { onAnchorDateChange(anchorDate.minusMonths(1)) }
             ) {
-                Text("Prev", maxLines = 1)
+                Text(uiText("Prev"), maxLines = 1)
             }
             Text(
                 text = DateTimeFormatter.ofPattern("MMM yyyy").format(month),
@@ -64,7 +65,7 @@ internal fun HeartRateMonthGrid(
                 enabled = canGoNext,
                 onClick = { onAnchorDateChange(anchorDate.plusMonths(1).coerceAtMost(today)) }
             ) {
-                Text("Next", maxLines = 1)
+                Text(uiText("Next"), maxLines = 1)
             }
         }
 

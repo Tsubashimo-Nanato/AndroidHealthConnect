@@ -38,16 +38,19 @@ private data class StoreNormalizedResult(
     val inserted: Int,
     val updated: Int,
     val skippedDuplicate: Int,
-    val valuesStored: Int
+    val valuesStored: Int,
+    val localBytesWritten: Long
 )
 
 private data class StoreAggregateResult(
-    val rowsStored: Int
+    val rowsStored: Int,
+    val localBytesWritten: Long
 )
 
 private data class SyncAggregateResult(
     val rowsRead: Int = 0,
     val rowsStored: Int = 0,
+    val localBytesWritten: Long = 0,
     val errorMessage: String? = null
 )
 
@@ -92,10 +95,12 @@ class HealthDataTypeSyncer(
         val records = HeartRateRecordReader.readRecords(client, start, end)
         val batch = records.toHeartRateEntities()
         if (batch.isNotEmpty()) dao.insertReplace(batch)
+        val normalizedRecords = records.map { it.toNormalizedHeartRate() }
         val storeResult = storeNormalizedRecords(
             typeKey = HealthDataTypeKeys.HEART_RATE,
-            records = records.map { it.toNormalizedHeartRate() }
+            records = normalizedRecords
         )
+        val sourceBytesRead = normalizedRecords.sumOf { it.approxBytes() }
         insertSyncRun(
             result = HealthDataTypeSyncResult(
                 key = HealthDataTypeKeys.HEART_RATE,
@@ -105,7 +110,9 @@ class HealthDataTypeSyncer(
                 recordsInserted = storeResult.inserted,
                 recordsUpdated = storeResult.updated,
                 recordsSkippedDuplicate = storeResult.skippedDuplicate,
-                valuesStored = storeResult.valuesStored
+                valuesStored = storeResult.valuesStored,
+                sourceBytesRead = sourceBytesRead,
+                localBytesWritten = storeResult.localBytesWritten
             ),
             startedAt = syncStartedAt
         )
@@ -117,7 +124,8 @@ class HealthDataTypeSyncer(
         key: String,
         start: Instant,
         end: Instant,
-        requireBackgroundReadPermission: Boolean = false
+        requireBackgroundReadPermission: Boolean = false,
+        onProgress: (SyncTypeProgress) -> Unit = {}
     ): HealthDataTypeSyncResult {
         val startedAt = Instant.now()
 
@@ -194,11 +202,60 @@ class HealthDataTypeSyncer(
                 )
             }
 
+            onProgress(
+                SyncTypeProgress(
+                    phase = SyncProgressPhase.FETCHING,
+                    message = "Fetching ${descriptor.displayName}"
+                )
+            )
             val records = reader.read(client, start, end)
+            val sourceBytesRead = records.sumOf { it.approxBytes() }
+            onProgress(
+                SyncTypeProgress(
+                    phase = if (records.isEmpty()) {
+                        SyncProgressPhase.NO_SOURCE_DATA
+                    } else {
+                        SyncProgressPhase.STORING
+                    },
+                    recordsRead = records.size,
+                    message = if (records.isEmpty()) {
+                        "No Health Connect records returned"
+                    } else {
+                        "Fetched ${records.size} records"
+                    },
+                    sourceBytesRead = sourceBytesRead
+                )
+            )
             val storeResult = storeNormalizedRecords(
                 typeKey = key,
                 records = records
             )
+            onProgress(
+                SyncTypeProgress(
+                    phase = SyncProgressPhase.STORING,
+                    recordsRead = records.size,
+                    inserted = storeResult.inserted,
+                    updated = storeResult.updated,
+                    duplicates = storeResult.skippedDuplicate,
+                    sourceBytesRead = sourceBytesRead,
+                    localBytesWritten = storeResult.localBytesWritten,
+                    message = "Stored local rows"
+                )
+            )
+            if (descriptor.aggregateReader != null) {
+                onProgress(
+                    SyncTypeProgress(
+                        phase = SyncProgressPhase.AGGREGATING,
+                        recordsRead = records.size,
+                        inserted = storeResult.inserted,
+                        updated = storeResult.updated,
+                        duplicates = storeResult.skippedDuplicate,
+                        sourceBytesRead = sourceBytesRead,
+                        localBytesWritten = storeResult.localBytesWritten,
+                        message = "Updating summaries"
+                    )
+                )
+            }
             val aggregateResult = syncDailyAggregatesIfAvailable(
                 descriptor = descriptor,
                 start = start,
@@ -215,6 +272,10 @@ class HealthDataTypeSyncer(
                 valuesStored = storeResult.valuesStored,
                 aggregateRowsRead = aggregateResult.rowsRead,
                 aggregateRowsStored = aggregateResult.rowsStored,
+                sourceBytesRead = sourceBytesRead,
+                localBytesWritten = storeResult.localBytesWritten + aggregateResult.localBytesWritten,
+                sourceStart = records.minOfOrNull { it.startTime },
+                sourceEnd = records.mapNotNull { it.endTime ?: it.startTime }.maxOrNull(),
                 aggregateErrorMessage = aggregateResult.errorMessage
             )
         } catch (t: CancellationException) {
@@ -276,6 +337,7 @@ class HealthDataTypeSyncer(
         var inserted = 0
         var updated = 0
         var skippedDuplicate = 0
+        var localBytesWritten = 0L
         db.withTransaction {
             for (record in records) {
                 val incoming = record.toEntity(now)
@@ -287,31 +349,10 @@ class HealthDataTypeSyncer(
                         healthDao.insertValues(values)
                         valuesStored += values.size
                     }
+                    localBytesWritten += record.approxBytes()
                     inserted++
                 } else {
-                    val changed = !existing.sameHealthPayload(incoming)
-                    healthDao.updateRecord(
-                        incoming.copy(
-                            localId = existing.localId,
-                            createdEpochMillis = existing.createdEpochMillis,
-                            updatedEpochMillis = if (changed) now else existing.updatedEpochMillis,
-                            syncStatus = if (changed) "local" else existing.syncStatus,
-                            exportStatus = if (changed) "pending" else existing.exportStatus,
-                            syncedEpochMillis = if (changed) null else existing.syncedEpochMillis,
-                            exportedEpochMillis = if (changed) null else existing.exportedEpochMillis
-                        )
-                    )
-                    if (changed) {
-                        healthDao.deleteValuesForRecord(existing.localId)
-                        val values = record.values.map { it.toEntity(existing.localId, record) }
-                        if (values.isNotEmpty()) {
-                            healthDao.insertValues(values)
-                            valuesStored += values.size
-                        }
-                        updated++
-                    } else {
-                        skippedDuplicate++
-                    }
+                    skippedDuplicate++
                 }
             }
         }
@@ -319,7 +360,8 @@ class HealthDataTypeSyncer(
             inserted = inserted,
             updated = updated,
             skippedDuplicate = skippedDuplicate,
-            valuesStored = valuesStored
+            valuesStored = valuesStored,
+            localBytesWritten = localBytesWritten
         )
     }
 
@@ -351,7 +393,8 @@ class HealthDataTypeSyncer(
             )
             SyncAggregateResult(
                 rowsRead = summaries.size,
-                rowsStored = stored.rowsStored
+                rowsStored = stored.rowsStored,
+                localBytesWritten = stored.localBytesWritten
             )
         }.getOrElse { throwable ->
             Log.e(TAG, "Aggregate sync failed for type=${descriptor.key} start=$start end=$end", throwable)
@@ -371,6 +414,24 @@ class HealthDataTypeSyncer(
         summaries: List<HealthAggregateSummary>
     ): StoreAggregateResult {
         val now = Instant.now().toEpochMilli()
+        val entities = summaries.map { summary ->
+            HealthAggregateEntity(
+                recordType = summary.recordType,
+                metric = summary.metric,
+                bucketPeriod = summary.bucketPeriod,
+                bucketStartEpochMillis = summary.bucketStart.toEpochMilli(),
+                bucketEndEpochMillis = summary.bucketEnd.toEpochMilli(),
+                localDate = summary.localDate.toString(),
+                timezoneId = summary.timezoneId,
+                value = summary.value,
+                unit = summary.unit,
+                source = summary.source,
+                computedEpochMillis = now,
+                requestedStartEpochMillis = requestedStart.toEpochMilli(),
+                requestedEndEpochMillis = requestedEnd.toEpochMilli(),
+                rawJson = summary.rawJson
+            )
+        }
         db.withTransaction {
             aggregateDao.deleteForTypeDateRange(
                 recordType = recordType,
@@ -378,29 +439,14 @@ class HealthDataTypeSyncer(
                 startDate = startDate.toString(),
                 endDate = endDate.toString()
             )
-            val entities = summaries.map { summary ->
-                HealthAggregateEntity(
-                    recordType = summary.recordType,
-                    metric = summary.metric,
-                    bucketPeriod = summary.bucketPeriod,
-                    bucketStartEpochMillis = summary.bucketStart.toEpochMilli(),
-                    bucketEndEpochMillis = summary.bucketEnd.toEpochMilli(),
-                    localDate = summary.localDate.toString(),
-                    timezoneId = summary.timezoneId,
-                    value = summary.value,
-                    unit = summary.unit,
-                    source = summary.source,
-                    computedEpochMillis = now,
-                    requestedStartEpochMillis = requestedStart.toEpochMilli(),
-                    requestedEndEpochMillis = requestedEnd.toEpochMilli(),
-                    rawJson = summary.rawJson
-                )
-            }
             if (entities.isNotEmpty()) {
                 aggregateDao.insertAll(entities)
             }
         }
-        return StoreAggregateResult(rowsStored = summaries.size)
+        return StoreAggregateResult(
+            rowsStored = summaries.size,
+            localBytesWritten = entities.sumOf { it.approxBytes() }
+        )
     }
 
     private fun NormalizedHealthRecord.toEntity(lastReadEpochMillis: Long): HealthRecordEntity =
@@ -421,20 +467,6 @@ class HealthDataTypeSyncer(
             updatedEpochMillis = lastReadEpochMillis,
             lastReadEpochMillis = lastReadEpochMillis
         )
-
-    private fun HealthRecordEntity.sameHealthPayload(other: HealthRecordEntity): Boolean =
-        recordUid == other.recordUid &&
-            dedupeKey == other.dedupeKey &&
-            recordType == other.recordType &&
-            recordKind == other.recordKind &&
-            startEpochMillis == other.startEpochMillis &&
-            endEpochMillis == other.endEpochMillis &&
-            localDate == other.localDate &&
-            startZoneOffsetSeconds == other.startZoneOffsetSeconds &&
-            endZoneOffsetSeconds == other.endZoneOffsetSeconds &&
-            sourcePackage == other.sourcePackage &&
-            metadataJson == other.metadataJson &&
-            rawJson == other.rawJson
 
     private fun NormalizedHealthValue.toEntity(
         recordLocalId: Long,
@@ -463,6 +495,39 @@ class HealthDataTypeSyncer(
         )
     }
 
+    private fun NormalizedHealthRecord.approxBytes(): Long =
+        160L +
+            uid.utf8ByteCount() +
+            typeKey.utf8ByteCount() +
+            kind.id.utf8ByteCount() +
+            sourcePackage.utf8ByteCount() +
+            metadataJson.utf8ByteCount() +
+            rawJson.utf8ByteCount() +
+            values.sumOf { it.approxBytes() }
+
+    private fun NormalizedHealthValue.approxBytes(): Long =
+        96L +
+            metric.utf8ByteCount() +
+            unit.utf8ByteCount() +
+            label.utf8ByteCount() +
+            category.utf8ByteCount() +
+            valueText.utf8ByteCount() +
+            valueJson.utf8ByteCount()
+
+    private fun HealthAggregateEntity.approxBytes(): Long =
+        128L +
+            recordType.utf8ByteCount() +
+            metric.utf8ByteCount() +
+            bucketPeriod.utf8ByteCount() +
+            localDate.utf8ByteCount() +
+            timezoneId.utf8ByteCount() +
+            unit.utf8ByteCount() +
+            source.utf8ByteCount() +
+            rawJson.utf8ByteCount()
+
+    private fun String?.utf8ByteCount(): Long =
+        this?.toByteArray(Charsets.UTF_8)?.size?.toLong() ?: 0L
+
     private suspend fun syncResultAndLog(
         result: HealthDataTypeSyncResult,
         startedAt: Instant
@@ -477,6 +542,7 @@ class HealthDataTypeSyncer(
                 "updated=${result.recordsUpdated} duplicates=${result.recordsSkippedDuplicate} " +
                 "values=${result.valuesStored} aggregateRead=${result.aggregateRowsRead} " +
                 "aggregateStored=${result.aggregateRowsStored} " +
+                "sourceBytes=${result.sourceBytesRead} localBytes=${result.localBytesWritten} " +
                 "aggregateError=${result.aggregateErrorMessage} " +
                 "skipped=${result.skippedReason} error=${result.errorMessage}"
         )

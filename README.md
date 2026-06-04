@@ -25,6 +25,23 @@ cd AndroidClient
 
 The Android build requires a Java 17+ JDK.
 
+### Local NanatoStudio Upload
+
+For a physical Android device on the same Wi-Fi, use the PC LAN IP, not `127.0.0.1`.
+
+```powershell
+cd E:\Mess\Projects\Programming\NanatoStudio
+npm.cmd run dev:lan
+```
+
+In the Android app upload settings:
+
+- Server mode: `Local debug`
+- Local URL: `http://<PC-LAN-IP>:8000/health/api/v1/`
+- API key: the key generated in NanatoStudio at `/admin/healthconnect/`
+
+Debug builds permit local HTTP for LAN testing. Release builds keep cleartext disabled; use `https://www.tsubashimonanato.com/health/api/v1/` or another HTTPS endpoint for production.
+
 ## Server
 
 ```powershell

@@ -25,6 +25,7 @@ import com.example.healthconnectandroid.hc.SleepSessionAnalysis
 import com.example.healthconnectandroid.hc.SleepTagTone
 import com.example.healthconnectandroid.ui.StatusTone
 import com.example.healthconnectandroid.ui.format.MetricDisplayFormatter
+import com.example.healthconnectandroid.ui.i18n.uiText
 import java.time.ZoneId
 
 @Composable
@@ -47,10 +48,10 @@ fun SleepSessionCard(
         )
     ) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(session.primaryText, style = MaterialTheme.typography.titleSmall)
+            Text(uiText(session.primaryText), style = MaterialTheme.typography.titleSmall)
             if (session.secondaryText.isNotBlank()) {
                 Text(
-                    session.secondaryText,
+                    uiText(session.secondaryText),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -73,10 +74,10 @@ private fun SleepStageCard(stage: ReadableHealthRecord) {
             Modifier.padding(10.dp),
             verticalArrangement = Arrangement.spacedBy(3.dp)
         ) {
-            Text(stage.primaryText, style = MaterialTheme.typography.bodyMedium)
+            Text(uiText(stage.primaryText), style = MaterialTheme.typography.bodyMedium)
             if (stage.secondaryText.isNotBlank()) {
                 Text(
-                    stage.secondaryText,
+                    uiText(stage.secondaryText),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -92,11 +93,11 @@ private fun SleepTagRow(analysis: SleepSessionAnalysis, stageCount: Int) {
         horizontalArrangement = Arrangement.spacedBy(6.dp)
     ) {
         analysis.tags.forEach { tag ->
-            SleepTagBadge(tag.label, tag.tone)
+            SleepTagBadge(uiText(tag.label), tag.tone)
         }
         if (stageCount > 0) {
             SleepTagBadge(
-                text = if (stageCount == 1) "1 stage" else "${MetricDisplayFormatter.formatCount(stageCount)} stages",
+                text = uiText(if (stageCount == 1) "1 stage" else "${MetricDisplayFormatter.formatCount(stageCount)} stages"),
                 tone = SleepTagTone.NEUTRAL
             )
         }

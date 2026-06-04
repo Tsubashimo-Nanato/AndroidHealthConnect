@@ -32,6 +32,7 @@ import com.example.healthconnectandroid.ui.StatusMessageCard
 import com.example.healthconnectandroid.ui.StatusTone
 import com.example.healthconnectandroid.ui.animation.rowFadeIn
 import com.example.healthconnectandroid.ui.format.MetricDisplayFormatter
+import com.example.healthconnectandroid.ui.i18n.uiText
 import kotlinx.coroutines.launch
 
 @Composable
@@ -117,7 +118,7 @@ fun RecordsSection(
 
     AppSection(title = "Records") {
         Text(
-            "${MetricDisplayFormatter.formatCount(totalCount)} rows in this range",
+            uiText("${MetricDisplayFormatter.formatCount(totalCount)} rows in this range"),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -152,10 +153,10 @@ fun RecordsSection(
                         .clickable { toggleRecord(row.localRecordId) }
                 ) {
                     Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text(row.primaryText, style = MaterialTheme.typography.titleSmall)
+                        Text(uiText(row.primaryText), style = MaterialTheme.typography.titleSmall)
                         if (row.secondaryText.isNotBlank()) {
                             Text(
-                                row.secondaryText,
+                                uiText(row.secondaryText),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -208,9 +209,9 @@ private fun ExpandedRecordDetails(details: RecordFullDetails) {
         details.readableFields.takeIf { it.isNotEmpty() }?.let { fields ->
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                    Text("Fields", style = MaterialTheme.typography.titleSmall)
+                    Text(uiText("Fields"), style = MaterialTheme.typography.titleSmall)
                     fields.forEach { field ->
-                        Text("${field.label}: ${field.value}", style = MaterialTheme.typography.bodySmall)
+                        Text("${uiText(field.label)}: ${uiText(field.value)}", style = MaterialTheme.typography.bodySmall)
                     }
                 }
             }
@@ -218,9 +219,9 @@ private fun ExpandedRecordDetails(details: RecordFullDetails) {
         if (details.valueRows.isNotEmpty()) {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                    Text("Values", style = MaterialTheme.typography.titleSmall)
+                    Text(uiText("Values"), style = MaterialTheme.typography.titleSmall)
                     details.valueRows.forEach { row ->
-                        Text(row.primaryText, style = MaterialTheme.typography.bodySmall)
+                        Text(uiText(row.primaryText), style = MaterialTheme.typography.bodySmall)
                     }
                 }
             }
@@ -228,7 +229,7 @@ private fun ExpandedRecordDetails(details: RecordFullDetails) {
         details.metadata?.let {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                    Text("Metadata", style = MaterialTheme.typography.titleSmall)
+                    Text(uiText("Metadata"), style = MaterialTheme.typography.titleSmall)
                     Text(it, style = MaterialTheme.typography.bodySmall)
                 }
             }
@@ -236,7 +237,7 @@ private fun ExpandedRecordDetails(details: RecordFullDetails) {
         details.rawDetails?.let {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                    Text("Raw fields", style = MaterialTheme.typography.titleSmall)
+                    Text(uiText("Raw fields"), style = MaterialTheme.typography.titleSmall)
                     Text(
                         it,
                         style = MaterialTheme.typography.bodySmall,

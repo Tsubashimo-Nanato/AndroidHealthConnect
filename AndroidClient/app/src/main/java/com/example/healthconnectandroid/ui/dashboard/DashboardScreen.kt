@@ -25,6 +25,7 @@ import com.example.healthconnectandroid.ui.SyncProgressCard
 import com.example.healthconnectandroid.ui.animation.rowFadeIn
 import com.example.healthconnectandroid.ui.format.DisplayPreferences
 import com.example.healthconnectandroid.ui.format.MetricDisplayFormatter
+import com.example.healthconnectandroid.ui.i18n.uiText
 
 @Composable
 fun DashboardScreen(
@@ -52,9 +53,9 @@ fun DashboardScreen(
             modifier = Modifier.rowFadeIn(0),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            Text("Health Connect Data Sync", style = MaterialTheme.typography.headlineSmall)
+            Text(uiText("Health Connect Data Sync"), style = MaterialTheme.typography.headlineSmall)
             Text(
-                "Local health data viewer, CSV exporter, and sync demo.",
+                uiText("Local health data viewer, CSV exporter, and sync demo."),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -89,15 +90,15 @@ fun DashboardScreen(
             }
             Text(
                 if (backgroundReadGranted) {
-                    "Background read permission is granted."
+                    uiText("Background read permission is granted.")
                 } else if (backgroundReadAvailable) {
-                    "Background read can be enabled in Settings."
+                    uiText("Background read can be enabled in Settings.")
                 } else {
-                    "Manual sync is available; background read is unavailable on this device."
+                    uiText("Manual sync is available; background read is unavailable on this device.")
                 },
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            Text(demoStatusText(demoStatus, displayPreferences), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(uiText(demoStatusText(demoStatus, displayPreferences)), color = MaterialTheme.colorScheme.onSurfaceVariant)
             StatusMessageCard(status, tone = statusTone)
         }
 
@@ -115,7 +116,7 @@ fun DashboardScreen(
                 SyncProgressCard(syncProgress)
             }
             Text(
-                "Use the bottom tabs for Data and Settings. Full resync and exports live in Settings.",
+                uiText("Use the bottom tabs for Data and Settings. Full resync and exports live in Settings."),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

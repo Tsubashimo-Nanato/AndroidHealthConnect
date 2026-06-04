@@ -11,6 +11,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import com.example.healthconnectandroid.ui.i18n.uiText
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
@@ -58,7 +59,7 @@ fun QueryCard(
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp)) {
             Text(
-                "Query heart rate at a specific time",
+                uiText("Query heart rate at a specific time"),
                 style = MaterialTheme.typography.titleMedium
             )
             Spacer(Modifier.height(8.dp))
@@ -71,12 +72,12 @@ fun QueryCard(
                     Text(localTime.toString())
                 }
                 Button(onClick = { onQuery(toInstant()) }) {
-                    Text("Get HR")
+                    Text(uiText("Get HR"))
                 }
             }
 
             Spacer(Modifier.height(8.dp))
-            Text("Local timezone: ${zone.id}", style = MaterialTheme.typography.bodySmall)
+            Text(uiText("Local timezone: ${zone.id}"), style = MaterialTheme.typography.bodySmall)
         }
     }
 }

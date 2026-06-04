@@ -24,6 +24,7 @@ import com.example.healthconnectandroid.ui.EmptyStateText
 import com.example.healthconnectandroid.ui.MetricCard
 import com.example.healthconnectandroid.ui.format.DisplayPreferences
 import com.example.healthconnectandroid.ui.format.MetricDisplayFormatter
+import com.example.healthconnectandroid.ui.i18n.uiText
 import com.example.healthconnectandroid.ui.sleep.SessionTimeline
 
 enum class ChartBucket(val label: String) {
@@ -116,7 +117,7 @@ fun InspectorVisualization(
                                 ChartVisibleRange(first.epochMillis, last.epochMillis)
                             }
                         }
-                    val visibleEstimate = remember(bucketedPoints, visibleRange) {
+                    val visibleEstimate = remember(displayPoints, visibleRange) {
                         HeartRateAnalysis.estimateRestingHeartRate(
                             bpmSamples = displayPoints
                                 .filter { point ->
@@ -189,9 +190,9 @@ private fun ChartBucketSelector(
     ) {
         options.forEach { option ->
             if (option == selected) {
-                Button(onClick = { onSelected(option) }) { Text(option.label) }
+                Button(onClick = { onSelected(option) }) { Text(uiText(option.label)) }
             } else {
-                OutlinedButton(onClick = { onSelected(option) }) { Text(option.label) }
+                OutlinedButton(onClick = { onSelected(option) }) { Text(uiText(option.label)) }
             }
         }
     }
@@ -209,13 +210,13 @@ private fun RestingHeartRateVisualizationSummary(
     )
     recordedEstimate?.recordedBpm?.let { recorded ->
         Text(
-            "Recorded resting HR: ${MetricDisplayFormatter.formatBpm(recorded)}",
+            uiText("Recorded resting HR: ${MetricDisplayFormatter.formatBpm(recorded)}"),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
     Text(
-        "${MetricDisplayFormatter.formatCount(estimate.sampleCount)} visible samples",
+        uiText("${MetricDisplayFormatter.formatCount(estimate.sampleCount)} visible samples"),
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant
     )
@@ -225,7 +226,7 @@ private fun RestingHeartRateVisualizationSummary(
 private fun WeeklyTotals(rows: List<InspectorPeriodTotal>) {
     if (rows.isEmpty()) return
     Spacer(Modifier.height(8.dp))
-    Text("Weekly summaries", style = MaterialTheme.typography.titleSmall)
+    Text(uiText("Weekly summaries"), style = MaterialTheme.typography.titleSmall)
     rows.takeLast(8).forEach { row ->
         Text("${row.label}: ${formatNumber(row.total)} ${row.unit.orEmpty()}".trim())
     }

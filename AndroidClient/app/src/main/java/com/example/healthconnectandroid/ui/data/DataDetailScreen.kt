@@ -81,12 +81,14 @@ import com.example.healthconnectandroid.ui.sleep.toSleepInput
 import com.example.healthconnectandroid.ui.format.DisplayPreferences
 import com.example.healthconnectandroid.ui.format.MetricDisplayFormatter
 import com.example.healthconnectandroid.ui.format.toDisplayPreferences
+import com.example.healthconnectandroid.ui.i18n.uiText
 import java.time.Instant
 import java.time.LocalDate
 import java.time.YearMonth
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.DayOfWeek
+import java.time.temporal.ChronoUnit
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -101,7 +103,7 @@ fun HealthDataDetailScreen(
     userPreferences: UserPreferences,
     diagnostics: DeviceSmokeDiagnostics,
     onExportType: (String) -> Unit,
-    runSelectedTypeSync: suspend (String, Instant, Instant, (SyncProgress) -> Unit) -> HealthDataTypeSyncResult,
+    runSelectedTypeSync: suspend (String, Instant, Instant, ZoneId, (SyncProgress) -> Unit) -> HealthDataTypeSyncResult,
     onLocalDataChanged: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
@@ -144,6 +146,48 @@ fun HealthDataDetailScreen(
     fun selectedSyncRange(): Pair<Instant, Instant> {
         val end = detailEndInstant()
         return range.startBefore(end, zoneId) to end
+    }
+
+    fun quickSyncRange(): Pair<Instant, Instant> {
+        val end = Instant.now()
+        return end.minus(31, ChronoUnit.DAYS) to end
+    }
+
+    fun launchSelectedSync(label: String, syncRange: Pair<Instant, Instant>) {
+        selectedSyncJob = scope.launch {
+            syncInProgress = true
+            val (start, end) = syncRange
+            selectedSyncProgress = null
+            status = "$label ${descriptor.displayName}..."
+            val result = try {
+                runSelectedTypeSync(dataTypeKey, start, end, zoneId) { progress ->
+                    selectedSyncProgress = progress
+                    diagnostics.recordSyncProgress(progress)
+                }
+            } catch (t: CancellationException) {
+                status = "${descriptor.displayName} sync cancelled"
+                diagnostics.recordSyncCancelled(SyncMode.SELECTED_TYPE)
+                selectedSyncProgress = selectedSyncProgress?.copy(
+                    isCancellable = false,
+                    message = "Selected sync cancelled"
+                )
+                syncInProgress = false
+                selectedSyncJob = null
+                return@launch
+            } catch (t: Throwable) {
+                status = "Sync failed: ${t.message}"
+                diagnostics.recordSyncFailure(SyncMode.SELECTED_TYPE, dataTypeKey, start, end)
+                syncInProgress = false
+                selectedSyncJob = null
+                return@launch
+            }
+            diagnostics.recordSyncResult(SyncMode.SELECTED_TYPE, result)
+            status = syncStatusText(result, zoneId)
+            reloadVersion++
+            onLocalDataChanged()
+            syncInProgress = false
+            selectedSyncJob = null
+        }
     }
 
     val sleepQueryWindow = remember(isSleep, range, sleepDataWindowCenterDate, weekStart, zoneId) {
@@ -193,7 +237,7 @@ fun HealthDataDetailScreen(
                     }
                 )
                 status = if (isHeartRate) {
-                    "Last synced data: date view"
+                    lastSyncedDataText(it.lastSynced, zoneId)
                 } else {
                     "Last synced data: ${descriptor.displayName} for ${range.label}"
                 }
@@ -219,7 +263,11 @@ fun HealthDataDetailScreen(
         AppSection(
             modifier = Modifier.rowFadeIn(0),
             title = descriptor.displayName,
-            subtitle = if (isHeartRate) "Last synced data: date view" else "Last synced data: ${range.label}"
+            subtitle = if (isHeartRate) {
+                detail?.let { lastSyncedDataText(it.lastSynced, zoneId) } ?: "Last synced data: loading"
+            } else {
+                "Last synced data: ${range.label}"
+            }
         ) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 StatusBadge(
@@ -230,48 +278,23 @@ fun HealthDataDetailScreen(
                 StatusBadge(visualizationLabel(descriptor.visualizationType), StatusTone.Info)
             }
             StatusMessageCard(status)
-            PrimaryActionButton(
-                label = if (syncInProgress) "Syncing..." else "Sync This Data Type",
-                enabled = permissionGranted &&
-                    descriptor.implementationStatus == HealthDataImplementationStatus.IMPLEMENTED &&
-                    !syncInProgress,
-                onClick = {
-                    selectedSyncJob = scope.launch {
-                        syncInProgress = true
-                        val (start, end) = selectedSyncRange()
-                        selectedSyncProgress = null
-                        status = "Syncing ${descriptor.displayName}..."
-                        val result = try {
-                            runSelectedTypeSync(dataTypeKey, start, end) { progress ->
-                                selectedSyncProgress = progress
-                                diagnostics.recordSyncProgress(progress)
-                            }
-                        } catch (t: CancellationException) {
-                            status = "${descriptor.displayName} sync cancelled"
-                            diagnostics.recordSyncCancelled(SyncMode.SELECTED_TYPE)
-                            selectedSyncProgress = selectedSyncProgress?.copy(
-                                isCancellable = false,
-                                message = "Selected sync cancelled"
-                            )
-                            syncInProgress = false
-                            selectedSyncJob = null
-                            return@launch
-                        } catch (t: Throwable) {
-                            status = "Sync failed: ${t.message}"
-                            diagnostics.recordSyncFailure(SyncMode.SELECTED_TYPE, dataTypeKey, start, end)
-                            syncInProgress = false
-                            selectedSyncJob = null
-                            return@launch
-                        }
-                        diagnostics.recordSyncResult(SyncMode.SELECTED_TYPE, result)
-                        status = syncStatusText(result, zoneId)
-                        reloadVersion++
-                        onLocalDataChanged()
-                        syncInProgress = false
-                        selectedSyncJob = null
-                    }
-                }
-            )
+            val syncEnabled = permissionGranted &&
+                descriptor.implementationStatus == HealthDataImplementationStatus.IMPLEMENTED &&
+                !syncInProgress
+            AppActionRow {
+                SecondaryActionButton(
+                    modifier = Modifier.weight(1f),
+                    label = "Quick Sync",
+                    enabled = syncEnabled,
+                    onClick = { launchSelectedSync("Quick syncing", quickSyncRange()) }
+                )
+                PrimaryActionButton(
+                    modifier = Modifier.weight(1f),
+                    label = if (syncInProgress) "Syncing..." else "Sync all",
+                    enabled = syncEnabled,
+                    onClick = { launchSelectedSync("Syncing", selectedSyncRange()) }
+                )
+            }
             if (syncInProgress) {
                 SecondaryActionButton(
                     label = "Cancel Sync",
@@ -596,10 +619,10 @@ private fun DetailStatusSummary(
             )
         }
         Text(
-            "Range: ${MetricDisplayFormatter.formatShortInstant(detail.start, zoneId)}-${MetricDisplayFormatter.formatShortInstant(detail.end, zoneId)}",
+            uiText("Range: ${MetricDisplayFormatter.formatShortInstant(detail.start, zoneId)}-${MetricDisplayFormatter.formatShortInstant(detail.end, zoneId)}"),
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
-        Text("Last sync: ${formatInstant(detail.lastSynced, zoneId)}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(uiText("Last sync: ${formatInstant(detail.lastSynced, zoneId)}"), color = MaterialTheme.colorScheme.onSurfaceVariant)
         detail.lastSyncStatus?.let { status ->
             StatusBadge(
                 "Last sync: $status",
@@ -625,9 +648,9 @@ private fun TimeRangeSelector(
         val visibleOptions = if (selected in options) options else listOf(selected) + options
         visibleOptions.forEach { option ->
             if (option == selected) {
-                Button(onClick = { onSelected(option) }) { Text(option.label) }
+                Button(onClick = { onSelected(option) }) { Text(uiText(option.label)) }
             } else {
-                OutlinedButton(onClick = { onSelected(option) }) { Text(option.label) }
+                OutlinedButton(onClick = { onSelected(option) }) { Text(uiText(option.label)) }
             }
         }
     }
@@ -689,16 +712,45 @@ private fun visualizationLabel(type: VisualizationType): String =
 private fun formatInstant(value: Instant?, zoneId: ZoneId): String =
     value?.let { HealthDisplayFormatter.formatInstantForUi(it, zoneId) }?.ifBlank { null } ?: "Never"
 
+private fun lastSyncedDataText(value: Instant?, zoneId: ZoneId): String =
+    "Last synced data: ${formatInstant(value, zoneId)}"
+
 private fun syncStatusText(result: HealthDataTypeSyncResult, zoneId: ZoneId): String =
     when {
         result.terminalStatus == SyncRunStatus.TIMEOUT -> "${result.key} sync timed out: ${result.errorMessage.orEmpty()}"
         result.terminalStatus == SyncRunStatus.CANCELLED -> "${result.key} sync cancelled"
         result.errorMessage != null -> "${result.key} sync failed: ${result.errorMessage}"
         result.skippedReason != null -> "${result.key} skipped: ${result.skippedReason}"
+        result.recordsInserted + result.recordsUpdated + result.aggregateRowsStored + result.valuesStored > 0 ->
+            "${result.key}: inserted data, read ${result.recordsRead}, inserted ${result.recordsInserted}, " +
+                "updated ${result.recordsUpdated}, duplicates ${result.recordsSkippedDuplicate}, " +
+                "daily summaries ${result.aggregateRowsStored}${result.syncDataSizeText()}${result.sourceRangeText(zoneId)}${result.syncRangeText(zoneId)}"
+        result.localDaysChecked > 0 && result.localDaysRequested == 0 ->
+            "${result.key}: no missing local days${result.syncDataSizeText()}${result.syncRangeText(zoneId)}"
+        result.recordsRead + result.aggregateRowsRead == 0 ->
+            "${result.key}: no source data returned${result.syncDataSizeText()}${result.syncRangeText(zoneId)}"
+        result.recordsSkippedDuplicate > 0 ->
+            "${result.key}: no new data, read ${result.recordsRead}, duplicates ${result.recordsSkippedDuplicate}" +
+                result.syncDataSizeText() + result.sourceRangeText(zoneId) + result.syncRangeText(zoneId)
         else -> "${result.key}: read ${result.recordsRead}, inserted ${result.recordsInserted}, " +
             "updated ${result.recordsUpdated}, duplicates ${result.recordsSkippedDuplicate}, " +
-            "daily summaries ${result.aggregateRowsStored}${result.syncRangeText(zoneId)}"
+            "daily summaries ${result.aggregateRowsStored}${result.syncDataSizeText()}${result.sourceRangeText(zoneId)}${result.syncRangeText(zoneId)}"
     }
+
+private fun HealthDataTypeSyncResult.syncDataSizeText(): String =
+    ", read ${formatBytesMb(sourceBytesRead)}, wrote ${formatBytesMb(localBytesWritten)}"
+
+private fun HealthDataTypeSyncResult.sourceRangeText(zoneId: ZoneId): String {
+    val start = sourceStart ?: return ""
+    val end = sourceEnd ?: return ""
+    return ", source ${MetricDisplayFormatter.formatShortInstant(start, zoneId)} to ${MetricDisplayFormatter.formatShortInstant(end, zoneId)}"
+}
+
+private fun formatBytesMb(bytes: Long): String {
+    if (bytes <= 0L) return "0 MB"
+    val mb = bytes.toDouble() / (1024.0 * 1024.0)
+    return if (mb < 0.01) "<0.01 MB" else String.format(java.util.Locale.US, "%.2f MB", mb)
+}
 
 private fun HealthDataTypeSyncResult.syncRangeText(zoneId: ZoneId): String {
     val start = requestedStart ?: return ""
@@ -718,30 +770,32 @@ private fun DetailRangeDebugFooter(
         subtitle = "Range debug"
     ) {
         Text(
-            "Loaded: ${MetricDisplayFormatter.formatShortInstant(loaded.start, zoneId)} to ${MetricDisplayFormatter.formatShortInstant(loaded.end, zoneId)}",
+            uiText("Loaded: ${MetricDisplayFormatter.formatShortInstant(loaded.start, zoneId)} to ${MetricDisplayFormatter.formatShortInstant(loaded.end, zoneId)}"),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             style = MaterialTheme.typography.bodySmall
         )
         Text(
-            "Selected sync: ${MetricDisplayFormatter.formatShortInstant(syncRange.first, zoneId)} to ${MetricDisplayFormatter.formatShortInstant(syncRange.second, zoneId)}",
+            uiText("Selected sync: ${MetricDisplayFormatter.formatShortInstant(syncRange.first, zoneId)} to ${MetricDisplayFormatter.formatShortInstant(syncRange.second, zoneId)}"),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             style = MaterialTheme.typography.bodySmall
         )
         heartRateChartRange?.let { range ->
             Text(
-                "Chart view: ${MetricDisplayFormatter.formatShortInstant(Instant.ofEpochMilli(range.startEpochMillis), zoneId)} to ${MetricDisplayFormatter.formatShortInstant(Instant.ofEpochMilli(range.endEpochMillis), zoneId)}",
+                uiText("Chart view: ${MetricDisplayFormatter.formatShortInstant(Instant.ofEpochMilli(range.startEpochMillis), zoneId)} to ${MetricDisplayFormatter.formatShortInstant(Instant.ofEpochMilli(range.endEpochMillis), zoneId)}"),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodySmall
             )
         }
         Text(
-            "Rows: ${MetricDisplayFormatter.formatCount(loaded.recordListTotalCount)} in loaded range",
+            uiText("Rows: ${MetricDisplayFormatter.formatCount(loaded.recordListTotalCount)} in loaded range"),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             style = MaterialTheme.typography.bodySmall
         )
         Text(
-            "Chart points: ${MetricDisplayFormatter.formatCount(loaded.chartPoints.size)}" +
-                if (loaded.chartPointsLimited) " (limited)" else "",
+            uiText(
+                "Chart points: ${MetricDisplayFormatter.formatCount(loaded.chartPoints.size)}" +
+                    if (loaded.chartPointsLimited) " (limited)" else ""
+            ),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             style = MaterialTheme.typography.bodySmall
         )
@@ -801,7 +855,7 @@ private fun compactDate(date: LocalDate): String =
 @Composable
 private fun EmptyStateText(message: String) {
     Text(
-        text = message,
+        text = uiText(message),
         color = MaterialTheme.colorScheme.onSurfaceVariant
     )
 }

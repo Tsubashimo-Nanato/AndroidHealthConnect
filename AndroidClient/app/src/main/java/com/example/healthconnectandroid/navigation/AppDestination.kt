@@ -25,6 +25,7 @@ enum class SettingsDestination(val title: String) {
     Preferences("Preferences"),
     Permissions("Permissions"),
     Sync("Sync"),
+    Upload("Upload"),
     DataSettings("Data Settings"),
     Appearance("Appearance"),
     Debug("Debug")
