@@ -7,8 +7,9 @@ import org.junit.Test
 
 class HealthDetailQueryServicePolicyTest {
     @Test
-    fun heartRateUsesLargeChartWindowForDateSelectorAndRhr() {
-        assertTrue(inspectorChartRowLimit(HealthDataTypeKeys.HEART_RATE) >= 150_000)
+    fun heartRateUsesBoundedChartWindowForResponsiveVisualization() {
+        assertTrue(inspectorChartRowLimit(HealthDataTypeKeys.HEART_RATE) > inspectorChartRowLimit(HealthDataTypeKeys.WEIGHT))
+        assertTrue(inspectorChartRowLimit(HealthDataTypeKeys.HEART_RATE) <= 12_000)
     }
 
     @Test

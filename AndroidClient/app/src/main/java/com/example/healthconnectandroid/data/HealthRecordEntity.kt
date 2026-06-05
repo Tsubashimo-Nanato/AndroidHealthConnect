@@ -11,7 +11,8 @@ import androidx.room.PrimaryKey
         Index(value = ["recordType", "recordUid"]),
         Index(value = ["recordType", "dedupeKey"], unique = true),
         Index(value = ["recordType", "localDate"]),
-        Index(value = ["syncStatus", "updatedEpochMillis"])
+        Index(value = ["syncStatus", "updatedEpochMillis"]),
+        Index(value = ["updatedEpochMillis", "localId"])
     ]
 )
 data class HealthRecordEntity(

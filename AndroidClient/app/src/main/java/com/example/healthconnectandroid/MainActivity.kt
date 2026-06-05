@@ -82,6 +82,7 @@ import com.example.healthconnectandroid.hc.upload.HealthUploadService
 import com.example.healthconnectandroid.hc.upload.HealthUploadWorker
 import com.example.healthconnectandroid.hc.upload.UploadPendingCounts
 import com.example.healthconnectandroid.hc.upload.UploadProgress
+import com.example.healthconnectandroid.hc.upload.UploadTimeRange
 import com.example.healthconnectandroid.hc.upload.toStatus
 import com.example.healthconnectandroid.navigation.AppDestination
 import com.example.healthconnectandroid.navigation.AppNavigationState
@@ -618,23 +619,25 @@ class MainActivity : ComponentActivity() {
                                         actionInProgress = null
                                     }
                                 },
-                                onUploadNow = { settings ->
+                                onUploadNow = { settings, range ->
                                     scope.launch {
                                         actionInProgress = "upload"
                                         uploadProgress = null
                                         uploadSettings = settings
                                         AppPreferences.setUploadSettings(this@MainActivity, settings)
-                                        status = "Uploading local data..."
-                                        val result = uploadService.uploadPending(settings) { progress ->
+                                        status = uploadStartStatus(range)
+                                        val result = uploadService.uploadPending(settings, range) { progress ->
                                             uploadProgress = progress
                                         }
                                         uploadStatus = result.toStatus()
                                         AppPreferences.setUploadStatus(this@MainActivity, uploadStatus)
                                         uploadPendingCounts = result.pendingCounts
                                         status = result.message
-                                        if (!result.success && result.retryable) {
+                                        if (!result.success && result.retryable && range == UploadTimeRange.ALL) {
                                             HealthUploadWorker.enqueue(this@MainActivity)
                                             status = "${result.message}. Retry queued."
+                                        } else if (!result.success && result.retryable) {
+                                            status = "${result.message}. Retry ${range.label} manually."
                                         }
                                         uploadProgress = null
                                         actionInProgress = null
@@ -922,6 +925,13 @@ class MainActivity : ComponentActivity() {
     private fun exportFileStamp(): String =
         java.time.LocalDateTime.now()
             .format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd_HHmm"))
+
+    private fun uploadStartStatus(range: UploadTimeRange): String =
+        if (range == UploadTimeRange.ALL) {
+            "Uploading local data..."
+        } else {
+            "Uploading local data (${range.label})..."
+        }
 
     private fun syncAllStatusText(
         results: List<HealthDataTypeSyncResult>,

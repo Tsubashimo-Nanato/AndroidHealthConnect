@@ -9,6 +9,8 @@ import androidx.room.PrimaryKey
     indices = [
         Index(value = ["recordLocalId"]),
         Index(value = ["recordLocalId", "valueKey"]),
+        Index(value = ["recordLocalId", "sequence", "localId"]),
+        Index(value = ["localDate"]),
         Index(value = ["metric", "sampleEpochMillis"]),
         Index(value = ["metric", "localDate"]),
         Index(value = ["metric", "startEpochMillis"])

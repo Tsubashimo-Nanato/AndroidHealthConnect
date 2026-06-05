@@ -12,6 +12,8 @@ import com.example.healthconnectandroid.hc.RecordListPage
 import com.example.healthconnectandroid.hc.RecordPagingPolicy
 import java.time.Instant
 import java.time.ZoneId
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 class HealthRecordDetailQueryService(
     private val db: AppDb
@@ -25,11 +27,12 @@ class HealthRecordDetailQueryService(
         limit: Int,
         offset: Int,
         zoneId: ZoneId = ZoneId.systemDefault(),
-        unitSystem: UnitSystemPreference = UnitSystemPreference.METRIC
-    ): RecordListPage {
+        unitSystem: UnitSystemPreference = UnitSystemPreference.METRIC,
+        totalCountOverride: Int? = null
+    ): RecordListPage = withContext(Dispatchers.Default) {
         val descriptor = HealthDataTypeRegistry.require(key)
         val safeLimit = RecordPagingPolicy.sanitizeLimit(limit)
-        val total = healthDao.countInspectorRowsForTypeRange(
+        val total = totalCountOverride ?: healthDao.countInspectorRowsForTypeRange(
             recordType = key,
             startEpochMillis = start.toEpochMilli(),
             endEpochMillis = end.toEpochMilli()
@@ -42,7 +45,7 @@ class HealthRecordDetailQueryService(
             offset = offset.coerceAtLeast(0)
         ).distinctBy { "${it.localRecordId}:${it.valueKey}" }
         val nextOffset = RecordPagingPolicy.nextOffset(offset, rows.size, total)
-        return RecordListPage(
+        RecordListPage(
             items = rows.map { it.toRecordListItem(descriptor, zoneId, unitSystem) },
             totalCount = total,
             nextOffset = nextOffset,
@@ -55,7 +58,7 @@ class HealthRecordDetailQueryService(
         localRecordId: Long,
         zoneId: ZoneId = ZoneId.systemDefault(),
         unitSystem: UnitSystemPreference = UnitSystemPreference.METRIC
-    ): RecordFullDetails {
+    ): RecordFullDetails = withContext(Dispatchers.Default) {
         val descriptor = HealthDataTypeRegistry.require(key)
         val rows = healthDao.inspectorRowsForRecord(localRecordId)
             .filter { it.recordType == key }
@@ -69,7 +72,7 @@ class HealthRecordDetailQueryService(
                     unitSystem = unitSystem
                 )
             }
-        return RecordFullDetails(
+        RecordFullDetails(
             localRecordId = localRecordId,
             recordType = key,
             readableFields = rows.flatMap { it.detailFields }.distinctBy { it.label to it.value },

@@ -5,6 +5,7 @@ import android.net.Uri
 import android.provider.Settings
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -13,6 +14,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -52,6 +55,7 @@ import com.example.healthconnectandroid.hc.upload.UploadResultSeverity
 import com.example.healthconnectandroid.hc.upload.UploadServerMode
 import com.example.healthconnectandroid.hc.upload.UploadSettings
 import com.example.healthconnectandroid.hc.upload.UploadStatus
+import com.example.healthconnectandroid.hc.upload.UploadTimeRange
 import com.example.healthconnectandroid.ui.AppActionRow
 import com.example.healthconnectandroid.ui.AppSection
 import com.example.healthconnectandroid.ui.PrimaryActionButton
@@ -497,7 +501,7 @@ fun SettingsUploadScreen(
     progress: UploadProgress?,
     onSaveSettings: (UploadSettings) -> Unit,
     onTestConnection: (UploadSettings) -> Unit,
-    onUploadNow: (UploadSettings) -> Unit,
+    onUploadNow: (UploadSettings, UploadTimeRange) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var serverMode by rememberSaveable(settings) { mutableStateOf(settings.serverMode) }
@@ -517,6 +521,7 @@ fun SettingsUploadScreen(
         is UploadEndpointValidation.Invalid -> validation.reason
     }
     val canRun = validation is UploadEndpointValidation.Valid && !busy
+    var uploadMenuExpanded by remember { mutableStateOf(false) }
 
     Column(
         modifier
@@ -617,12 +622,28 @@ fun SettingsUploadScreen(
                     enabled = canRun,
                     onClick = { onTestConnection(editedSettings) }
                 )
-                PrimaryActionButton(
-                    modifier = Modifier.weight(1f),
-                    label = if (busy) "Uploading..." else "Upload",
-                    enabled = canRun,
-                    onClick = { onUploadNow(editedSettings) }
-                )
+                Box(modifier = Modifier.weight(1f)) {
+                    PrimaryActionButton(
+                        label = if (busy) "Uploading..." else "Upload",
+                        enabled = canRun,
+                        onClick = { uploadMenuExpanded = true }
+                    )
+                    DropdownMenu(
+                        expanded = uploadMenuExpanded,
+                        onDismissRequest = { uploadMenuExpanded = false }
+                    ) {
+                        UploadTimeRange.values().forEach { range ->
+                            DropdownMenuItem(
+                                text = { Text(uiText(range.label)) },
+                                enabled = canRun,
+                                onClick = {
+                                    uploadMenuExpanded = false
+                                    onUploadNow(editedSettings, range)
+                                }
+                            )
+                        }
+                    }
+                }
             }
         }
     }

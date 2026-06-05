@@ -194,8 +194,22 @@ fun HealthDataDetailScreen(
         if (isSleep) sleepDataQueryWindow(range, sleepDataWindowCenterDate, weekStart, zoneId) else null
     }
     val sleepLoadKey = sleepQueryWindow?.key ?: "standard"
+    val heartRateChartQueryRange = remember(isHeartRate, selectedHeartRateDates, zoneId) {
+        if (isHeartRate) HeartRateDateAnalysis.visibleRangeForDates(selectedHeartRateDates, zoneId) else null
+    }
+    val heartRateChartLoadKey = heartRateChartQueryRange?.let { queryRange ->
+        "${queryRange.start.toEpochMilli()}:${queryRange.end.toEpochMilli()}"
+    } ?: "latest-day"
 
-    LaunchedEffect(dataTypeKey, range, reloadVersion, sleepLoadKey, zoneId, displayPreferences.unitSystem) {
+    LaunchedEffect(
+        dataTypeKey,
+        range,
+        reloadVersion,
+        sleepLoadKey,
+        heartRateChartLoadKey,
+        zoneId,
+        displayPreferences.unitSystem
+    ) {
         loading = true
         status = "Loading local ${descriptor.displayName} data..."
         if (!isHeartRate) {
@@ -219,7 +233,9 @@ fun HealthDataDetailScreen(
                     end = detailEndInstant(),
                     zoneId = zoneId,
                     unitSystem = displayPreferences.unitSystem,
-                    weekStart = weekStart
+                    weekStart = weekStart,
+                    chartStart = heartRateChartQueryRange?.start,
+                    chartEnd = heartRateChartQueryRange?.end
                 )
             }
         }
@@ -413,41 +429,47 @@ fun HealthDataDetailScreen(
                 )
                 SleepSessionsSection(selectedSleepModels, zoneId = zoneId)
             } else if (isHeartRate) {
-                val latestHeartRateDate = remember(loaded.chartPoints) {
+                val heartRateSummaryByDate = remember(loaded.dailyNumericSummaries) {
+                    loaded.dailyNumericSummaries.mapNotNull { row ->
+                        val date = runCatching { LocalDate.parse(row.localDate) }.getOrNull()
+                            ?: return@mapNotNull null
+                        date to row
+                    }.toMap()
+                }
+                val latestHeartRateDate = remember(heartRateSummaryByDate, today) {
                     HeartRateDateAnalysis.latestDataDate(
-                        dataDates = loaded.chartPoints.map {
-                            Instant.ofEpochMilli(it.epochMillis).atZone(zoneId).toLocalDate()
-                        },
+                        dataDates = heartRateSummaryByDate.keys,
                         today = today
                     )
                 }
                 LaunchedEffect(latestHeartRateDate, loaded.start, loaded.end) {
                     if (selectedHeartRateDates.isEmpty()) {
                         val date = latestHeartRateDate ?: today
+                        loading = true
                         selectedHeartRateDates = setOf(date)
                         heartRateAnchorDate = date
                         heartRateVisibleRange = heartRateVisibleRangeForDates(setOf(date), zoneId)
                         heartRateSelectionVersion++
                     }
                 }
-                val heartRatePointsByDate = remember(loaded.chartPoints, zoneId) {
-                    loaded.chartPoints.groupBy { point ->
-                        Instant.ofEpochMilli(point.epochMillis).atZone(zoneId).toLocalDate()
-                    }
-                }
                 val heartRateZones = remember(userAge) { HeartRateAnalysis.referenceZones(userAge) }
-                val heartRateCellByDate = remember(loaded.start, heartRatePointsByDate, heartRateZones, today, zoneId) {
-                    val firstDate = Instant.ofEpochMilli(loaded.start.toEpochMilli())
-                        .atZone(zoneId)
-                        .toLocalDate()
+                val heartRateCellByDate = remember(loaded.start, heartRateSummaryByDate, heartRateZones, today, zoneId) {
+                    val firstDate = (heartRateSummaryByDate.keys.minOrNull()
+                        ?: loaded.start.atZone(zoneId).toLocalDate())
                         .coerceAtMost(today)
                     HeartRateDateAnalysis.weekStripDates(firstDate, today).associateWith { date ->
-                        val values = heartRatePointsByDate[date].orEmpty().map { it.value }
-                        val summary = HeartRateDateAnalysis.qualityFor(values, heartRateZones)
+                        val dailySummary = heartRateSummaryByDate[date]
+                        val summary = HeartRateDateAnalysis.qualityForSummary(
+                            sampleCount = dailySummary?.sampleCount ?: 0,
+                            averageBpm = dailySummary?.averageValue,
+                            maxBpm = dailySummary?.maxValue,
+                            zones = heartRateZones
+                        )
                         HrDateCell(
                             date = date,
                             label = heartRateDateCellLabel(date),
                             quality = summary.quality,
+                            zoneScore = summary.zoneScore,
                             sampleCount = summary.sampleCount
                         )
                     }
@@ -471,6 +493,7 @@ fun HealthDataDetailScreen(
                             ?: today
                         if (selectedHeartRateDates.isEmpty()) {
                             val date = latestHeartRateDate ?: today
+                            loading = true
                             selectedHeartRateDates = setOf(date)
                             heartRateAnchorDate = date
                             heartRateSelectionVersion++
@@ -491,6 +514,9 @@ fun HealthDataDetailScreen(
                     selectedDates = selectedHeartRateDates,
                     onDateSelected = { date ->
                         val cleaned = setOf(date.coerceAtMost(today))
+                        if (cleaned != selectedHeartRateDates) {
+                            loading = true
+                        }
                         selectedHeartRateDates = cleaned
                         heartRateAnchorDate = cleaned.maxOrNull()?.coerceAtMost(today) ?: today
                         heartRateSelectionVersion++
@@ -508,7 +534,12 @@ fun HealthDataDetailScreen(
                         )
                     }
                 )
-                if (loaded.hasNoDisplayData()) {
+                if (loading) {
+                    LoadingStateCard(
+                        title = "Loading heart-rate chart",
+                        message = "Reading and reducing samples for the selected date."
+                    )
+                } else if (loaded.hasNoDisplayData()) {
                     EmptyStateText(emptyReason(loaded, permissionStatus))
                 } else {
                     InspectorVisualization(
@@ -554,7 +585,8 @@ fun HealthDataDetailScreen(
                             limit = limit,
                             offset = offset,
                             zoneId = zoneId,
-                            unitSystem = displayPreferences.unitSystem
+                            unitSystem = displayPreferences.unitSystem,
+                            totalCountOverride = loaded.recordListTotalCount
                         )
                     },
                     loadRecordDetails = { localRecordId ->
@@ -657,7 +689,11 @@ private fun TimeRangeSelector(
 }
 
 private fun InspectorDetailData.hasNoDisplayData(): Boolean =
-    recordListTotalCount == 0 && readableRows.isEmpty() && chartPoints.isEmpty() && dailyTotals.isEmpty()
+    recordListTotalCount == 0 &&
+        readableRows.isEmpty() &&
+        chartPoints.isEmpty() &&
+        dailyTotals.isEmpty() &&
+        dailyNumericSummaries.isEmpty()
 
 private fun emptyReason(
     detail: InspectorDetailData,

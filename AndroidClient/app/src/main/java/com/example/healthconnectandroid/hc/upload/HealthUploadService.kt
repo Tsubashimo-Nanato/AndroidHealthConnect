@@ -26,12 +26,15 @@ class HealthUploadService(
 ) {
     private val uploadDao = db.healthUploadDao()
 
-    suspend fun pendingCounts(settings: UploadSettings): UploadPendingCounts = withContext(Dispatchers.IO) {
+    suspend fun pendingCounts(
+        settings: UploadSettings,
+        range: UploadTimeRange = UploadTimeRange.ALL
+    ): UploadPendingCounts = withContext(Dispatchers.IO) {
         val endpoint = when (val validation = UploadEndpointPolicy.validate(settings, requireApiKey = false)) {
             is UploadEndpointValidation.Valid -> validation.endpoint
             is UploadEndpointValidation.Invalid -> return@withContext UploadPendingCounts.Empty
         }
-        pendingCountsForServer(endpoint.serverKey)
+        pendingCountsForServer(endpoint.serverKey, range.startEpochMillis())
     }
 
     suspend fun testConnection(settings: UploadSettings): UploadConnectionResult = withContext(Dispatchers.IO) {
@@ -103,6 +106,8 @@ class HealthUploadService(
 
     suspend fun uploadPending(
         settings: UploadSettings,
+        range: UploadTimeRange = UploadTimeRange.ALL,
+        maxBatches: Int? = null,
         onProgress: suspend (UploadProgress) -> Unit = {}
     ): UploadRunResult = withContext(Dispatchers.IO) {
         val endpoint = when (val validation = UploadEndpointPolicy.validate(settings)) {
@@ -120,13 +125,14 @@ class HealthUploadService(
             }
         }
 
-        var pending = pendingCountsForServer(endpoint.serverKey)
+        val startEpochMillis = range.startEpochMillis()
+        var pending = pendingCountsForServer(endpoint.serverKey, startEpochMillis)
         if (pending.total == 0) {
             return@withContext UploadRunResult(
                 success = true,
                 retryable = false,
-                message = "No pending upload rows",
-                pendingCounts = pending,
+                message = uploadMessage("No pending upload rows", range),
+                pendingCounts = pendingCountsForServer(endpoint.serverKey, startEpochMillis = null),
                 serverMode = settings.serverMode
             )
         }
@@ -145,10 +151,10 @@ class HealthUploadService(
             )
         )
 
-        while (pending.total > 0 && batchNumber < MAX_BATCHES_PER_RUN) {
+        while (pending.total > 0 && (maxBatches == null || batchNumber < maxBatches)) {
             coroutineContext.ensureActive()
             batchNumber += 1
-            val rows = loadPendingBatch(endpoint.serverKey)
+            val rows = loadPendingBatch(endpoint.serverKey, startEpochMillis)
             if (rows.isEmpty) break
             val batch = UploadBatch.fromRows(
                 schemaVersion = SCHEMA_VERSION,
@@ -174,7 +180,11 @@ class HealthUploadService(
                     uploadedRecords += rows.records.size
                     uploadedValues += rows.values.size
                     uploadedAggregates += rows.aggregates.size
-                    pending = pendingCountsForServer(endpoint.serverKey)
+                    pending = pending.minusUploaded(
+                        recordsUploaded = rows.records.size,
+                        valuesUploaded = rows.values.size,
+                        aggregatesUploaded = rows.aggregates.size
+                    )
                     onProgress(
                         UploadProgress(
                             phase = "Uploaded batch",
@@ -186,7 +196,7 @@ class HealthUploadService(
                     )
                 }
                 is PostBatchResult.Failure -> {
-                    val remaining = pendingCountsForServer(endpoint.serverKey)
+                    val remaining = pendingCountsForServer(endpoint.serverKey, startEpochMillis = null)
                     return@withContext UploadRunResult(
                         success = false,
                         retryable = postResult.retryable,
@@ -205,39 +215,51 @@ class HealthUploadService(
         }
 
         val finishedAt = Instant.now()
-        val remaining = pendingCountsForServer(endpoint.serverKey)
+        val scopedRemaining = pendingCountsForServer(endpoint.serverKey, startEpochMillis)
+        val remaining = pendingCountsForServer(endpoint.serverKey, startEpochMillis = null)
         UploadRunResult(
-            success = remaining.total == 0,
-            retryable = remaining.total > 0,
-            failureKind = if (remaining.total == 0) UploadFailureKind.NONE else UploadFailureKind.SERVER,
-            message = if (remaining.total == 0) {
-                "Upload complete: ${uploadedRecords + uploadedValues + uploadedAggregates} rows"
+            success = scopedRemaining.total == 0,
+            retryable = scopedRemaining.total > 0,
+            failureKind = if (scopedRemaining.total == 0) UploadFailureKind.NONE else UploadFailureKind.SERVER,
+            message = if (scopedRemaining.total == 0) {
+                uploadMessage("Upload complete: ${uploadedRecords + uploadedValues + uploadedAggregates} rows", range)
             } else {
-                "Upload paused with ${remaining.total} rows pending"
+                uploadMessage("Upload paused with ${scopedRemaining.total} rows pending", range)
             },
             uploadedRecords = uploadedRecords,
             uploadedValues = uploadedValues,
             uploadedAggregates = uploadedAggregates,
-            errors = if (remaining.total == 0) 0 else 1,
+            errors = if (scopedRemaining.total == 0) 0 else 1,
             lastUploadTime = finishedAt,
             pendingCounts = remaining,
             serverMode = settings.serverMode
         )
     }
 
-    private suspend fun pendingCountsForServer(serverKey: String): UploadPendingCounts =
-        UploadPendingCounts(
-            records = uploadDao.pendingRecordCount(serverKey),
-            values = uploadDao.pendingValueCount(serverKey),
-            aggregates = uploadDao.pendingAggregateCount(serverKey)
+    private suspend fun pendingCountsForServer(
+        serverKey: String,
+        startEpochMillis: Long?
+    ): UploadPendingCounts {
+        return UploadPendingCounts(
+            records = uploadDao.pendingRecordCount(serverKey, startEpochMillis),
+            values = uploadDao.pendingValueCount(serverKey, startEpochMillis),
+            aggregates = uploadDao.pendingAggregateCount(serverKey, startEpochMillis)
         )
+    }
 
-    private suspend fun loadPendingBatch(serverKey: String): PendingUploadRows =
-        PendingUploadRows(
-            records = uploadDao.pendingRecords(serverKey, RECORD_LIMIT),
-            values = uploadDao.pendingValues(serverKey, VALUE_LIMIT),
-            aggregates = uploadDao.pendingAggregates(serverKey, AGGREGATE_LIMIT)
+    private suspend fun loadPendingBatch(
+        serverKey: String,
+        startEpochMillis: Long?
+    ): PendingUploadRows {
+        return PendingUploadRows(
+            records = uploadDao.pendingRecords(serverKey, startEpochMillis, RECORD_LIMIT),
+            values = uploadDao.pendingValues(serverKey, startEpochMillis, VALUE_LIMIT),
+            aggregates = uploadDao.pendingAggregates(serverKey, startEpochMillis, AGGREGATE_LIMIT)
         )
+    }
+
+    private fun uploadMessage(message: String, range: UploadTimeRange): String =
+        if (range == UploadTimeRange.ALL) message else "$message (${range.label})"
 
     private fun postBatch(
         endpoint: UploadEndpoint,
@@ -451,7 +473,7 @@ class HealthUploadService(
         private const val RECORD_LIMIT = 250
         private const val VALUE_LIMIT = 1000
         private const val AGGREGATE_LIMIT = 250
-        private const val MAX_BATCHES_PER_RUN = 50
+        const val BACKGROUND_MAX_BATCHES_PER_RUN = 50
         private const val ITEM_RECORD = "record"
         private const val ITEM_VALUE = "value"
         private const val ITEM_AGGREGATE = "aggregate"

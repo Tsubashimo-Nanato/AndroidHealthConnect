@@ -19,7 +19,9 @@ import androidx.room.PrimaryKey
             unique = true
         ),
         Index(value = ["recordType", "localDate"]),
-        Index(value = ["source", "computedEpochMillis"])
+        Index(value = ["source", "computedEpochMillis"]),
+        Index(value = ["bucketEndEpochMillis"]),
+        Index(value = ["computedEpochMillis", "localId"])
     ]
 )
 data class HealthAggregateEntity(

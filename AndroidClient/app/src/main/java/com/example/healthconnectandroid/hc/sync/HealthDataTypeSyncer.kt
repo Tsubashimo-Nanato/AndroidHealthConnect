@@ -208,50 +208,77 @@ class HealthDataTypeSyncer(
                     message = "Fetching ${descriptor.displayName}"
                 )
             )
-            val records = reader.read(client, start, end)
-            val sourceBytesRead = records.sumOf { it.approxBytes() }
-            onProgress(
-                SyncTypeProgress(
-                    phase = if (records.isEmpty()) {
-                        SyncProgressPhase.NO_SOURCE_DATA
-                    } else {
-                        SyncProgressPhase.STORING
-                    },
-                    recordsRead = records.size,
-                    message = if (records.isEmpty()) {
-                        "No Health Connect records returned"
-                    } else {
-                        "Fetched ${records.size} records"
-                    },
-                    sourceBytesRead = sourceBytesRead
+            var recordsRead = 0
+            var sourceBytesRead = 0L
+            var sourceStart: Instant? = null
+            var sourceEnd: Instant? = null
+            var inserted = 0
+            var updated = 0
+            var skippedDuplicate = 0
+            var valuesStored = 0
+            var localBytesWritten = 0L
+
+            reader.readPages(client, start, end) { page ->
+                val pageSourceBytes = page.sumOf { it.approxBytes() }
+                recordsRead += page.size
+                sourceBytesRead += pageSourceBytes
+                sourceStart = minInstantOrNull(sourceStart, page.minOfOrNull { it.startTime })
+                sourceEnd = maxInstantOrNull(
+                    sourceEnd,
+                    page.mapNotNull { it.endTime ?: it.startTime }.maxOrNull()
                 )
-            )
-            val storeResult = storeNormalizedRecords(
-                typeKey = key,
-                records = records
-            )
-            onProgress(
-                SyncTypeProgress(
-                    phase = SyncProgressPhase.STORING,
-                    recordsRead = records.size,
-                    inserted = storeResult.inserted,
-                    updated = storeResult.updated,
-                    duplicates = storeResult.skippedDuplicate,
-                    sourceBytesRead = sourceBytesRead,
-                    localBytesWritten = storeResult.localBytesWritten,
-                    message = "Stored local rows"
+                onProgress(
+                    SyncTypeProgress(
+                        phase = SyncProgressPhase.STORING,
+                        recordsRead = recordsRead,
+                        inserted = inserted,
+                        updated = updated,
+                        duplicates = skippedDuplicate,
+                        sourceBytesRead = sourceBytesRead,
+                        localBytesWritten = localBytesWritten,
+                        message = "Fetched $recordsRead records"
+                    )
                 )
-            )
+                val pageStoreResult = storeNormalizedRecords(
+                    typeKey = key,
+                    records = page
+                )
+                inserted += pageStoreResult.inserted
+                updated += pageStoreResult.updated
+                skippedDuplicate += pageStoreResult.skippedDuplicate
+                valuesStored += pageStoreResult.valuesStored
+                localBytesWritten += pageStoreResult.localBytesWritten
+                onProgress(
+                    SyncTypeProgress(
+                        phase = SyncProgressPhase.STORING,
+                        recordsRead = recordsRead,
+                        inserted = inserted,
+                        updated = updated,
+                        duplicates = skippedDuplicate,
+                        sourceBytesRead = sourceBytesRead,
+                        localBytesWritten = localBytesWritten,
+                        message = "Stored $recordsRead records"
+                    )
+                )
+            }
+            if (recordsRead == 0) {
+                onProgress(
+                    SyncTypeProgress(
+                        phase = SyncProgressPhase.NO_SOURCE_DATA,
+                        message = "No Health Connect records returned"
+                    )
+                )
+            }
             if (descriptor.aggregateReader != null) {
                 onProgress(
                     SyncTypeProgress(
                         phase = SyncProgressPhase.AGGREGATING,
-                        recordsRead = records.size,
-                        inserted = storeResult.inserted,
-                        updated = storeResult.updated,
-                        duplicates = storeResult.skippedDuplicate,
+                        recordsRead = recordsRead,
+                        inserted = inserted,
+                        updated = updated,
+                        duplicates = skippedDuplicate,
                         sourceBytesRead = sourceBytesRead,
-                        localBytesWritten = storeResult.localBytesWritten,
+                        localBytesWritten = localBytesWritten,
                         message = "Updating summaries"
                     )
                 )
@@ -265,17 +292,17 @@ class HealthDataTypeSyncer(
                 key = key,
                 requestedStart = start,
                 requestedEnd = end,
-                recordsRead = records.size,
-                recordsInserted = storeResult.inserted,
-                recordsUpdated = storeResult.updated,
-                recordsSkippedDuplicate = storeResult.skippedDuplicate,
-                valuesStored = storeResult.valuesStored,
+                recordsRead = recordsRead,
+                recordsInserted = inserted,
+                recordsUpdated = updated,
+                recordsSkippedDuplicate = skippedDuplicate,
+                valuesStored = valuesStored,
                 aggregateRowsRead = aggregateResult.rowsRead,
                 aggregateRowsStored = aggregateResult.rowsStored,
                 sourceBytesRead = sourceBytesRead,
-                localBytesWritten = storeResult.localBytesWritten + aggregateResult.localBytesWritten,
-                sourceStart = records.minOfOrNull { it.startTime },
-                sourceEnd = records.mapNotNull { it.endTime ?: it.startTime }.maxOrNull(),
+                localBytesWritten = localBytesWritten + aggregateResult.localBytesWritten,
+                sourceStart = sourceStart,
+                sourceEnd = sourceEnd,
                 aggregateErrorMessage = aggregateResult.errorMessage
             )
         } catch (t: CancellationException) {
@@ -527,6 +554,22 @@ class HealthDataTypeSyncer(
 
     private fun String?.utf8ByteCount(): Long =
         this?.toByteArray(Charsets.UTF_8)?.size?.toLong() ?: 0L
+
+    private fun minInstantOrNull(current: Instant?, candidate: Instant?): Instant? =
+        when {
+            current == null -> candidate
+            candidate == null -> current
+            candidate.isBefore(current) -> candidate
+            else -> current
+        }
+
+    private fun maxInstantOrNull(current: Instant?, candidate: Instant?): Instant? =
+        when {
+            current == null -> candidate
+            candidate == null -> current
+            candidate.isAfter(current) -> candidate
+            else -> current
+        }
 
     private suspend fun syncResultAndLog(
         result: HealthDataTypeSyncResult,

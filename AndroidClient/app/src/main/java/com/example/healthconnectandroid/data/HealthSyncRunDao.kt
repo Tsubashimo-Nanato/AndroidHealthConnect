@@ -30,6 +30,37 @@ interface HealthSyncRunDao {
 
     @Query(
         """
+        SELECT
+            recordType AS recordType,
+            finishedEpochMillis AS lastFinishedEpochMillis,
+            status AS lastStatus,
+            errorMessage AS lastErrorMessage
+        FROM health_sync_runs
+        WHERE finishedEpochMillis IS NOT NULL
+        ORDER BY finishedEpochMillis DESC
+        LIMIT 1
+        """
+    )
+    suspend fun latestOverallSummary(): HealthSyncSummaryRow?
+
+    @Query(
+        """
+        SELECT
+            recordType AS recordType,
+            finishedEpochMillis AS lastFinishedEpochMillis,
+            status AS lastStatus,
+            errorMessage AS lastErrorMessage
+        FROM health_sync_runs
+        WHERE recordType = :recordType
+          AND finishedEpochMillis IS NOT NULL
+        ORDER BY finishedEpochMillis DESC
+        LIMIT 1
+        """
+    )
+    suspend fun latestSummaryForType(recordType: String): HealthSyncSummaryRow?
+
+    @Query(
+        """
         SELECT * FROM health_sync_runs
         WHERE recordType = :recordType
         ORDER BY startedEpochMillis DESC

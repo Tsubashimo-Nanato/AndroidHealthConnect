@@ -4,6 +4,7 @@ import com.example.healthconnectandroid.UnitSystemPreference
 import com.example.healthconnectandroid.data.AppDb
 import com.example.healthconnectandroid.data.HealthCsvRow
 import com.example.healthconnectandroid.data.HealthDailyAggregateRow
+import com.example.healthconnectandroid.data.HealthDailyNumericSummaryRow
 import com.example.healthconnectandroid.hc.HealthDataTypeDescriptor
 import com.example.healthconnectandroid.hc.HealthDataTypeKeys
 import com.example.healthconnectandroid.hc.HealthDataTypeRegistry
@@ -20,11 +21,16 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.temporal.TemporalAdjusters
+import kotlin.math.ceil
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 private const val INSPECTOR_TABLE_ROW_LIMIT = 200
 private const val INSPECTOR_SLEEP_ROW_LIMIT = 12000
 private const val INSPECTOR_CHART_ROW_LIMIT = 1200
-private const val INSPECTOR_HEART_RATE_CHART_ROW_LIMIT = 150000
+private const val INSPECTOR_HEART_RATE_CHART_ROW_LIMIT = 3600
+private const val INSPECTOR_HEART_RATE_CHART_PAGE_SIZE = 5000
+private const val HEART_RATE_METRIC = "heart_rate"
 
 class HealthDetailQueryService(
     private val db: AppDb
@@ -39,7 +45,9 @@ class HealthDetailQueryService(
         end: Instant = Instant.now(),
         zoneId: ZoneId = ZoneId.systemDefault(),
         unitSystem: UnitSystemPreference = UnitSystemPreference.METRIC,
-        weekStart: DayOfWeek = DayOfWeek.MONDAY
+        weekStart: DayOfWeek = DayOfWeek.MONDAY,
+        chartStart: Instant? = null,
+        chartEnd: Instant? = null
     ): InspectorDetailData {
         return inspectorDetailForWindow(
             key = key,
@@ -48,7 +56,9 @@ class HealthDetailQueryService(
             end = end,
             zoneId = zoneId,
             unitSystem = unitSystem,
-            weekStart = weekStart
+            weekStart = weekStart,
+            chartStart = chartStart,
+            chartEnd = chartEnd
         )
     }
 
@@ -59,16 +69,33 @@ class HealthDetailQueryService(
         end: Instant,
         zoneId: ZoneId = ZoneId.systemDefault(),
         unitSystem: UnitSystemPreference = UnitSystemPreference.METRIC,
-        weekStart: DayOfWeek = DayOfWeek.MONDAY
-    ): InspectorDetailData {
+        weekStart: DayOfWeek = DayOfWeek.MONDAY,
+        chartStart: Instant? = null,
+        chartEnd: Instant? = null
+    ): InspectorDetailData = withContext(Dispatchers.Default) {
         val descriptor = HealthDataTypeRegistry.require(key)
-        val syncSummary = syncDao.latestSummaries().firstOrNull { it.recordType == key }
+        val syncSummary = syncDao.latestSummaryForType(key)
         val totalLocalRecordsForType = healthDao.countRecordsForType(key)
-        val recordListTotalCount = healthDao.countInspectorRowsForTypeRange(
-            recordType = key,
-            startEpochMillis = start.toEpochMilli(),
-            endEpochMillis = end.toEpochMilli()
-        )
+        val dailyNumericSummaries = if (key == HealthDataTypeKeys.HEART_RATE) {
+            val startDate = start.atZone(zoneId).toLocalDate()
+            val endDate = end.minusMillis(1).atZone(zoneId).toLocalDate()
+            healthDao.dailyNumericSummariesForMetricLocalDateRange(
+                metric = HEART_RATE_METRIC,
+                startDate = startDate.toString(),
+                endDate = endDate.toString()
+            )
+        } else {
+            emptyList()
+        }
+        val recordListTotalCount = if (key == HealthDataTypeKeys.HEART_RATE) {
+            dailyNumericSummaries.sumOf { it.sampleCount }
+        } else {
+            healthDao.countInspectorRowsForTypeRange(
+                recordType = key,
+                startEpochMillis = start.toEpochMilli(),
+                endEpochMillis = end.toEpochMilli()
+            )
+        }
         val displayRowLimit = inspectorDisplayRowLimit(key)
         val displayRows = if (key == HealthDataTypeKeys.SLEEP_SESSION) {
             healthDao.inspectorDisplayRowsForTypeRange(
@@ -86,16 +113,22 @@ class HealthDetailQueryService(
                 VisualizationType.TREND,
                 VisualizationType.MEASUREMENT_LIST
             )
-        val numericRows = if (needsNumericRows) {
-            val chartRowLimit = inspectorChartRowLimit(key)
-            healthDao.inspectorNumericRowsForTypeRange(
-                recordType = key,
-                startEpochMillis = start.toEpochMilli(),
-                endEpochMillis = end.toEpochMilli(),
-                limit = chartRowLimit + 1
-            ).distinctBy { "${it.localRecordId}:${it.valueKey}" }
+        val chartWindow = heartRateChartWindow(
+            requestedStart = start,
+            requestedEnd = end,
+            selectedStart = chartStart,
+            selectedEnd = chartEnd,
+            dailySummaries = dailyNumericSummaries,
+            zoneId = zoneId
+        )
+        val numericStart = chartWindow?.first ?: start
+        val numericEnd = chartWindow?.second ?: end
+        val numericRows = if (needsNumericRows && key == HealthDataTypeKeys.HEART_RATE) {
+            loadHeartRateNumericRowsForChart(numericStart, numericEnd, zoneId)
+        } else if (needsNumericRows) {
+            loadGenericNumericRowsForChart(key, numericStart, numericEnd)
         } else {
-            emptyList()
+            NumericChartRows.Empty
         }
         val dailyTotalsWithSource = if (descriptor.aggregationPreferred) {
             val startDate = start.atZone(zoneId).toLocalDate()
@@ -113,21 +146,19 @@ class HealthDetailQueryService(
         val chartPoints = if (descriptor.aggregationPreferred) {
             emptyList()
         } else {
-            val chartRowLimit = inspectorChartRowLimit(key)
-            numericRows
-                .take(chartRowLimit)
+            numericRows.chartRows
                 .asChartPoints(descriptor)
         }
         val restingHeartRateEstimate = if (key == HealthDataTypeKeys.HEART_RATE) {
             HeartRateAnalysis.estimateRestingHeartRate(
-                bpmSamples = numericRows.mapNotNull { it.numericValue },
+                bpmSamples = numericRows.estimateBpmSamples,
                 rangeLabel = range.label,
                 recordedBpm = recordedRestingHeartRate(start, end)
             )
         } else {
             null
         }
-        return InspectorDetailData(
+        InspectorDetailData(
             descriptor = descriptor,
             range = range,
             start = start,
@@ -139,6 +170,7 @@ class HealthDetailQueryService(
             rows = emptyList(),
             chartPoints = chartPoints,
             dailyTotals = dailyTotals,
+            dailyNumericSummaries = dailyNumericSummaries,
             dailyTotalsSource = dailyTotalsSource,
             weeklyTotals = weeklyTotalsFromDaily(dailyTotals, weekStart),
             readableRows = displayRows
@@ -154,13 +186,35 @@ class HealthDetailQueryService(
             recordListTotalCount = recordListTotalCount,
             tableRows = emptyList(),
             tableRowsLimited = recordListTotalCount > displayRowLimit,
-            chartPointsLimited = numericRows.size > inspectorChartRowLimit(key),
+            chartPointsLimited = numericRows.limited,
             restingHeartRateEstimate = restingHeartRateEstimate
         )
     }
 
     private fun inspectorDisplayRowLimit(key: String): Int =
         if (key == HealthDataTypeKeys.SLEEP_SESSION) INSPECTOR_SLEEP_ROW_LIMIT else INSPECTOR_TABLE_ROW_LIMIT
+
+    private fun heartRateChartWindow(
+        requestedStart: Instant,
+        requestedEnd: Instant,
+        selectedStart: Instant?,
+        selectedEnd: Instant?,
+        dailySummaries: List<HealthDailyNumericSummaryRow>,
+        zoneId: ZoneId
+    ): Pair<Instant, Instant>? {
+        if (selectedStart != null && selectedEnd != null && selectedStart.isBefore(selectedEnd)) {
+            val start = maxInstant(requestedStart, selectedStart)
+            val end = minInstant(requestedEnd, selectedEnd)
+            return if (start.isBefore(end)) start to end else null
+        }
+        val latestDate = dailySummaries
+            .mapNotNull { row -> runCatching { LocalDate.parse(row.localDate) }.getOrNull() }
+            .maxOrNull()
+            ?: return null
+        val start = maxInstant(requestedStart, latestDate.atStartOfDay(zoneId).toInstant())
+        val end = minInstant(requestedEnd, latestDate.plusDays(1).atStartOfDay(zoneId).toInstant())
+        return if (start.isBefore(end)) start to end else null
+    }
 
     private suspend fun recordedRestingHeartRate(start: Instant, end: Instant): Double? =
         healthDao.inspectorNumericRowsForTypeRange(
@@ -169,6 +223,102 @@ class HealthDetailQueryService(
             endEpochMillis = end.toEpochMilli(),
             limit = 1
         ).firstOrNull()?.numericValue
+
+    private suspend fun loadGenericNumericRowsForChart(
+        key: String,
+        start: Instant,
+        end: Instant
+    ): NumericChartRows {
+        val limit = inspectorChartRowLimit(key)
+        val rows = healthDao.inspectorNumericRowsForTypeRange(
+            recordType = key,
+            startEpochMillis = start.toEpochMilli(),
+            endEpochMillis = end.toEpochMilli(),
+            limit = limit + 1
+        ).distinctBy { "${it.localRecordId}:${it.valueKey}" }
+        val chartRows = rows.take(limit)
+        return NumericChartRows(
+            chartRows = chartRows,
+            estimateBpmSamples = chartRows.mapNotNull { it.numericValue },
+            limited = rows.size > limit
+        )
+    }
+
+    private suspend fun loadHeartRateNumericRowsForChart(
+        start: Instant,
+        end: Instant,
+        zoneId: ZoneId
+    ): NumericChartRows {
+        val startEpochMillis = start.toEpochMilli()
+        val endEpochMillis = end.toEpochMilli()
+        val startDate = start.atZone(zoneId).toLocalDate().toString()
+        val endDate = end.minusMillis(1).atZone(zoneId).toLocalDate().toString()
+        val seen = HashSet<String>(INSPECTOR_HEART_RATE_CHART_ROW_LIMIT)
+        val exactRows = ArrayList<HealthCsvRow>(INSPECTOR_HEART_RATE_CHART_ROW_LIMIT + 1)
+        val estimateSamples = ArrayList<Double>(INSPECTOR_HEART_RATE_CHART_ROW_LIMIT + 1)
+        val downsampler = HealthCsvRowMinMaxDownsampler(
+            startEpochMillis = startEpochMillis,
+            endEpochMillis = endEpochMillis,
+            targetCount = INSPECTOR_HEART_RATE_CHART_ROW_LIMIT
+        )
+        var limited = false
+        loadHeartRateNumericRowsAsc(
+            startDate = startDate,
+            endDate = endDate,
+            startEpochMillis = startEpochMillis,
+            endEpochMillis = endEpochMillis,
+            seen = seen,
+            onRow = { row ->
+                row.numericValue
+                    ?.takeIf { it in 25.0..240.0 }
+                    ?.let(estimateSamples::add)
+                if (!limited) {
+                    exactRows.add(row)
+                    if (exactRows.size > INSPECTOR_HEART_RATE_CHART_ROW_LIMIT) {
+                        limited = true
+                    }
+                }
+                downsampler.offer(row)
+            }
+        )
+        if (exactRows.isEmpty()) return NumericChartRows.Empty
+        return NumericChartRows(
+            chartRows = if (limited) downsampler.rows() else exactRows,
+            estimateBpmSamples = estimateSamples,
+            limited = limited
+        )
+    }
+
+    private suspend fun loadHeartRateNumericRowsAsc(
+        startDate: String,
+        endDate: String,
+        startEpochMillis: Long,
+        endEpochMillis: Long,
+        seen: MutableSet<String>,
+        onRow: (HealthCsvRow) -> Unit
+    ) {
+        var offset = 0
+        while (true) {
+            val page = healthDao.inspectorNumericRowsForMetricLocalDateRangeAscPaged(
+                recordType = HealthDataTypeKeys.HEART_RATE,
+                metric = HEART_RATE_METRIC,
+                startDate = startDate,
+                endDate = endDate,
+                startEpochMillis = startEpochMillis,
+                endEpochMillis = endEpochMillis,
+                limit = INSPECTOR_HEART_RATE_CHART_PAGE_SIZE,
+                offset = offset
+            )
+            if (page.isEmpty()) break
+            page.forEach { row ->
+                if (seen.add("${row.localRecordId}:${row.valueKey}")) {
+                    onRow(row)
+                }
+            }
+            if (page.size < INSPECTOR_HEART_RATE_CHART_PAGE_SIZE) break
+            offset += page.size
+        }
+    }
 
     private suspend fun dailyTotalsForInspector(
         descriptor: HealthDataTypeDescriptor,
@@ -216,6 +366,71 @@ class HealthDetailQueryService(
                 )
             }
 
+    private data class NumericChartRows(
+        val chartRows: List<HealthCsvRow>,
+        val estimateBpmSamples: List<Double>,
+        val limited: Boolean
+    ) {
+        companion object {
+            val Empty = NumericChartRows(emptyList(), emptyList(), limited = false)
+        }
+    }
+
+    private class HealthCsvRowMinMaxDownsampler(
+        private val startEpochMillis: Long,
+        endEpochMillis: Long,
+        targetCount: Int
+    ) {
+        private val bucketCount = ((targetCount.coerceAtLeast(3) - 2) / 2).coerceAtLeast(1)
+        private val bucketMillis = ceil(
+            (endEpochMillis - startEpochMillis).coerceAtLeast(1).toDouble() / bucketCount.toDouble()
+        ).toLong().coerceAtLeast(1L)
+        private val buckets = Array<Bucket?>(bucketCount) { null }
+        private var first: HealthCsvRow? = null
+        private var last: HealthCsvRow? = null
+
+        fun offer(row: HealthCsvRow) {
+            val epoch = row.effectiveEpochMillis()
+            if (first == null) first = row
+            last = row
+            val bucketIndex = ((epoch - startEpochMillis) / bucketMillis)
+                .toInt()
+                .coerceIn(0, bucketCount - 1)
+            val bucket = buckets[bucketIndex] ?: Bucket().also { buckets[bucketIndex] = it }
+            bucket.offer(row)
+        }
+
+        fun rows(): List<HealthCsvRow> {
+            val result = ArrayList<HealthCsvRow>(bucketCount * 2 + 2)
+            first?.let(result::addIfNew)
+            buckets.forEach { bucket ->
+                bucket?.rows()?.forEach(result::addIfNew)
+            }
+            last?.let(result::addIfNew)
+            return result.sortedBy { it.effectiveEpochMillis() }
+        }
+
+        private class Bucket {
+            private var low: HealthCsvRow? = null
+            private var high: HealthCsvRow? = null
+
+            fun offer(row: HealthCsvRow) {
+                val value = row.numericValue ?: return
+                if ((low?.numericValue ?: Double.POSITIVE_INFINITY) > value) {
+                    low = row
+                }
+                if ((high?.numericValue ?: Double.NEGATIVE_INFINITY) < value) {
+                    high = row
+                }
+            }
+
+            fun rows(): List<HealthCsvRow> =
+                listOfNotNull(low, high)
+                    .distinctBy { "${it.localRecordId}:${it.valueKey}:${it.numericValue}" }
+                    .sortedBy { it.effectiveEpochMillis() }
+        }
+    }
+
     private fun List<HealthCsvRow>.asChartPoints(
         descriptor: HealthDataTypeDescriptor
     ): List<InspectorChartPoint> {
@@ -253,3 +468,21 @@ internal fun inspectorChartRowLimit(key: String): Int =
     } else {
         INSPECTOR_CHART_ROW_LIMIT
     }
+
+private fun maxInstant(a: Instant, b: Instant): Instant = if (a.isAfter(b)) a else b
+
+private fun minInstant(a: Instant, b: Instant): Instant = if (a.isBefore(b)) a else b
+
+private fun MutableList<HealthCsvRow>.addIfNew(row: HealthCsvRow) {
+    val last = lastOrNull()
+    if (last == null ||
+        last.localRecordId != row.localRecordId ||
+        last.valueKey != row.valueKey ||
+        last.numericValue != row.numericValue
+    ) {
+        add(row)
+    }
+}
+
+private fun HealthCsvRow.effectiveEpochMillis(): Long =
+    valueStartEpochMillis ?: recordStartEpochMillis

@@ -9,6 +9,7 @@ import androidx.room.PrimaryKey
     indices = [
         Index(value = ["recordType", "startedEpochMillis"]),
         Index(value = ["recordType", "finishedEpochMillis"]),
+        Index(value = ["finishedEpochMillis"]),
         Index(value = ["status"])
     ]
 )

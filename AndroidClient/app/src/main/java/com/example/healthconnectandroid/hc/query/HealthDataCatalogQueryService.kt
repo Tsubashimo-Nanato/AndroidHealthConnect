@@ -12,6 +12,8 @@ import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 class HealthDataCatalogQueryService(
     private val db: AppDb
@@ -23,7 +25,7 @@ class HealthDataCatalogQueryService(
     suspend fun inspectorCategories(
         grantedPermissions: Set<String>,
         zoneId: ZoneId = ZoneId.systemDefault()
-    ): List<InspectorCategorySummary> {
+    ): List<InspectorCategorySummary> = withContext(Dispatchers.Default) {
         val overviewEnd = Instant.now()
         val overviewStart = overviewEnd.minus(RECENT_OVERVIEW_WINDOW)
         val allSummariesByType = healthDao
@@ -47,7 +49,7 @@ class HealthDataCatalogQueryService(
         val localTotalsByType = healthDao
             .numericTotalsForTypesOnDate(today)
             .associateBy { it.recordType }
-        return HealthDataTypeRegistry.descriptors.map { descriptor ->
+        HealthDataTypeRegistry.descriptors.map { descriptor ->
             val summary = allSummariesByType[descriptor.key]
             val recentSummary = recentSummariesByType[descriptor.key]
             val syncSummary = syncSummariesByType[descriptor.key]

@@ -22,7 +22,10 @@ class HealthUploadWorker(
     override suspend fun doWork(): Result {
         val settings = AppPreferences.uploadSettings(applicationContext)
         val service = HealthUploadService(AppDb.get(applicationContext))
-        val result = service.uploadPending(settings) { progress ->
+        val result = service.uploadPending(
+            settings = settings,
+            maxBatches = HealthUploadService.BACKGROUND_MAX_BATCHES_PER_RUN
+        ) { progress ->
             setProgress(
                 workDataOf(
                     KEY_PHASE to progress.phase,

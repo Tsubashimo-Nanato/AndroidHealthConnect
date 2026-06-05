@@ -99,6 +99,17 @@ interface HealthRecordDao {
 
     @Query(
         """
+        SELECT
+            COUNT(*) AS localRecordCount,
+            COUNT(DISTINCT recordType) AS localDataTypeCount,
+            MAX(lastReadEpochMillis) AS latestLocalReadEpochMillis
+        FROM health_records
+        """
+    )
+    suspend fun dashboardSummary(): HealthDashboardSummaryRow
+
+    @Query(
+        """
         SELECT DISTINCT COALESCE(v.localDate, r.localDate)
         FROM health_records r
         LEFT JOIN health_values v ON v.recordLocalId = r.localId
@@ -754,6 +765,107 @@ interface HealthRecordDao {
         FROM health_records r
         INNER JOIN health_values v ON v.recordLocalId = r.localId
         WHERE r.recordType = :recordType
+          AND COALESCE(v.startEpochMillis, v.sampleEpochMillis, r.startEpochMillis) < :endEpochMillis
+          AND COALESCE(v.endEpochMillis, v.startEpochMillis, v.sampleEpochMillis, r.endEpochMillis, r.startEpochMillis) >= :startEpochMillis
+          AND v.numericValue IS NOT NULL
+        ORDER BY COALESCE(v.startEpochMillis, v.sampleEpochMillis, r.startEpochMillis) ASC,
+            COALESCE(v.sequence, 2147483647) ASC,
+            v.metric ASC
+        LIMIT :limit OFFSET :offset
+        """
+    )
+    suspend fun inspectorNumericRowsForTypeRangeAscPaged(
+        recordType: String,
+        startEpochMillis: Long,
+        endEpochMillis: Long,
+        limit: Int,
+        offset: Int
+    ): List<HealthCsvRow>
+
+    @Query(
+        """
+        SELECT
+            r.localId AS localRecordId,
+            v.localId AS localValueId,
+            v.valueKey AS valueKey,
+            r.recordType AS recordType,
+            r.recordKind AS recordKind,
+            r.recordUid AS healthConnectUid,
+            r.dedupeKey AS dedupeKey,
+            r.sourcePackage AS sourcePackage,
+            r.startEpochMillis AS recordStartEpochMillis,
+            r.endEpochMillis AS recordEndEpochMillis,
+            COALESCE(v.startEpochMillis, v.sampleEpochMillis) AS valueStartEpochMillis,
+            COALESCE(v.endEpochMillis, v.startEpochMillis, v.sampleEpochMillis) AS valueEndEpochMillis,
+            COALESCE(v.localDate, r.localDate) AS localDate,
+            r.startZoneOffsetSeconds AS zoneOffsetSeconds,
+            v.metric AS metric,
+            v.numericValue AS numericValue,
+            v.secondaryNumericValue AS secondaryNumericValue,
+            v.unit AS unit,
+            COALESCE(v.label, v.category) AS categoryOrStage,
+            v.label AS label,
+            v.valueText AS textValue,
+            v.valueJson AS jsonValue,
+            NULL AS metadataJson,
+            NULL AS rawJson
+        FROM health_values v
+        INNER JOIN health_records r ON r.localId = v.recordLocalId
+        WHERE r.recordType = :recordType
+          AND v.metric = :metric
+          AND v.numericValue IS NOT NULL
+          AND v.localDate IS NOT NULL
+          AND v.localDate >= :startDate
+          AND v.localDate <= :endDate
+          AND COALESCE(v.startEpochMillis, v.sampleEpochMillis, r.startEpochMillis) < :endEpochMillis
+          AND COALESCE(v.endEpochMillis, v.startEpochMillis, v.sampleEpochMillis, r.endEpochMillis, r.startEpochMillis) >= :startEpochMillis
+        ORDER BY COALESCE(v.startEpochMillis, v.sampleEpochMillis, r.startEpochMillis) ASC,
+            COALESCE(v.sequence, 2147483647) ASC,
+            v.localId ASC
+        LIMIT :limit OFFSET :offset
+        """
+    )
+    suspend fun inspectorNumericRowsForMetricLocalDateRangeAscPaged(
+        recordType: String,
+        metric: String,
+        startDate: String,
+        endDate: String,
+        startEpochMillis: Long,
+        endEpochMillis: Long,
+        limit: Int,
+        offset: Int
+    ): List<HealthCsvRow>
+
+    @Query(
+        """
+        SELECT
+            r.localId AS localRecordId,
+            v.localId AS localValueId,
+            v.valueKey AS valueKey,
+            r.recordType AS recordType,
+            r.recordKind AS recordKind,
+            r.recordUid AS healthConnectUid,
+            r.dedupeKey AS dedupeKey,
+            r.sourcePackage AS sourcePackage,
+            r.startEpochMillis AS recordStartEpochMillis,
+            r.endEpochMillis AS recordEndEpochMillis,
+            COALESCE(v.startEpochMillis, v.sampleEpochMillis) AS valueStartEpochMillis,
+            COALESCE(v.endEpochMillis, v.startEpochMillis, v.sampleEpochMillis) AS valueEndEpochMillis,
+            COALESCE(v.localDate, r.localDate) AS localDate,
+            r.startZoneOffsetSeconds AS zoneOffsetSeconds,
+            v.metric AS metric,
+            v.numericValue AS numericValue,
+            v.secondaryNumericValue AS secondaryNumericValue,
+            v.unit AS unit,
+            COALESCE(v.label, v.category) AS categoryOrStage,
+            v.label AS label,
+            v.valueText AS textValue,
+            v.valueJson AS jsonValue,
+            NULL AS metadataJson,
+            NULL AS rawJson
+        FROM health_records r
+        INNER JOIN health_values v ON v.recordLocalId = r.localId
+        WHERE r.recordType = :recordType
           AND v.numericValue IS NOT NULL
         ORDER BY COALESCE(v.startEpochMillis, v.sampleEpochMillis, r.startEpochMillis) DESC,
             COALESCE(v.sequence, 2147483647) ASC
@@ -861,14 +973,12 @@ interface HealthRecordDao {
 
     @Query(
         """
-        WITH latest AS (
+        WITH latest_records AS (
             SELECT
-                r.recordType AS recordType,
-                MAX(COALESCE(v.startEpochMillis, v.sampleEpochMillis, r.startEpochMillis)) AS latestEpochMillis
-            FROM health_records r
-            INNER JOIN health_values v ON v.recordLocalId = r.localId
-            WHERE v.numericValue IS NOT NULL
-            GROUP BY r.recordType
+                recordType AS recordType,
+                MAX(startEpochMillis) AS latestRecordEpochMillis
+            FROM health_records
+            GROUP BY recordType
         )
         SELECT
             r.localId AS localRecordId,
@@ -896,11 +1006,13 @@ interface HealthRecordDao {
             NULL AS metadataJson,
             NULL AS rawJson
         FROM health_records r
+        INNER JOIN latest_records l ON l.recordType = r.recordType
+            AND l.latestRecordEpochMillis = r.startEpochMillis
         INNER JOIN health_values v ON v.recordLocalId = r.localId
-        INNER JOIN latest l ON l.recordType = r.recordType
-            AND l.latestEpochMillis = COALESCE(v.startEpochMillis, v.sampleEpochMillis, r.startEpochMillis)
         WHERE v.numericValue IS NOT NULL
-        ORDER BY r.recordType ASC, COALESCE(v.sequence, 2147483647) ASC
+        ORDER BY r.recordType ASC,
+            COALESCE(v.startEpochMillis, v.sampleEpochMillis, r.startEpochMillis) DESC,
+            COALESCE(v.sequence, 2147483647) ASC
         """
     )
     suspend fun latestNumericRows(): List<HealthCsvRow>
@@ -961,6 +1073,57 @@ interface HealthRecordDao {
         startDate: String,
         endDate: String
     ): List<HealthDailyAggregateRow>
+
+    @Query(
+        """
+        SELECT
+            COALESCE(v.localDate, r.localDate) AS localDate,
+            COUNT(*) AS sampleCount,
+            AVG(v.numericValue) AS averageValue,
+            MIN(v.numericValue) AS minValue,
+            MAX(v.numericValue) AS maxValue,
+            MAX(v.unit) AS unit
+        FROM health_records r
+        INNER JOIN health_values v ON v.recordLocalId = r.localId
+        WHERE r.recordType = :recordType
+          AND v.numericValue IS NOT NULL
+          AND COALESCE(v.startEpochMillis, v.sampleEpochMillis, r.startEpochMillis) < :endEpochMillis
+          AND COALESCE(v.endEpochMillis, v.startEpochMillis, v.sampleEpochMillis, r.endEpochMillis, r.startEpochMillis) >= :startEpochMillis
+          AND COALESCE(v.localDate, r.localDate) IS NOT NULL
+        GROUP BY COALESCE(v.localDate, r.localDate)
+        ORDER BY COALESCE(v.localDate, r.localDate) ASC
+        """
+    )
+    suspend fun dailyNumericSummariesForTypeRange(
+        recordType: String,
+        startEpochMillis: Long,
+        endEpochMillis: Long
+    ): List<HealthDailyNumericSummaryRow>
+
+    @Query(
+        """
+        SELECT
+            localDate AS localDate,
+            COUNT(*) AS sampleCount,
+            AVG(numericValue) AS averageValue,
+            MIN(numericValue) AS minValue,
+            MAX(numericValue) AS maxValue,
+            MAX(unit) AS unit
+        FROM health_values
+        WHERE metric = :metric
+          AND numericValue IS NOT NULL
+          AND localDate IS NOT NULL
+          AND localDate >= :startDate
+          AND localDate <= :endDate
+        GROUP BY localDate
+        ORDER BY localDate ASC
+        """
+    )
+    suspend fun dailyNumericSummariesForMetricLocalDateRange(
+        metric: String,
+        startDate: String,
+        endDate: String
+    ): List<HealthDailyNumericSummaryRow>
 
     @Query(
         """

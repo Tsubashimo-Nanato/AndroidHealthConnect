@@ -149,4 +149,44 @@ class HeartRateDateAnalysisTest {
             HeartRateDateAnalysis.qualityFor(listOf(90.0, 150.0, 158.0, 164.0), zones).quality
         )
     }
+
+    @Test
+    fun dateQualitySummaryClassifiesWithoutAllSamples() {
+        val zones = HeartRateAnalysis.referenceZones(age = 40)
+
+        assertEquals(
+            HrDateQuality.NO_DATA,
+            HeartRateDateAnalysis.qualityForSummary(0, null, null, zones).quality
+        )
+        assertEquals(
+            HrDateQuality.NORMAL,
+            HeartRateDateAnalysis.qualityForSummary(240, 72.0, 88.0, zones).quality
+        )
+        assertEquals(
+            HrDateQuality.ELEVATED,
+            HeartRateDateAnalysis.qualityForSummary(240, 112.0, 128.0, zones).quality
+        )
+        assertEquals(
+            HrDateQuality.NORMAL,
+            HeartRateDateAnalysis.qualityForSummary(240, 72.0, 152.0, zones).quality
+        )
+        assertEquals(
+            HrDateQuality.HIGH,
+            HeartRateDateAnalysis.qualityForSummary(240, 145.0, 168.0, zones).quality
+        )
+    }
+
+    @Test
+    fun dateQualitySummaryUsesContinuousZoneScore() {
+        val zones = HeartRateAnalysis.referenceZones(age = 40)
+
+        val reference = HeartRateDateAnalysis.qualityForSummary(240, 72.0, 88.0, zones)
+        val elevated = HeartRateDateAnalysis.qualityForSummary(240, 112.0, 128.0, zones)
+        val high = HeartRateDateAnalysis.qualityForSummary(240, 145.0, 168.0, zones)
+
+        assertTrue(reference.zoneScore < elevated.zoneScore)
+        assertTrue(elevated.zoneScore < high.zoneScore)
+        assertTrue(reference.zoneScore < 0.28f)
+        assertTrue(elevated.zoneScore in 0.28f..0.68f)
+    }
 }

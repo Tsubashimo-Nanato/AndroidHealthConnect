@@ -2,6 +2,7 @@ package com.example.healthconnectandroid.hc
 
 import com.example.healthconnectandroid.data.HealthCsvRow
 import com.example.healthconnectandroid.data.HealthDailyAggregateRow
+import com.example.healthconnectandroid.data.HealthDailyNumericSummaryRow
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
@@ -74,6 +75,7 @@ data class InspectorDetailData(
     val rows: List<HealthCsvRow>,
     val chartPoints: List<InspectorChartPoint>,
     val dailyTotals: List<HealthDailyAggregateRow>,
+    val dailyNumericSummaries: List<HealthDailyNumericSummaryRow> = emptyList(),
     val dailyTotalsSource: String?,
     val weeklyTotals: List<InspectorPeriodTotal>,
     val readableRows: List<ReadableHealthRecord>,

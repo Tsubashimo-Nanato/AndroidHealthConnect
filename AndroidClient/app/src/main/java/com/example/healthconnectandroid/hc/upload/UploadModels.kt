@@ -1,10 +1,24 @@
 package com.example.healthconnectandroid.hc.upload
 
 import java.time.Instant
+import java.time.temporal.ChronoUnit
 
 enum class UploadServerMode(val label: String) {
     PRODUCTION("Production"),
     LOCAL_DEBUG("Local debug")
+}
+
+enum class UploadTimeRange(val label: String) {
+    ALL("All"),
+    PAST_MONTH("Past month"),
+    PAST_WEEK("Past week");
+
+    fun startEpochMillis(now: Instant = Instant.now()): Long? =
+        when (this) {
+            ALL -> null
+            PAST_MONTH -> now.minus(30, ChronoUnit.DAYS).toEpochMilli()
+            PAST_WEEK -> now.minus(7, ChronoUnit.DAYS).toEpochMilli()
+        }
 }
 
 data class UploadSettings(
@@ -20,6 +34,17 @@ data class UploadPendingCounts(
     val aggregates: Int = 0
 ) {
     val total: Int get() = records + values + aggregates
+
+    fun minusUploaded(
+        recordsUploaded: Int,
+        valuesUploaded: Int,
+        aggregatesUploaded: Int
+    ): UploadPendingCounts =
+        UploadPendingCounts(
+            records = (records - recordsUploaded).coerceAtLeast(0),
+            values = (values - valuesUploaded).coerceAtLeast(0),
+            aggregates = (aggregates - aggregatesUploaded).coerceAtLeast(0)
+        )
 
     companion object {
         val Empty = UploadPendingCounts()

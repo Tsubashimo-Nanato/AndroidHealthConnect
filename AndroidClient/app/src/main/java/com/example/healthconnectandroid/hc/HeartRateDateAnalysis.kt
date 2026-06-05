@@ -23,7 +23,8 @@ data class HrDateQualitySummary(
     val quality: HrDateQuality,
     val sampleCount: Int,
     val medianBpm: Double?,
-    val highPercentileBpm: Double?
+    val highPercentileBpm: Double?,
+    val zoneScore: Float
 )
 
 data class HrDateRange(
@@ -129,7 +130,8 @@ object HeartRateDateAnalysis {
                 quality = HrDateQuality.NO_DATA,
                 sampleCount = 0,
                 medianBpm = null,
-                highPercentileBpm = null
+                highPercentileBpm = null,
+                zoneScore = 0f
             )
         }
         val median = percentile(clean, 0.50)
@@ -144,17 +146,96 @@ object HeartRateDateAnalysis {
             ?: 140.0
         val highShare = clean.count { it >= highStart }.toDouble() / clean.size
         val elevatedShare = clean.count { it >= elevatedStart }.toDouble() / clean.size
-        val quality = when {
-            highShare >= 0.10 || p90 >= highStart -> HrDateQuality.HIGH
-            elevatedShare >= 0.25 || median >= elevatedStart -> HrDateQuality.ELEVATED
-            else -> HrDateQuality.NORMAL
-        }
+        val zoneScore = (
+            zoneScoreForBpm(median, zones) * 0.55f +
+                elevatedShare.toFloat() * 0.22f +
+                highShare.toFloat() * 0.45f
+            ).coerceIn(0f, 1f)
         return HrDateQualitySummary(
-            quality = quality,
+            quality = qualityForZoneScore(zoneScore),
             sampleCount = clean.size,
             medianBpm = median,
-            highPercentileBpm = p90
+            highPercentileBpm = p90,
+            zoneScore = zoneScore
         )
+    }
+
+    fun qualityForSummary(
+        sampleCount: Int,
+        averageBpm: Double?,
+        maxBpm: Double?,
+        zones: HeartRateReferenceZones
+    ): HrDateQualitySummary {
+        if (sampleCount <= 0 || averageBpm == null) {
+            return HrDateQualitySummary(
+                quality = HrDateQuality.NO_DATA,
+                sampleCount = 0,
+                medianBpm = null,
+                highPercentileBpm = null,
+                zoneScore = 0f
+            )
+        }
+        val elevatedStart = zones.bands
+            .firstOrNull { it.tone == HeartRateZoneTone.ELEVATED }
+            ?.lowerBpm
+            ?: 100.0
+        val highStart = zones.bands
+            .firstOrNull { it.tone == HeartRateZoneTone.HIGH }
+            ?.lowerBpm
+            ?: 140.0
+        val max = maxBpm ?: averageBpm
+        val maxBoost = when {
+            max >= highStart -> 0.12f
+            max >= elevatedStart -> 0.06f * ((max - elevatedStart) / (highStart - elevatedStart).coerceAtLeast(1.0)).toFloat()
+            else -> 0f
+        }
+        val zoneScore = (zoneScoreForBpm(averageBpm, zones) + maxBoost).coerceIn(0f, 1f)
+        return HrDateQualitySummary(
+            quality = qualityForZoneScore(zoneScore),
+            sampleCount = sampleCount,
+            medianBpm = averageBpm,
+            highPercentileBpm = maxBpm,
+            zoneScore = zoneScore
+        )
+    }
+
+    private fun qualityForZoneScore(score: Float): HrDateQuality =
+        when {
+            score < 0.28f -> HrDateQuality.NORMAL
+            score < 0.68f -> HrDateQuality.ELEVATED
+            else -> HrDateQuality.HIGH
+        }
+
+    private fun zoneScoreForBpm(value: Double, zones: HeartRateReferenceZones): Float {
+        val referenceStart = zones.bands
+            .firstOrNull { it.tone == HeartRateZoneTone.REFERENCE }
+            ?.lowerBpm
+            ?: 40.0
+        val elevatedStart = zones.bands
+            .firstOrNull { it.tone == HeartRateZoneTone.ELEVATED }
+            ?.lowerBpm
+            ?: 100.0
+        val highStart = zones.bands
+            .firstOrNull { it.tone == HeartRateZoneTone.HIGH }
+            ?.lowerBpm
+            ?: 140.0
+        return when {
+            value < elevatedStart -> {
+                val fraction = ((value - referenceStart) / (elevatedStart - referenceStart).coerceAtLeast(1.0))
+                    .coerceIn(0.0, 1.0)
+                (fraction * 0.18).toFloat()
+            }
+            value < highStart -> {
+                val fraction = ((value - elevatedStart) / (highStart - elevatedStart).coerceAtLeast(1.0))
+                    .coerceIn(0.0, 1.0)
+                (0.30 + fraction * 0.34).toFloat()
+            }
+            else -> {
+                val fraction = ((value - highStart) / highStart.coerceAtLeast(1.0))
+                    .coerceIn(0.0, 1.0)
+                (0.70 + fraction * 0.30).toFloat()
+            }
+        }.coerceIn(0f, 1f)
     }
 
     private fun percentile(sortedValues: List<Double>, percentile: Double): Double {
