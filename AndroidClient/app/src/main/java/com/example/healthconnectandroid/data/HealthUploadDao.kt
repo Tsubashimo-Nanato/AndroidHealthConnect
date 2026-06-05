@@ -9,6 +9,22 @@ import androidx.room.Query
 interface HealthUploadDao {
     @Query(
         """
+        SELECT MAX(
+            0,
+            (SELECT COUNT(*) FROM health_records) -
+            (
+                SELECT COUNT(*)
+                FROM health_upload_ack ack
+                WHERE ack.serverKey = :serverKey
+                  AND ack.itemKind = 'record'
+            )
+        )
+        """
+    )
+    suspend fun pendingAllRecordCount(serverKey: String): Int
+
+    @Query(
+        """
         SELECT COUNT(*)
         FROM health_records r
         WHERE NOT EXISTS (
@@ -17,10 +33,26 @@ interface HealthUploadDao {
               AND ack.itemKind = 'record'
               AND ack.localId = r.localId
         )
-          AND (:startEpochMillis IS NULL OR COALESCE(r.endEpochMillis, r.startEpochMillis) >= :startEpochMillis)
+          AND COALESCE(r.endEpochMillis, r.startEpochMillis) >= :startEpochMillis
         """
     )
-    suspend fun pendingRecordCount(serverKey: String, startEpochMillis: Long?): Int
+    suspend fun pendingRecentRecordCount(serverKey: String, startEpochMillis: Long): Int
+
+    @Query(
+        """
+        SELECT MAX(
+            0,
+            (SELECT COUNT(*) FROM health_values) -
+            (
+                SELECT COUNT(*)
+                FROM health_upload_ack ack
+                WHERE ack.serverKey = :serverKey
+                  AND ack.itemKind = 'value'
+            )
+        )
+        """
+    )
+    suspend fun pendingAllValueCount(serverKey: String): Int
 
     @Query(
         """
@@ -33,19 +65,32 @@ interface HealthUploadDao {
               AND ack.itemKind = 'value'
               AND ack.localId = v.localId
         )
-          AND (
-              :startEpochMillis IS NULL
-              OR COALESCE(
-                  v.endEpochMillis,
-                  v.startEpochMillis,
-                  v.sampleEpochMillis,
-                  r.endEpochMillis,
-                  r.startEpochMillis
-              ) >= :startEpochMillis
-          )
+          AND COALESCE(
+              v.endEpochMillis,
+              v.startEpochMillis,
+              v.sampleEpochMillis,
+              r.endEpochMillis,
+              r.startEpochMillis
+          ) >= :startEpochMillis
         """
     )
-    suspend fun pendingValueCount(serverKey: String, startEpochMillis: Long?): Int
+    suspend fun pendingRecentValueCount(serverKey: String, startEpochMillis: Long): Int
+
+    @Query(
+        """
+        SELECT MAX(
+            0,
+            (SELECT COUNT(*) FROM health_aggregate_summaries) -
+            (
+                SELECT COUNT(*)
+                FROM health_upload_ack ack
+                WHERE ack.serverKey = :serverKey
+                  AND ack.itemKind = 'aggregate'
+            )
+        )
+        """
+    )
+    suspend fun pendingAllAggregateCount(serverKey: String): Int
 
     @Query(
         """
@@ -57,10 +102,10 @@ interface HealthUploadDao {
               AND ack.itemKind = 'aggregate'
               AND ack.localId = a.localId
         )
-          AND (:startEpochMillis IS NULL OR a.bucketEndEpochMillis >= :startEpochMillis)
+          AND a.bucketEndEpochMillis >= :startEpochMillis
         """
     )
-    suspend fun pendingAggregateCount(serverKey: String, startEpochMillis: Long?): Int
+    suspend fun pendingRecentAggregateCount(serverKey: String, startEpochMillis: Long): Int
 
     @Query(
         """

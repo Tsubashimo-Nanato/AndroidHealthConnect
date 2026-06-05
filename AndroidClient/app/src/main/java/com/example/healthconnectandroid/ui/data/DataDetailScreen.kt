@@ -475,7 +475,8 @@ fun HealthDataDetailScreen(
                             sampleCount = dailySummary?.sampleCount ?: 0,
                             averageBpm = dailySummary?.averageValue,
                             maxBpm = dailySummary?.maxValue,
-                            zones = heartRateZones
+                            zones = heartRateZones,
+                            minBpm = dailySummary?.minValue
                         )
                         HrDateCell(
                             date = date,

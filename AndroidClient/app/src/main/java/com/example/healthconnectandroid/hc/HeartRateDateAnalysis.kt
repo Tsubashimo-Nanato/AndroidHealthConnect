@@ -164,7 +164,8 @@ object HeartRateDateAnalysis {
         sampleCount: Int,
         averageBpm: Double?,
         maxBpm: Double?,
-        zones: HeartRateReferenceZones
+        zones: HeartRateReferenceZones,
+        minBpm: Double? = null
     ): HrDateQualitySummary {
         if (sampleCount <= 0 || averageBpm == null) {
             return HrDateQualitySummary(
@@ -183,13 +184,18 @@ object HeartRateDateAnalysis {
             .firstOrNull { it.tone == HeartRateZoneTone.HIGH }
             ?.lowerBpm
             ?: 140.0
-        val max = maxBpm ?: averageBpm
-        val maxBoost = when {
-            max >= highStart -> 0.12f
-            max >= elevatedStart -> 0.06f * ((max - elevatedStart) / (highStart - elevatedStart).coerceAtLeast(1.0)).toFloat()
-            else -> 0f
-        }
-        val zoneScore = (zoneScoreForBpm(averageBpm, zones) + maxBoost).coerceIn(0f, 1f)
+        val min = minOf(minBpm ?: averageBpm, averageBpm, maxBpm ?: averageBpm)
+        val max = maxOf(maxBpm ?: averageBpm, averageBpm, minBpm ?: averageBpm)
+        val averageScore = zoneScoreForBpm(averageBpm, zones)
+        val maxScore = zoneScoreForBpm(max, zones)
+        val elevatedShare = estimatedRangeShareAtOrAbove(min, max, elevatedStart)
+        val highShare = estimatedRangeShareAtOrAbove(min, max, highStart)
+        val tailPressure = (
+            elevatedShare * 0.05f +
+                highShare * 0.12f +
+                (maxScore - averageScore).coerceAtLeast(0f) * 0.06f
+            )
+        val zoneScore = (averageScore + tailPressure).coerceIn(0f, 1f)
         return HrDateQualitySummary(
             quality = qualityForZoneScore(zoneScore),
             sampleCount = sampleCount,
@@ -236,6 +242,13 @@ object HeartRateDateAnalysis {
                 (0.70 + fraction * 0.30).toFloat()
             }
         }.coerceIn(0f, 1f)
+    }
+
+    private fun estimatedRangeShareAtOrAbove(min: Double, max: Double, threshold: Double): Float {
+        if (max < threshold) return 0f
+        if (min >= threshold) return 1f
+        val span = (max - min).coerceAtLeast(1.0)
+        return ((max - threshold) / span).coerceIn(0.0, 1.0).toFloat()
     }
 
     private fun percentile(sortedValues: List<Double>, percentile: Double): Double {

@@ -13,7 +13,9 @@ import androidx.room.PrimaryKey
         Index(value = ["localDate"]),
         Index(value = ["metric", "sampleEpochMillis"]),
         Index(value = ["metric", "localDate"]),
-        Index(value = ["metric", "startEpochMillis"])
+        Index(value = ["metric", "startEpochMillis"]),
+        Index(value = ["metric", "startEpochMillis", "localId"]),
+        Index(value = ["metric", "localDate", "startEpochMillis", "localId"])
     ]
 )
 data class HealthValueEntity(

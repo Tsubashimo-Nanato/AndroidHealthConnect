@@ -792,26 +792,28 @@ interface HealthRecordDao {
         WHERE r.recordType = :recordType
           AND v.metric = :metric
           AND v.numericValue IS NOT NULL
-          AND v.localDate IS NOT NULL
-          AND v.localDate >= :startDate
-          AND v.localDate <= :endDate
-          AND COALESCE(v.startEpochMillis, v.sampleEpochMillis, r.startEpochMillis) < :endEpochMillis
+          AND v.startEpochMillis IS NOT NULL
+          AND v.startEpochMillis >= :startEpochMillis
+          AND v.startEpochMillis < :endEpochMillis
           AND COALESCE(v.endEpochMillis, v.startEpochMillis, v.sampleEpochMillis, r.endEpochMillis, r.startEpochMillis) >= :startEpochMillis
-        ORDER BY COALESCE(v.startEpochMillis, v.sampleEpochMillis, r.startEpochMillis) ASC,
-            COALESCE(v.sequence, 2147483647) ASC,
+          AND (
+              :afterEpochMillis IS NULL
+              OR v.startEpochMillis > :afterEpochMillis
+              OR (v.startEpochMillis = :afterEpochMillis AND v.localId > :afterLocalValueId)
+          )
+        ORDER BY v.startEpochMillis ASC,
             v.localId ASC
-        LIMIT :limit OFFSET :offset
+        LIMIT :limit
         """
     )
-    suspend fun inspectorNumericRowsForMetricLocalDateRangeAscPaged(
+    suspend fun inspectorNumericRowsForMetricEpochRangeAscAfter(
         recordType: String,
         metric: String,
-        startDate: String,
-        endDate: String,
         startEpochMillis: Long,
         endEpochMillis: Long,
         limit: Int,
-        offset: Int
+        afterEpochMillis: Long?,
+        afterLocalValueId: Long
     ): List<HealthCsvRow>
 
     @Query(
@@ -1108,6 +1110,30 @@ interface HealthRecordDao {
         startDate: String,
         endDate: String
     ): List<HealthDailyNumericSummaryRow>
+
+    @Query(
+        """
+        SELECT
+            :localDate AS localDate,
+            COUNT(*) AS sampleCount,
+            AVG(numericValue) AS averageValue,
+            MIN(numericValue) AS minValue,
+            MAX(numericValue) AS maxValue,
+            MAX(unit) AS unit
+        FROM health_values
+        WHERE metric = :metric
+          AND numericValue IS NOT NULL
+          AND startEpochMillis IS NOT NULL
+          AND startEpochMillis >= :startEpochMillis
+          AND startEpochMillis < :endEpochMillis
+        """
+    )
+    suspend fun numericSummaryForMetricEpochRange(
+        metric: String,
+        localDate: String,
+        startEpochMillis: Long,
+        endEpochMillis: Long
+    ): HealthDailyNumericSummaryRow
 
     @Query(
         """

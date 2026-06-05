@@ -71,18 +71,26 @@ private fun heartRateDateCellColors(quality: HrDateQuality, zoneScore: Float): H
         )
     } else {
         val score = zoneScore.coerceIn(0f, 1f)
+        val colorT = zoneColorProgress(score)
         val reference = Color(0xFF1F5A3A)
         val elevated = Color(0xFF806315)
         val high = Color(0xFF61251F)
-        val background = if (score <= 0.5f) {
-            lerp(reference, elevated, score / 0.5f)
+        val background = if (colorT <= 0.5f) {
+            lerp(reference, elevated, colorT / 0.5f)
         } else {
-            lerp(elevated, high, (score - 0.5f) / 0.5f)
+            lerp(elevated, high, (colorT - 0.5f) / 0.5f)
         }
         HrCellColors(
             background = background,
             border = lerp(background, Color.White, 0.36f),
-            content = lerp(Color(0xFFE5F4E8), Color(0xFFFFD4C9), score)
+            content = lerp(Color(0xFFE5F4E8), Color(0xFFFFD4C9), colorT)
         )
     }
 }
+
+private fun zoneColorProgress(score: Float): Float =
+    when {
+        score <= 0.28f -> (score / 0.28f) * 0.22f
+        score <= 0.68f -> 0.22f + ((score - 0.28f) / 0.40f) * 0.43f
+        else -> 0.65f + ((score - 0.68f) / 0.32f) * 0.35f
+    }.coerceIn(0f, 1f)

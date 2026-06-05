@@ -25,8 +25,8 @@ class LocalDataService(
             coverageDao.clearAll()
         }
         dao.clearAll()
+        db.openHelper.writableDatabase.execSQL("VACUUM")
+        db.openHelper.writableDatabase.execSQL("PRAGMA optimize")
         return before
     }
-
-
 }

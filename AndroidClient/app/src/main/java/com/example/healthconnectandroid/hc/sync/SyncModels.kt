@@ -1,5 +1,6 @@
 package com.example.healthconnectandroid.hc.sync
 
+import com.example.healthconnectandroid.hc.HealthDataTypeSyncResult
 import java.time.Duration
 import java.time.Instant
 
@@ -77,5 +78,15 @@ data class SyncProgress(
             ?.let {
                 val currentPhaseFraction = if (currentType != null) phase.fraction else 0f
                 ((completedTypes + currentPhaseFraction) / it).coerceIn(0f, 1f)
-            }
+    }
+}
+
+internal fun HealthDataTypeSyncResult.isSuccessfulCoverageWindow(): Boolean {
+    val start = requestedStart ?: return false
+    val end = requestedEnd ?: return false
+    return start.isBefore(end) &&
+        terminalStatus == null &&
+        errorMessage == null &&
+        aggregateErrorMessage == null &&
+        skippedReason == null
 }

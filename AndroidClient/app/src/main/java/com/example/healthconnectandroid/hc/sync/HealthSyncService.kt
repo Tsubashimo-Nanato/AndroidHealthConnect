@@ -144,6 +144,7 @@ class HealthSyncService(
                 descriptor = descriptor,
                 start = window.start,
                 end = window.end,
+                zoneId = zoneId,
                 requireBackgroundReadPermission = false,
                 timeout = timeoutConfig.selectedSyncTimeout,
                 onTypeProgress = { typeProgress ->
@@ -317,6 +318,7 @@ class HealthSyncService(
                 descriptor = descriptor,
                 start = start,
                 end = end,
+                zoneId = ZoneId.systemDefault(),
                 requireBackgroundReadPermission = requireBackgroundReadPermission,
                 timeout = perTypeTimeout,
                 onTypeProgress = { typeProgress ->
@@ -360,6 +362,7 @@ class HealthSyncService(
         descriptor: HealthDataTypeDescriptor,
         start: Instant,
         end: Instant,
+        zoneId: ZoneId,
         requireBackgroundReadPermission: Boolean,
         timeout: Duration,
         onTypeProgress: (SyncTypeProgress) -> Unit = {}
@@ -371,6 +374,7 @@ class HealthSyncService(
                     key = descriptor.key,
                     start = start,
                     end = end,
+                    zoneId = zoneId,
                     requireBackgroundReadPermission = requireBackgroundReadPermission,
                     onProgress = onTypeProgress
                 )
@@ -422,7 +426,11 @@ class HealthSyncService(
             inserted = results.sumOf { it.recordsInserted },
             updated = results.sumOf { it.recordsUpdated },
             duplicates = results.sumOf { it.recordsSkippedDuplicate },
-            errors = results.count { it.errorMessage != null || it.terminalStatus == SyncRunStatus.TIMEOUT },
+            errors = results.count {
+                it.errorMessage != null ||
+                    it.aggregateErrorMessage != null ||
+                    it.terminalStatus == SyncRunStatus.TIMEOUT
+            },
             sourceBytesRead = results.sumOf { it.sourceBytesRead },
             localBytesWritten = results.sumOf { it.localBytesWritten },
             rangeStart = rangeStart,
@@ -453,10 +461,9 @@ class HealthSyncService(
         mode: SyncMode,
         result: HealthDataTypeSyncResult
     ) {
+        if (!result.isSuccessfulCoverageWindow()) return
         val start = result.requestedStart ?: return
         val end = result.requestedEnd ?: return
-        if (!start.isBefore(end)) return
-        if (result.terminalStatus != null || result.errorMessage != null || result.skippedReason != null) return
 
         try {
             coverageDao.insert(
@@ -491,7 +498,7 @@ class HealthSyncService(
         val terminalStatus = when {
             results.any { it.terminalStatus == SyncRunStatus.TIMEOUT } -> SyncRunStatus.TIMEOUT
             results.any { it.terminalStatus == SyncRunStatus.CANCELLED } -> SyncRunStatus.CANCELLED
-            results.any { it.errorMessage != null } -> SyncRunStatus.ERROR
+            results.any { it.errorMessage != null || it.aggregateErrorMessage != null } -> SyncRunStatus.ERROR
             else -> null
         }
         val errorMessage = results.mapNotNull { it.errorMessage }.distinct().joinToString("; ")
@@ -543,7 +550,11 @@ class HealthSyncService(
             inserted = previousResults.sumOf { it.recordsInserted } + typeProgress.inserted,
             updated = previousResults.sumOf { it.recordsUpdated } + typeProgress.updated,
             duplicates = previousResults.sumOf { it.recordsSkippedDuplicate } + typeProgress.duplicates,
-            errors = previousResults.count { it.errorMessage != null || it.terminalStatus == SyncRunStatus.TIMEOUT } +
+            errors = previousResults.count {
+                it.errorMessage != null ||
+                    it.aggregateErrorMessage != null ||
+                    it.terminalStatus == SyncRunStatus.TIMEOUT
+            } +
                 typeProgress.errors,
             sourceBytesRead = previousResults.sumOf { it.sourceBytesRead } + typeProgress.sourceBytesRead,
             localBytesWritten = previousResults.sumOf { it.localBytesWritten } + typeProgress.localBytesWritten,
@@ -559,7 +570,7 @@ class HealthSyncService(
         when {
             result.terminalStatus == SyncRunStatus.TIMEOUT -> SyncProgressPhase.TIMEOUT
             result.terminalStatus == SyncRunStatus.CANCELLED -> SyncProgressPhase.CANCELLED
-            result.errorMessage != null -> SyncProgressPhase.FAILED
+            result.errorMessage != null || result.aggregateErrorMessage != null -> SyncProgressPhase.FAILED
             result.skippedReason != null -> SyncProgressPhase.SKIPPED
             result.recordsInserted + result.recordsUpdated + result.aggregateRowsStored + result.valuesStored > 0 ->
                 SyncProgressPhase.INSERTED_DATA
@@ -574,6 +585,7 @@ class HealthSyncService(
             result.terminalStatus == SyncRunStatus.TIMEOUT -> "Selected sync timed out"
             result.terminalStatus == SyncRunStatus.CANCELLED -> "Selected sync cancelled"
             result.errorMessage != null -> "Selected sync failed: ${result.errorMessage}"
+            result.aggregateErrorMessage != null -> "Selected sync failed: ${result.aggregateErrorMessage}"
             result.skippedReason != null -> "Selected sync skipped"
             result.localDaysChecked > 0 && result.localDaysRequested == 0 ->
                 "Selected sync found no missing local days"

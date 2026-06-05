@@ -355,11 +355,8 @@ internal fun HeartRateRecord.toNormalizedHeartRate(): NormalizedHealthRecord {
         startZoneOffsetSeconds = startZoneOffset.totalSecondsOrNull(),
         endZoneOffsetSeconds = endZoneOffset.totalSecondsOrNull(),
         sourcePackage = metadata.sourcePackageName(),
-        metadataJson = metadata.toMetadataJson(),
-        rawJson = jsonObject(
-            "record" to toString(),
-            "sampleCount" to samples.size
-        ),
+        metadataJson = null,
+        rawJson = null,
         values = values
     )
 }
@@ -382,8 +379,8 @@ private fun WeightRecord.toNormalizedWeight(): NormalizedHealthRecord =
         time = time,
         zoneOffsetSeconds = zoneOffset.totalSecondsOrNull(),
         sourcePackage = metadata.sourcePackageName(),
-        metadataJson = metadata.toMetadataJson(),
-        rawJson = jsonObject("record" to toString()),
+        metadataJson = null,
+        rawJson = null,
         values = listOf(
             NormalizedHealthValue.floating(
                 metric = "weight",
@@ -403,8 +400,8 @@ private fun BodyFatRecord.toNormalizedBodyFat(): NormalizedHealthRecord =
         time = time,
         zoneOffsetSeconds = zoneOffset.totalSecondsOrNull(),
         sourcePackage = metadata.sourcePackageName(),
-        metadataJson = metadata.toMetadataJson(),
-        rawJson = jsonObject("record" to toString()),
+        metadataJson = null,
+        rawJson = null,
         values = listOf(
             NormalizedHealthValue.floating(
                 metric = "body_fat",
@@ -424,8 +421,8 @@ private fun OxygenSaturationRecord.toNormalizedOxygenSaturation(): NormalizedHea
         time = time,
         zoneOffsetSeconds = zoneOffset.totalSecondsOrNull(),
         sourcePackage = metadata.sourcePackageName(),
-        metadataJson = metadata.toMetadataJson(),
-        rawJson = jsonObject("record" to toString()),
+        metadataJson = null,
+        rawJson = null,
         values = listOf(
             NormalizedHealthValue.floating(
                 metric = "oxygen_saturation",
@@ -474,12 +471,8 @@ private fun SleepSessionRecord.toNormalizedSleepSession(): NormalizedHealthRecor
         startZoneOffsetSeconds = startZoneOffset.totalSecondsOrNull(),
         endZoneOffsetSeconds = endZoneOffset.totalSecondsOrNull(),
         sourcePackage = metadata.sourcePackageName(),
-        metadataJson = metadata.toMetadataJson(),
-        rawJson = jsonObject(
-            "record" to toString(),
-            "stageCount" to stages.size,
-            "stages" to jsonArray(stageValues.mapNotNull { it.valueJson })
-        ),
+        metadataJson = null,
+        rawJson = null,
         values = summaryValues + stageValues
     )
 }
@@ -494,8 +487,8 @@ private fun StepsRecord.toNormalizedSteps(): NormalizedHealthRecord =
         startZoneOffsetSeconds = startZoneOffset.totalSecondsOrNull(),
         endZoneOffsetSeconds = endZoneOffset.totalSecondsOrNull(),
         sourcePackage = metadata.sourcePackageName(),
-        metadataJson = metadata.toMetadataJson(),
-        rawJson = jsonObject("record" to toString()),
+        metadataJson = null,
+        rawJson = null,
         values = listOf(
             NormalizedHealthValue.integer(
                 metric = "steps",
@@ -516,8 +509,8 @@ private fun ActiveCaloriesBurnedRecord.toNormalizedActiveCalories(): NormalizedH
         startZoneOffsetSeconds = startZoneOffset.totalSecondsOrNull(),
         endZoneOffsetSeconds = endZoneOffset.totalSecondsOrNull(),
         sourcePackage = metadata.sourcePackageName(),
-        metadataJson = metadata.toMetadataJson(),
-        rawJson = jsonObject("record" to toString()),
+        metadataJson = null,
+        rawJson = null,
         values = listOf(
             NormalizedHealthValue.floating(
                 metric = "active_calories",
@@ -538,8 +531,8 @@ private fun TotalCaloriesBurnedRecord.toNormalizedTotalCalories(): NormalizedHea
         startZoneOffsetSeconds = startZoneOffset.totalSecondsOrNull(),
         endZoneOffsetSeconds = endZoneOffset.totalSecondsOrNull(),
         sourcePackage = metadata.sourcePackageName(),
-        metadataJson = metadata.toMetadataJson(),
-        rawJson = jsonObject("record" to toString()),
+        metadataJson = null,
+        rawJson = null,
         values = listOf(
             NormalizedHealthValue.floating(
                 metric = "total_calories",
@@ -560,8 +553,8 @@ private fun DistanceRecord.toNormalizedDistance(): NormalizedHealthRecord =
         startZoneOffsetSeconds = startZoneOffset.totalSecondsOrNull(),
         endZoneOffsetSeconds = endZoneOffset.totalSecondsOrNull(),
         sourcePackage = metadata.sourcePackageName(),
-        metadataJson = metadata.toMetadataJson(),
-        rawJson = jsonObject("record" to toString()),
+        metadataJson = null,
+        rawJson = null,
         values = listOf(
             NormalizedHealthValue.floating(
                 metric = "distance",
@@ -580,12 +573,8 @@ private fun BloodPressureRecord.toNormalizedBloodPressure(): NormalizedHealthRec
         time = time,
         zoneOffsetSeconds = zoneOffset.totalSecondsOrNull(),
         sourcePackage = metadata.sourcePackageName(),
-        metadataJson = metadata.toMetadataJson(),
-        rawJson = jsonObject(
-            "record" to toString(),
-            "bodyPosition" to bodyPosition,
-            "measurementLocation" to measurementLocation
-        ),
+        metadataJson = null,
+        rawJson = null,
         values = listOf(
             NormalizedHealthValue.paired(
                 metric = "blood_pressure",
@@ -640,11 +629,8 @@ private fun BodyTemperatureRecord.toNormalizedBodyTemperature(): NormalizedHealt
         time = time,
         zoneOffsetSeconds = zoneOffset.totalSecondsOrNull(),
         sourcePackage = metadata.sourcePackageName(),
-        metadataJson = metadata.toMetadataJson(),
-        rawJson = jsonObject(
-            "record" to toString(),
-            "measurementLocation" to measurementLocation
-        ),
+        metadataJson = null,
+        rawJson = null,
         values = listOf(
             NormalizedHealthValue.floating(
                 metric = "body_temperature",
@@ -671,8 +657,8 @@ private fun RespiratoryRateRecord.toNormalizedRespiratoryRate(): NormalizedHealt
         time = time,
         zoneOffsetSeconds = zoneOffset.totalSecondsOrNull(),
         sourcePackage = metadata.sourcePackageName(),
-        metadataJson = metadata.toMetadataJson(),
-        rawJson = jsonObject("record" to toString()),
+        metadataJson = null,
+        rawJson = null,
         values = listOf(
             NormalizedHealthValue.floating(
                 metric = "respiratory_rate",
@@ -692,8 +678,8 @@ private fun RestingHeartRateRecord.toNormalizedRestingHeartRate(): NormalizedHea
         time = time,
         zoneOffsetSeconds = zoneOffset.totalSecondsOrNull(),
         sourcePackage = metadata.sourcePackageName(),
-        metadataJson = metadata.toMetadataJson(),
-        rawJson = jsonObject("record" to toString()),
+        metadataJson = null,
+        rawJson = null,
         values = listOf(
             NormalizedHealthValue.integer(
                 metric = "resting_heart_rate",

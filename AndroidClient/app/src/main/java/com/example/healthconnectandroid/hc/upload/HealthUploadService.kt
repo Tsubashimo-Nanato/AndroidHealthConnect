@@ -240,11 +240,19 @@ class HealthUploadService(
         serverKey: String,
         startEpochMillis: Long?
     ): UploadPendingCounts {
-        return UploadPendingCounts(
-            records = uploadDao.pendingRecordCount(serverKey, startEpochMillis),
-            values = uploadDao.pendingValueCount(serverKey, startEpochMillis),
-            aggregates = uploadDao.pendingAggregateCount(serverKey, startEpochMillis)
-        )
+        return if (startEpochMillis == null) {
+            UploadPendingCounts(
+                records = uploadDao.pendingAllRecordCount(serverKey),
+                values = uploadDao.pendingAllValueCount(serverKey),
+                aggregates = uploadDao.pendingAllAggregateCount(serverKey)
+            )
+        } else {
+            UploadPendingCounts(
+                records = uploadDao.pendingRecentRecordCount(serverKey, startEpochMillis),
+                values = uploadDao.pendingRecentValueCount(serverKey, startEpochMillis),
+                aggregates = uploadDao.pendingRecentAggregateCount(serverKey, startEpochMillis)
+            )
+        }
     }
 
     private suspend fun loadPendingBatch(
@@ -406,8 +414,6 @@ class HealthUploadService(
             .putNullable("startZoneOffsetSeconds", startZoneOffsetSeconds)
             .putNullable("endZoneOffsetSeconds", endZoneOffsetSeconds)
             .putNullable("sourcePackage", sourcePackage)
-            .putNullable("metadataJson", metadataJson)
-            .putNullable("rawJson", rawJson)
             .put("syncStatus", syncStatus)
             .put("exportStatus", exportStatus)
             .put("createdEpochMillis", createdEpochMillis)
@@ -453,7 +459,6 @@ class HealthUploadService(
             .put("computedEpochMillis", computedEpochMillis)
             .put("requestedStartEpochMillis", requestedStartEpochMillis)
             .put("requestedEndEpochMillis", requestedEndEpochMillis)
-            .putNullable("rawJson", rawJson)
 
     private fun JSONObject.putNullable(name: String, value: Any?): JSONObject =
         put(name, value ?: JSONObject.NULL)
@@ -470,10 +475,10 @@ class HealthUploadService(
     companion object {
         private const val API_KEY_HEADER = "X-API-Key"
         private const val SCHEMA_VERSION = 1
-        private const val RECORD_LIMIT = 250
-        private const val VALUE_LIMIT = 1000
-        private const val AGGREGATE_LIMIT = 250
-        const val BACKGROUND_MAX_BATCHES_PER_RUN = 50
+        private const val RECORD_LIMIT = 1000
+        private const val VALUE_LIMIT = 5000
+        private const val AGGREGATE_LIMIT = 1000
+        const val BACKGROUND_MAX_BATCHES_PER_RUN = 100
         private const val ITEM_RECORD = "record"
         private const val ITEM_VALUE = "value"
         private const val ITEM_AGGREGATE = "aggregate"

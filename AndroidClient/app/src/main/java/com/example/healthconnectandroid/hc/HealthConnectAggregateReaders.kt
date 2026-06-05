@@ -150,15 +150,7 @@ private suspend fun <T : Any> readDailyAggregate(
             value = valueOf(value),
             unit = unit,
             source = "health_connect_aggregate",
-            rawJson = jsonObject(
-                "metric" to metricName,
-                "bucketStartLocal" to row.startTime.toString(),
-                "bucketEndLocal" to row.endTime.toString(),
-                "dataOrigins" to row.result.dataOrigins
-                    .map { it.packageName }
-                    .sorted()
-                    .joinToString(",")
-            )
+            rawJson = null
         )
     }
 }

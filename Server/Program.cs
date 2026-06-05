@@ -8,11 +8,34 @@ var builder = WebApplication.CreateBuilder(args);
 // DB
 builder.Services.AddDbContext<AppDbContext>(opt =>
 {
-    opt.UseSqlite("Data Source=hc.db");
-    // helpful while debugging
-    opt.EnableDetailedErrors();
-    opt.EnableSensitiveDataLogging();
+    var connectionString = builder.Configuration.GetConnectionString("HealthDb") ?? "Data Source=hc.db";
+    opt.UseSqlite(connectionString);
+    if (builder.Environment.IsDevelopment() &&
+        builder.Configuration.GetValue<bool>("Ef:EnableSensitiveDataLogging"))
+    {
+        opt.EnableDetailedErrors();
+        opt.EnableSensitiveDataLogging();
+    }
 });
+
+var configuredApiKeys = builder.Configuration
+    .GetSection("ApiKeys")
+    .Get<string[]>()
+    ?.Where(key => !string.IsNullOrWhiteSpace(key))
+    .Select(key => key.Trim())
+    .ToArray()
+    ?? Array.Empty<string>();
+if (!builder.Environment.IsDevelopment())
+{
+    if (configuredApiKeys.Length == 0)
+    {
+        throw new InvalidOperationException("At least one ApiKeys entry is required outside Development.");
+    }
+    if (configuredApiKeys.Contains("123", StringComparer.Ordinal))
+    {
+        throw new InvalidOperationException("The default development API key cannot be used outside Development.");
+    }
+}
 
 // Controllers
 builder.Services.AddControllers();
@@ -43,6 +66,7 @@ using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     await db.Database.EnsureCreatedAsync();
+    await UploadSchemaInitializer.EnsureUploadTablesAsync(db);
 }
 
 // Static files (index.html)

@@ -125,6 +125,7 @@ class HealthDataTypeSyncer(
         start: Instant,
         end: Instant,
         requireBackgroundReadPermission: Boolean = false,
+        zoneId: ZoneId = ZoneId.systemDefault(),
         onProgress: (SyncTypeProgress) -> Unit = {}
     ): HealthDataTypeSyncResult {
         val startedAt = Instant.now()
@@ -286,7 +287,8 @@ class HealthDataTypeSyncer(
             val aggregateResult = syncDailyAggregatesIfAvailable(
                 descriptor = descriptor,
                 start = start,
-                end = end
+                end = end,
+                zoneId = zoneId
             )
             HealthDataTypeSyncResult(
                 key = key,
@@ -395,10 +397,10 @@ class HealthDataTypeSyncer(
     private suspend fun syncDailyAggregatesIfAvailable(
         descriptor: HealthDataTypeDescriptor,
         start: Instant,
-        end: Instant
+        end: Instant,
+        zoneId: ZoneId
     ): SyncAggregateResult {
         val aggregateReader = descriptor.aggregateReader ?: return SyncAggregateResult()
-        val zoneId = ZoneId.systemDefault()
         val startDate = LocalDate.ofInstant(start, zoneId)
         val endDate = LocalDate.ofInstant(end, zoneId)
 
@@ -456,7 +458,7 @@ class HealthDataTypeSyncer(
                 computedEpochMillis = now,
                 requestedStartEpochMillis = requestedStart.toEpochMilli(),
                 requestedEndEpochMillis = requestedEnd.toEpochMilli(),
-                rawJson = summary.rawJson
+                rawJson = null
             )
         }
         db.withTransaction {
@@ -488,8 +490,8 @@ class HealthDataTypeSyncer(
             startZoneOffsetSeconds = startZoneOffsetSeconds,
             endZoneOffsetSeconds = endZoneOffsetSeconds,
             sourcePackage = sourcePackage,
-            metadataJson = metadataJson,
-            rawJson = rawJson,
+            metadataJson = null,
+            rawJson = null,
             createdEpochMillis = lastReadEpochMillis,
             updatedEpochMillis = lastReadEpochMillis,
             lastReadEpochMillis = lastReadEpochMillis
@@ -610,14 +612,14 @@ class HealthDataTypeSyncer(
                 recordsUpdated = result.recordsUpdated,
                 recordsSkippedDuplicate = result.recordsSkippedDuplicate,
                 valuesStored = result.valuesStored,
-                errorMessage = result.errorMessage ?: result.skippedReason
+                errorMessage = result.errorMessage ?: result.aggregateErrorMessage ?: result.skippedReason
             )
         )
     }
 
     private fun HealthDataTypeSyncResult.runStatus(): SyncRunStatus =
         terminalStatus ?: when {
-            errorMessage != null -> SyncRunStatus.ERROR
+            errorMessage != null || aggregateErrorMessage != null -> SyncRunStatus.ERROR
             skippedReason != null -> SyncRunStatus.SKIPPED
             else -> SyncRunStatus.SUCCESS
         }

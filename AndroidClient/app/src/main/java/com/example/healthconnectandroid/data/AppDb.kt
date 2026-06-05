@@ -17,7 +17,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         HealthAggregateEntity::class,
         HealthUploadAckEntity::class
     ],
-    version = 8,
+    version = 10,
     exportSchema = false
 )
 abstract class AppDb : RoomDatabase() {
@@ -345,6 +345,44 @@ abstract class AppDb : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    UPDATE `health_records`
+                    SET `metadataJson` = NULL,
+                        `rawJson` = NULL
+                    WHERE `metadataJson` IS NOT NULL
+                       OR `rawJson` IS NOT NULL
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    UPDATE `health_aggregate_summaries`
+                    SET `rawJson` = NULL
+                    WHERE `rawJson` IS NOT NULL
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_health_values_metric_localDate_startEpochMillis_localId` " +
+                        "ON `health_values` (`metric`, `localDate`, `startEpochMillis`, `localId`)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_health_values_metric_startEpochMillis_localId` " +
+                        "ON `health_values` (`metric`, `startEpochMillis`, `localId`)"
+                )
+            }
+        }
+
+        private val MIGRATION_9_10 = object : Migration(9, 10) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_health_values_metric_startEpochMillis_localId` " +
+                        "ON `health_values` (`metric`, `startEpochMillis`, `localId`)"
+                )
+            }
+        }
+
         fun get(context: Context): AppDb =
             INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(
@@ -358,7 +396,9 @@ abstract class AppDb : RoomDatabase() {
                         MIGRATION_4_5,
                         MIGRATION_5_6,
                         MIGRATION_6_7,
-                        MIGRATION_7_8
+                        MIGRATION_7_8,
+                        MIGRATION_8_9,
+                        MIGRATION_9_10
                     )
                     .build()
                     .also { INSTANCE = it }

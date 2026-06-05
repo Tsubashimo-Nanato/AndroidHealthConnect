@@ -1,8 +1,12 @@
 package com.example.healthconnectandroid.hc.sync
 
-import org.junit.Assert.assertNotEquals
+import com.example.healthconnectandroid.hc.HealthDataTypeSyncResult
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.time.Instant
 
 class SyncModelsTest {
     @Test
@@ -71,5 +75,48 @@ class SyncModelsTest {
         )
 
         assertEquals(1f, progress.progressFraction ?: -1f, 0.0001f)
+    }
+
+    @Test
+    fun coverageWindowIsSuccessfulOnlyForCleanCompletedRange() {
+        val start = Instant.parse("2026-06-01T00:00:00Z")
+        val end = Instant.parse("2026-06-02T00:00:00Z")
+
+        assertTrue(
+            HealthDataTypeSyncResult(
+                key = "heart_rate",
+                requestedStart = start,
+                requestedEnd = end
+            ).isSuccessfulCoverageWindow()
+        )
+        assertFalse(
+            HealthDataTypeSyncResult(
+                key = "heart_rate",
+                requestedStart = start,
+                requestedEnd = end,
+                aggregateErrorMessage = "aggregate failed"
+            ).isSuccessfulCoverageWindow()
+        )
+        assertFalse(
+            HealthDataTypeSyncResult(
+                key = "heart_rate",
+                requestedStart = start,
+                requestedEnd = end,
+                errorMessage = "read failed"
+            ).isSuccessfulCoverageWindow()
+        )
+        assertFalse(
+            HealthDataTypeSyncResult(
+                key = "heart_rate",
+                requestedStart = start
+            ).isSuccessfulCoverageWindow()
+        )
+        assertFalse(
+            HealthDataTypeSyncResult(
+                key = "heart_rate",
+                requestedStart = end,
+                requestedEnd = start
+            ).isSuccessfulCoverageWindow()
+        )
     }
 }

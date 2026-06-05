@@ -77,13 +77,7 @@ class HealthDetailQueryService(
         val syncSummary = syncDao.latestSummaryForType(key)
         val totalLocalRecordsForType = healthDao.countRecordsForType(key)
         val dailyNumericSummaries = if (key == HealthDataTypeKeys.HEART_RATE) {
-            val startDate = start.atZone(zoneId).toLocalDate()
-            val endDate = end.minusMillis(1).atZone(zoneId).toLocalDate()
-            healthDao.dailyNumericSummariesForMetricLocalDateRange(
-                metric = HEART_RATE_METRIC,
-                startDate = startDate.toString(),
-                endDate = endDate.toString()
-            )
+            heartRateDailySummariesForZone(start, end, zoneId)
         } else {
             emptyList()
         }
@@ -124,7 +118,7 @@ class HealthDetailQueryService(
         val numericStart = chartWindow?.first ?: start
         val numericEnd = chartWindow?.second ?: end
         val numericRows = if (needsNumericRows && key == HealthDataTypeKeys.HEART_RATE) {
-            loadHeartRateNumericRowsForChart(numericStart, numericEnd, zoneId)
+            loadHeartRateNumericRowsForChart(numericStart, numericEnd)
         } else if (needsNumericRows) {
             loadGenericNumericRowsForChart(key, numericStart, numericEnd)
         } else {
@@ -151,7 +145,7 @@ class HealthDetailQueryService(
         }
         val restingHeartRateEstimate = if (key == HealthDataTypeKeys.HEART_RATE) {
             HeartRateAnalysis.estimateRestingHeartRate(
-                bpmSamples = numericRows.estimateBpmSamples,
+                bpmSamples = emptyList(),
                 rangeLabel = range.label,
                 recordedBpm = recordedRestingHeartRate(start, end)
             )
@@ -239,23 +233,17 @@ class HealthDetailQueryService(
         val chartRows = rows.take(limit)
         return NumericChartRows(
             chartRows = chartRows,
-            estimateBpmSamples = chartRows.mapNotNull { it.numericValue },
             limited = rows.size > limit
         )
     }
 
     private suspend fun loadHeartRateNumericRowsForChart(
         start: Instant,
-        end: Instant,
-        zoneId: ZoneId
+        end: Instant
     ): NumericChartRows {
         val startEpochMillis = start.toEpochMilli()
         val endEpochMillis = end.toEpochMilli()
-        val startDate = start.atZone(zoneId).toLocalDate().toString()
-        val endDate = end.minusMillis(1).atZone(zoneId).toLocalDate().toString()
-        val seen = HashSet<String>(INSPECTOR_HEART_RATE_CHART_ROW_LIMIT)
         val exactRows = ArrayList<HealthCsvRow>(INSPECTOR_HEART_RATE_CHART_ROW_LIMIT + 1)
-        val estimateSamples = ArrayList<Double>(INSPECTOR_HEART_RATE_CHART_ROW_LIMIT + 1)
         val downsampler = HealthCsvRowMinMaxDownsampler(
             startEpochMillis = startEpochMillis,
             endEpochMillis = endEpochMillis,
@@ -263,15 +251,9 @@ class HealthDetailQueryService(
         )
         var limited = false
         loadHeartRateNumericRowsAsc(
-            startDate = startDate,
-            endDate = endDate,
             startEpochMillis = startEpochMillis,
             endEpochMillis = endEpochMillis,
-            seen = seen,
             onRow = { row ->
-                row.numericValue
-                    ?.takeIf { it in 25.0..240.0 }
-                    ?.let(estimateSamples::add)
                 if (!limited) {
                     exactRows.add(row)
                     if (exactRows.size > INSPECTOR_HEART_RATE_CHART_ROW_LIMIT) {
@@ -284,40 +266,65 @@ class HealthDetailQueryService(
         if (exactRows.isEmpty()) return NumericChartRows.Empty
         return NumericChartRows(
             chartRows = if (limited) downsampler.rows() else exactRows,
-            estimateBpmSamples = estimateSamples,
             limited = limited
         )
     }
 
     private suspend fun loadHeartRateNumericRowsAsc(
-        startDate: String,
-        endDate: String,
         startEpochMillis: Long,
         endEpochMillis: Long,
-        seen: MutableSet<String>,
         onRow: (HealthCsvRow) -> Unit
     ) {
-        var offset = 0
+        var afterEpochMillis: Long? = null
+        var afterLocalValueId = 0L
         while (true) {
-            val page = healthDao.inspectorNumericRowsForMetricLocalDateRangeAscPaged(
+            val page = healthDao.inspectorNumericRowsForMetricEpochRangeAscAfter(
                 recordType = HealthDataTypeKeys.HEART_RATE,
                 metric = HEART_RATE_METRIC,
-                startDate = startDate,
-                endDate = endDate,
                 startEpochMillis = startEpochMillis,
                 endEpochMillis = endEpochMillis,
                 limit = INSPECTOR_HEART_RATE_CHART_PAGE_SIZE,
-                offset = offset
+                afterEpochMillis = afterEpochMillis,
+                afterLocalValueId = afterLocalValueId
             )
             if (page.isEmpty()) break
             page.forEach { row ->
-                if (seen.add("${row.localRecordId}:${row.valueKey}")) {
-                    onRow(row)
+                onRow(row)
+            }
+            val last = page.last()
+            afterEpochMillis = last.valueStartEpochMillis ?: last.recordStartEpochMillis
+            afterLocalValueId = last.localValueId
+            if (page.size < INSPECTOR_HEART_RATE_CHART_PAGE_SIZE) break
+        }
+    }
+
+    private suspend fun heartRateDailySummariesForZone(
+        start: Instant,
+        end: Instant,
+        zoneId: ZoneId
+    ): List<HealthDailyNumericSummaryRow> {
+        if (!start.isBefore(end)) return emptyList()
+        val firstDate = start.atZone(zoneId).toLocalDate()
+        val lastDate = end.minusMillis(1).atZone(zoneId).toLocalDate()
+        val summaries = mutableListOf<HealthDailyNumericSummaryRow>()
+        var date = firstDate
+        while (!date.isAfter(lastDate)) {
+            val dayStart = maxInstant(start, date.atStartOfDay(zoneId).toInstant())
+            val dayEnd = minInstant(end, date.plusDays(1).atStartOfDay(zoneId).toInstant())
+            if (dayStart.isBefore(dayEnd)) {
+                val summary = healthDao.numericSummaryForMetricEpochRange(
+                    metric = HEART_RATE_METRIC,
+                    localDate = date.toString(),
+                    startEpochMillis = dayStart.toEpochMilli(),
+                    endEpochMillis = dayEnd.toEpochMilli()
+                )
+                if (summary.sampleCount > 0) {
+                    summaries += summary
                 }
             }
-            if (page.size < INSPECTOR_HEART_RATE_CHART_PAGE_SIZE) break
-            offset += page.size
+            date = date.plusDays(1)
         }
+        return summaries
     }
 
     private suspend fun dailyTotalsForInspector(
@@ -368,11 +375,10 @@ class HealthDetailQueryService(
 
     private data class NumericChartRows(
         val chartRows: List<HealthCsvRow>,
-        val estimateBpmSamples: List<Double>,
         val limited: Boolean
     ) {
         companion object {
-            val Empty = NumericChartRows(emptyList(), emptyList(), limited = false)
+            val Empty = NumericChartRows(emptyList(), limited = false)
         }
     }
 

@@ -189,4 +189,20 @@ class HeartRateDateAnalysisTest {
         assertTrue(reference.zoneScore < 0.28f)
         assertTrue(elevated.zoneScore in 0.28f..0.68f)
     }
+
+    @Test
+    fun summaryWithReferenceAverageAndHighPeakStaysReferenceDominant() {
+        val zones = HeartRateAnalysis.referenceZones(age = 40)
+
+        val summary = HeartRateDateAnalysis.qualityForSummary(
+            sampleCount = 38_000,
+            averageBpm = 76.0,
+            maxBpm = 152.0,
+            zones = zones,
+            minBpm = 58.0
+        )
+
+        assertEquals(HrDateQuality.NORMAL, summary.quality)
+        assertTrue(summary.zoneScore < 0.28f)
+    }
 }
