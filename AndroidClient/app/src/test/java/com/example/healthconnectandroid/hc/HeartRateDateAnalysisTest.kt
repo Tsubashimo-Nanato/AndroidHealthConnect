@@ -1,8 +1,10 @@
 package com.example.healthconnectandroid.hc
 
+import java.time.Instant
 import java.time.LocalDate
 import java.time.DayOfWeek
 import java.time.YearMonth
+import java.time.ZoneId
 import java.time.ZoneOffset
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -17,6 +19,26 @@ class HeartRateDateAnalysisTest {
 
         assertEquals(date.atStartOfDay(ZoneOffset.UTC).toInstant(), range?.start)
         assertEquals(date.plusDays(1).atStartOfDay(ZoneOffset.UTC).toInstant(), range?.end)
+    }
+
+    @Test
+    fun tapDateRangeUsesSelectedPositiveOffsetTimezone() {
+        val date = LocalDate.of(2026, 5, 10)
+
+        val range = HeartRateDateAnalysis.visibleRangeForDates(setOf(date), ZoneId.of("Asia/Tokyo"))
+
+        assertEquals(Instant.parse("2026-05-09T15:00:00Z"), range?.start)
+        assertEquals(Instant.parse("2026-05-10T15:00:00Z"), range?.end)
+    }
+
+    @Test
+    fun tapDateRangeUsesSelectedNegativeOffsetTimezone() {
+        val date = LocalDate.of(2026, 5, 10)
+
+        val range = HeartRateDateAnalysis.visibleRangeForDates(setOf(date), ZoneOffset.ofHours(-5))
+
+        assertEquals(Instant.parse("2026-05-10T05:00:00Z"), range?.start)
+        assertEquals(Instant.parse("2026-05-11T05:00:00Z"), range?.end)
     }
 
     @Test
