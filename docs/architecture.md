@@ -30,6 +30,7 @@ Observed core logic currently lives mostly under `AndroidClient/app/src/main/jav
 - record paging policy
 - sync range and result severity policy
 - upload endpoint and time-range policy
+- query-layer chart row downsampling
 
 These modules are mostly testable with local JVM unit tests and should stay independent from Compose where possible.
 

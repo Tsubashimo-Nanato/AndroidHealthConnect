@@ -17,6 +17,7 @@ Results observed:
 
 - `v0.1.0`: passed.
 - `v0.1.1`: passed.
+- `refactor/repository-organization`: passed after adding timezone date-window characterization tests and extracting the health CSV row downsampler.
 
 Both tagged stages emitted an Android Gradle warning that `package="com.example.healthconnectandroid"` in `AndroidManifest.xml` is ignored because namespace is configured by Gradle.
 
@@ -44,6 +45,7 @@ Current tested areas include:
 
 - heart-rate analysis and date selection
 - inspector time ranges
+- query-layer chart row downsampling
 - record paging
 - sleep-session analysis and display models
 - sync range and result severity policy
