@@ -82,6 +82,7 @@ import com.example.healthconnectandroid.hc.upload.HealthUploadService
 import com.example.healthconnectandroid.hc.upload.HealthUploadWorker
 import com.example.healthconnectandroid.hc.upload.UploadPendingCounts
 import com.example.healthconnectandroid.hc.upload.UploadProgress
+import com.example.healthconnectandroid.hc.upload.UploadResultSeverity
 import com.example.healthconnectandroid.hc.upload.UploadTimeRange
 import com.example.healthconnectandroid.hc.upload.toStatus
 import com.example.healthconnectandroid.navigation.AppDestination
@@ -605,42 +606,70 @@ class MainActivity : ComponentActivity() {
                                 },
                                 onTestConnection = { settings ->
                                     scope.launch {
-                                        actionInProgress = "upload_test"
-                                        uploadSettings = settings
-                                        AppPreferences.setUploadSettings(this@MainActivity, settings)
-                                        status = "Testing upload server..."
-                                        val counts = runCatching { uploadService.pendingCounts(settings) }
-                                            .getOrDefault(UploadPendingCounts.Empty)
-                                        uploadPendingCounts = counts
-                                        val result = uploadService.testConnection(settings)
-                                        uploadStatus = result.toStatus(uploadStatus, counts.total)
-                                        AppPreferences.setUploadStatus(this@MainActivity, uploadStatus)
-                                        status = result.message
-                                        actionInProgress = null
+                                        try {
+                                            actionInProgress = "upload_test"
+                                            uploadSettings = settings
+                                            AppPreferences.setUploadSettings(this@MainActivity, settings)
+                                            status = "Testing upload server..."
+                                            val counts = runCatching { uploadService.pendingCounts(settings) }
+                                                .getOrDefault(UploadPendingCounts.Empty)
+                                            uploadPendingCounts = counts
+                                            val result = uploadService.testConnection(settings)
+                                            uploadStatus = result.toStatus(uploadStatus, counts.total)
+                                            AppPreferences.setUploadStatus(this@MainActivity, uploadStatus)
+                                            status = result.message
+                                        } catch (t: CancellationException) {
+                                            throw t
+                                        } catch (t: Throwable) {
+                                            Log.e(TAG, "Upload connection test failed", t)
+                                            val message = "Upload test failed: ${t.message ?: t.javaClass.simpleName}"
+                                            uploadStatus = uploadStatus.copy(
+                                                connectionResult = message,
+                                                severity = UploadResultSeverity.ERROR
+                                            )
+                                            AppPreferences.setUploadStatus(this@MainActivity, uploadStatus)
+                                            status = message
+                                        } finally {
+                                            actionInProgress = null
+                                        }
                                     }
                                 },
                                 onUploadNow = { settings, range ->
                                     scope.launch {
-                                        actionInProgress = "upload"
-                                        uploadProgress = null
-                                        uploadSettings = settings
-                                        AppPreferences.setUploadSettings(this@MainActivity, settings)
-                                        status = uploadStartStatus(range)
-                                        val result = uploadService.uploadPending(settings, range) { progress ->
-                                            uploadProgress = progress
+                                        try {
+                                            actionInProgress = "upload"
+                                            uploadProgress = null
+                                            uploadSettings = settings
+                                            AppPreferences.setUploadSettings(this@MainActivity, settings)
+                                            status = uploadStartStatus(range)
+                                            val result = uploadService.uploadPending(settings, range) { progress ->
+                                                uploadProgress = progress
+                                            }
+                                            uploadStatus = result.toStatus()
+                                            AppPreferences.setUploadStatus(this@MainActivity, uploadStatus)
+                                            uploadPendingCounts = result.pendingCounts
+                                            status = result.message
+                                            if (!result.success && result.retryable && range == UploadTimeRange.ALL) {
+                                                HealthUploadWorker.enqueue(this@MainActivity)
+                                                status = "${result.message}. Retry queued."
+                                            } else if (!result.success && result.retryable) {
+                                                status = "${result.message}. Retry ${range.label} manually."
+                                            }
+                                        } catch (t: CancellationException) {
+                                            throw t
+                                        } catch (t: Throwable) {
+                                            Log.e(TAG, "Upload failed", t)
+                                            val message = "Upload failed: ${t.message ?: t.javaClass.simpleName}"
+                                            uploadStatus = uploadStatus.copy(
+                                                lastResult = message,
+                                                severity = UploadResultSeverity.ERROR
+                                            )
+                                            AppPreferences.setUploadStatus(this@MainActivity, uploadStatus)
+                                            status = message
+                                        } finally {
+                                            uploadProgress = null
+                                            actionInProgress = null
                                         }
-                                        uploadStatus = result.toStatus()
-                                        AppPreferences.setUploadStatus(this@MainActivity, uploadStatus)
-                                        uploadPendingCounts = result.pendingCounts
-                                        status = result.message
-                                        if (!result.success && result.retryable && range == UploadTimeRange.ALL) {
-                                            HealthUploadWorker.enqueue(this@MainActivity)
-                                            status = "${result.message}. Retry queued."
-                                        } else if (!result.success && result.retryable) {
-                                            status = "${result.message}. Retry ${range.label} manually."
-                                        }
-                                        uploadProgress = null
-                                        actionInProgress = null
                                     }
                                 },
                                 modifier = Modifier.padding(pad)

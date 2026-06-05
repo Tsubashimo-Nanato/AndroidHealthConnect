@@ -40,7 +40,7 @@ class HealthDataCatalogQueryService(
         val syncSummariesByType = syncDao.latestSummaries().associateBy { it.recordType }
         val today = LocalDate.now(zoneId).toString()
         val latestValuesByType = healthDao
-            .latestNumericRows()
+            .latestNumericRowsFromLatestNumericRecords()
             .distinctBy { it.recordType }
             .associateBy { it.recordType }
         val aggregateTotalsByType = aggregateDao

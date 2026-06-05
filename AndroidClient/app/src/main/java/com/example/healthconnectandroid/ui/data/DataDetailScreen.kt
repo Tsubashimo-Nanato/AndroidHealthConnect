@@ -128,7 +128,8 @@ fun HealthDataDetailScreen(
     var heartRateAnchorDate by remember(dataTypeKey, zoneId) { mutableStateOf(LocalDate.now(zoneId)) }
     var selectedHeartRateDates by remember(dataTypeKey) { mutableStateOf<Set<LocalDate>>(emptySet()) }
     var heartRateSelectionVersion by remember(dataTypeKey) { mutableIntStateOf(0) }
-    var loading by remember { mutableStateOf(false) }
+    var detailLoading by remember(dataTypeKey) { mutableStateOf(false) }
+    var heartRateChartLoading by remember(dataTypeKey) { mutableStateOf(false) }
     var syncInProgress by remember { mutableStateOf(false) }
     var selectedSyncProgress by remember(dataTypeKey, range) { mutableStateOf<SyncProgress?>(null) }
     var selectedSyncJob by remember(dataTypeKey, range) { mutableStateOf<Job?>(null) }
@@ -210,13 +211,18 @@ fun HealthDataDetailScreen(
         zoneId,
         displayPreferences.unitSystem
     ) {
-        loading = true
+        val chartReload = isHeartRate && detail != null
+        if (chartReload) {
+            heartRateChartLoading = true
+        } else {
+            detailLoading = true
+        }
         status = "Loading local ${descriptor.displayName} data..."
-        if (!isHeartRate) {
+        if (!isHeartRate || detail == null) {
             detail = null
         }
-        runCatching {
-            if (isSleep && sleepQueryWindow != null) {
+        try {
+            val loaded = if (isSleep && sleepQueryWindow != null) {
                 detailQueries.inspectorDetailForWindow(
                     key = dataTypeKey,
                     range = range,
@@ -238,28 +244,34 @@ fun HealthDataDetailScreen(
                     chartEnd = heartRateChartQueryRange?.end
                 )
             }
-        }
-            .onSuccess {
-                detail = it
-                diagnostics.recordDetailQuery(
-                    dataType = dataTypeKey,
-                    start = it.start,
-                    end = it.end,
-                    chartPointCount = it.chartPoints.size,
-                    sleepSessionCount = if (isSleep) {
-                        it.readableRows.count { row -> row.recordTypeKey == HealthDataTypeKeys.SLEEP_SESSION }
-                    } else {
-                        null
-                    }
-                )
-                status = if (isHeartRate) {
-                    lastSyncedDataText(it.lastSynced, zoneId)
+            detail = loaded
+            diagnostics.recordDetailQuery(
+                dataType = dataTypeKey,
+                start = loaded.start,
+                end = loaded.end,
+                chartPointCount = loaded.chartPoints.size,
+                sleepSessionCount = if (isSleep) {
+                    loaded.readableRows.count { row -> row.recordTypeKey == HealthDataTypeKeys.SLEEP_SESSION }
                 } else {
-                    "Last synced data: ${descriptor.displayName} for ${range.label}"
+                    null
                 }
+            )
+            status = if (isHeartRate) {
+                lastSyncedDataText(loaded.lastSynced, zoneId)
+            } else {
+                "Last synced data: ${descriptor.displayName} for ${range.label}"
             }
-            .onFailure { status = "Load failed: ${it.message}" }
-        loading = false
+        } catch (t: CancellationException) {
+            throw t
+        } catch (t: Throwable) {
+            status = "Load failed: ${t.message ?: t.javaClass.simpleName}"
+        } finally {
+            if (chartReload) {
+                heartRateChartLoading = false
+            } else {
+                detailLoading = false
+            }
+        }
     }
 
     LaunchedEffect(pendingSleepScrollRestore, sleepWindowEndDate, selectedSleepBoxIds, detail) {
@@ -445,7 +457,7 @@ fun HealthDataDetailScreen(
                 LaunchedEffect(latestHeartRateDate, loaded.start, loaded.end) {
                     if (selectedHeartRateDates.isEmpty()) {
                         val date = latestHeartRateDate ?: today
-                        loading = true
+                        heartRateChartLoading = true
                         selectedHeartRateDates = setOf(date)
                         heartRateAnchorDate = date
                         heartRateVisibleRange = heartRateVisibleRangeForDates(setOf(date), zoneId)
@@ -493,7 +505,7 @@ fun HealthDataDetailScreen(
                             ?: today
                         if (selectedHeartRateDates.isEmpty()) {
                             val date = latestHeartRateDate ?: today
-                            loading = true
+                            heartRateChartLoading = true
                             selectedHeartRateDates = setOf(date)
                             heartRateAnchorDate = date
                             heartRateSelectionVersion++
@@ -515,7 +527,7 @@ fun HealthDataDetailScreen(
                     onDateSelected = { date ->
                         val cleaned = setOf(date.coerceAtMost(today))
                         if (cleaned != selectedHeartRateDates) {
-                            loading = true
+                            heartRateChartLoading = true
                         }
                         selectedHeartRateDates = cleaned
                         heartRateAnchorDate = cleaned.maxOrNull()?.coerceAtMost(today) ?: today
@@ -534,7 +546,7 @@ fun HealthDataDetailScreen(
                         )
                     }
                 )
-                if (loading) {
+                if (heartRateChartLoading) {
                     LoadingStateCard(
                         title = "Loading heart-rate chart",
                         message = "Reading and reducing samples for the selected date."
@@ -611,7 +623,7 @@ fun HealthDataDetailScreen(
                 syncRange = selectedSyncRange(),
                 heartRateChartRange = heartRateVisibleRange
             )
-        } ?: if (loading) {
+        } ?: if (detailLoading) {
             LoadingStateCard(
                 title = "Loading ${descriptor.displayName}",
                 message = "Reading local rows for the selected range."

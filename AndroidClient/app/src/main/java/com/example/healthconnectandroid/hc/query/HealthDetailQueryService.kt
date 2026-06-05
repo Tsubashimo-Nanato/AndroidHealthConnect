@@ -147,7 +147,7 @@ class HealthDetailQueryService(
             emptyList()
         } else {
             numericRows.chartRows
-                .asChartPoints(descriptor)
+                .asChartPoints(descriptor, zoneId, unitSystem)
         }
         val restingHeartRateEstimate = if (key == HealthDataTypeKeys.HEART_RATE) {
             HeartRateAnalysis.estimateRestingHeartRate(
@@ -432,7 +432,9 @@ class HealthDetailQueryService(
     }
 
     private fun List<HealthCsvRow>.asChartPoints(
-        descriptor: HealthDataTypeDescriptor
+        descriptor: HealthDataTypeDescriptor,
+        zoneId: ZoneId,
+        unitSystem: UnitSystemPreference
     ): List<InspectorChartPoint> {
         val preferredMetric = when (descriptor.key) {
             HealthDataTypeKeys.BLOOD_PRESSURE -> "blood_pressure"
@@ -444,7 +446,12 @@ class HealthDetailQueryService(
             .mapNotNull { row ->
                 val value = row.numericValue ?: return@mapNotNull null
                 val time = row.valueStartEpochMillis ?: row.recordStartEpochMillis
-                val readable = HealthDisplayFormatter.toReadable(row, descriptor)
+                val readable = HealthDisplayFormatter.toReadable(
+                    row = row,
+                    descriptor = descriptor,
+                    zoneId = zoneId,
+                    unitSystem = unitSystem
+                )
                 InspectorChartPoint(
                     epochMillis = time,
                     value = value,

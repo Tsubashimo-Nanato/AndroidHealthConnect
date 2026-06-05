@@ -325,6 +325,7 @@ private val exactChinese = mapOf(
     "All" to "全部",
     "Past month" to "过去一个月",
     "Past week" to "过去一周",
+    "Past day" to "过去一天",
     "Endpoint ready" to "端点就绪",
     "Production" to "生产",
     "Local debug" to "本地调试",

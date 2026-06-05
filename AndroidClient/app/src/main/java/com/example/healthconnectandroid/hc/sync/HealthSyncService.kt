@@ -1,20 +1,23 @@
 package com.example.healthconnectandroid.hc.sync
 
 import android.content.Context
+import android.util.Log
 import com.example.healthconnectandroid.data.AppDb
+import com.example.healthconnectandroid.data.HealthSyncCoverageEntity
 import com.example.healthconnectandroid.hc.HealthDataTypeDescriptor
 import com.example.healthconnectandroid.hc.HealthDataTypeRegistry
 import com.example.healthconnectandroid.hc.HealthDataTypeSyncResult
 import com.example.healthconnectandroid.hc.HrSample
 import java.time.Duration
 import java.time.Instant
-import java.time.LocalDate
 import java.time.ZoneId
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withTimeout
 import kotlin.coroutines.coroutineContext
+
+private const val TAG = "HCHRSyncService"
 
 class HealthSyncService(
     context: Context,
@@ -23,8 +26,8 @@ class HealthSyncService(
 ) {
     private val appContext = context.applicationContext
     private val syncer = HealthDataTypeSyncer(appContext, db)
-    private val healthDao = db.healthRecordDao()
     private val syncDao = db.healthSyncRunDao()
+    private val coverageDao = db.healthSyncCoverageDao()
 
     suspend fun runSmartSync(
         requireBackgroundReadPermission: Boolean = false,
@@ -77,13 +80,15 @@ class HealthSyncService(
         onProgress: (SyncProgress) -> Unit = {}
     ): HealthDataTypeSyncResult {
         val descriptor = HealthDataTypeRegistry.require(key)
-        val coveredLocalDates = localDatesForRange(key, start, end, zoneId)
+        val coveredWindows = coverageWindowsForRange(key, start, end)
+        val totalDailyWindows = SyncWindowPlanner.dailyWindowCount(start, end, zoneId)
         val missingWindows = SyncWindowPlanner.missingDailyWindows(
             requestedStart = start,
             requestedEnd = end,
             zoneId = zoneId,
-            coveredLocalDates = coveredLocalDates
+            coveredWindows = coveredWindows
         )
+        val coveredDailyWindows = (totalDailyWindows - missingWindows.size).coerceAtLeast(0)
         onProgress(
             SyncProgress(
                 mode = SyncMode.SELECTED_TYPE,
@@ -99,7 +104,7 @@ class HealthSyncService(
                 isCancellable = true,
                 isIndeterminate = false,
                 phase = SyncProgressPhase.PREPARING,
-                message = "Checking local coverage: ${coveredLocalDates.size} days already local"
+                message = "Checking sync coverage: $coveredDailyWindows/$totalDailyWindows days covered"
             )
         )
         if (missingWindows.isEmpty()) {
@@ -108,11 +113,12 @@ class HealthSyncService(
                     key = descriptor.key,
                     requestedStart = start,
                     requestedEnd = end,
-                    localDaysChecked = coveredLocalDates.size,
+                    localDaysChecked = totalDailyWindows,
                     localDaysRequested = 0
                 ),
                 startedAt = Instant.now()
             )
+            recordCoverageIfSuccessful(SyncMode.SELECTED_TYPE, result)
             onProgress(
                 progressForResults(
                     mode = SyncMode.SELECTED_TYPE,
@@ -158,6 +164,7 @@ class HealthSyncService(
                 }
             )
             results += result
+            recordCoverageIfSuccessful(SyncMode.SELECTED_TYPE, result)
             onProgress(
                 progressForResults(
                     mode = SyncMode.SELECTED_TYPE,
@@ -177,7 +184,7 @@ class HealthSyncService(
             key = descriptor.key,
             requestedStart = start,
             requestedEnd = end,
-            localDaysChecked = coveredLocalDates.size + missingWindows.size,
+            localDaysChecked = totalDailyWindows,
             localDaysRequested = missingWindows.size,
             results = results
         )
@@ -329,6 +336,7 @@ class HealthSyncService(
                 }
             )
             results += result
+            recordCoverageIfSuccessful(mode, result)
             onProgress(
                 progressForResults(
                     mode = mode,
@@ -425,19 +433,52 @@ class HealthSyncService(
             message = message
         )
 
-    private suspend fun localDatesForRange(
+    private suspend fun coverageWindowsForRange(
         key: String,
         start: Instant,
-        end: Instant,
-        zoneId: ZoneId
-    ): Set<LocalDate> =
-        healthDao.localDateEpochsForTypeRange(
+        end: Instant
+    ): List<SyncCoverageWindow> =
+        coverageDao.successfulCoverageForTypeRange(
             recordType = key,
             startEpochMillis = start.toEpochMilli(),
             endEpochMillis = end.toEpochMilli()
-        ).map { epochMillis ->
-            Instant.ofEpochMilli(epochMillis).atZone(zoneId).toLocalDate()
-        }.toSet()
+        ).map { coverage ->
+            SyncCoverageWindow(
+                start = Instant.ofEpochMilli(coverage.coveredStartEpochMillis),
+                end = Instant.ofEpochMilli(coverage.coveredEndEpochMillis)
+            )
+        }
+
+    private suspend fun recordCoverageIfSuccessful(
+        mode: SyncMode,
+        result: HealthDataTypeSyncResult
+    ) {
+        val start = result.requestedStart ?: return
+        val end = result.requestedEnd ?: return
+        if (!start.isBefore(end)) return
+        if (result.terminalStatus != null || result.errorMessage != null || result.skippedReason != null) return
+
+        try {
+            coverageDao.insert(
+                HealthSyncCoverageEntity(
+                    recordType = result.key,
+                    coveredStartEpochMillis = start.toEpochMilli(),
+                    coveredEndEpochMillis = end.toEpochMilli(),
+                    status = SyncRunStatus.SUCCESS.id,
+                    mode = mode.name,
+                    updatedAtEpochMillis = Instant.now().toEpochMilli(),
+                    recordsRead = result.recordsRead + result.aggregateRowsRead,
+                    recordsInserted = result.recordsInserted + result.recordsUpdated + result.aggregateRowsStored,
+                    recordsSkippedDuplicate = result.recordsSkippedDuplicate,
+                    errorMessage = null
+                )
+            )
+        } catch (t: CancellationException) {
+            throw t
+        } catch (t: Throwable) {
+            Log.w(TAG, "Failed to record sync coverage for type=${result.key} mode=${mode.name}", t)
+        }
+    }
 
     private fun combineSelectedTypeResults(
         key: String,

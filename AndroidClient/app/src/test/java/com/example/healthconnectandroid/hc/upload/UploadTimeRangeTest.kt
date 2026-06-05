@@ -30,4 +30,14 @@ class UploadTimeRangeTest {
             UploadTimeRange.PAST_WEEK.startEpochMillis(now)
         )
     }
+
+    @Test
+    fun pastDayUsesTwentyFourHourCutoff() {
+        val now = Instant.parse("2026-06-04T00:00:00Z")
+
+        assertEquals(
+            Instant.parse("2026-06-03T00:00:00Z").toEpochMilli(),
+            UploadTimeRange.PAST_DAY.startEpochMillis(now)
+        )
+    }
 }

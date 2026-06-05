@@ -134,28 +134,6 @@ interface HealthRecordDao {
 
     @Query(
         """
-        SELECT DISTINCT COALESCE(v.startEpochMillis, v.sampleEpochMillis, r.startEpochMillis)
-        FROM health_records r
-        LEFT JOIN health_values v ON v.recordLocalId = r.localId
-        WHERE r.recordType = :recordType
-          AND COALESCE(v.startEpochMillis, v.sampleEpochMillis, r.startEpochMillis) < :endEpochMillis
-          AND COALESCE(
-              v.endEpochMillis,
-              v.startEpochMillis,
-              v.sampleEpochMillis,
-              r.endEpochMillis,
-              r.startEpochMillis
-          ) >= :startEpochMillis
-        """
-    )
-    suspend fun localDateEpochsForTypeRange(
-        recordType: String,
-        startEpochMillis: Long,
-        endEpochMillis: Long
-    ): List<Long>
-
-    @Query(
-        """
         SELECT
             recordType AS recordType,
             COUNT(*) AS recordCount,
@@ -973,12 +951,18 @@ interface HealthRecordDao {
 
     @Query(
         """
-        WITH latest_records AS (
+        WITH latest_records_with_numeric AS (
             SELECT
-                recordType AS recordType,
-                MAX(startEpochMillis) AS latestRecordEpochMillis
-            FROM health_records
-            GROUP BY recordType
+                r.recordType AS recordType,
+                MAX(r.startEpochMillis) AS latestRecordEpochMillis
+            FROM health_records r
+            WHERE EXISTS (
+                SELECT 1
+                FROM health_values v
+                WHERE v.recordLocalId = r.localId
+                  AND v.numericValue IS NOT NULL
+            )
+            GROUP BY r.recordType
         )
         SELECT
             r.localId AS localRecordId,
@@ -1006,16 +990,16 @@ interface HealthRecordDao {
             NULL AS metadataJson,
             NULL AS rawJson
         FROM health_records r
-        INNER JOIN latest_records l ON l.recordType = r.recordType
-            AND l.latestRecordEpochMillis = r.startEpochMillis
         INNER JOIN health_values v ON v.recordLocalId = r.localId
+        INNER JOIN latest_records_with_numeric l ON l.recordType = r.recordType
+            AND l.latestRecordEpochMillis = r.startEpochMillis
         WHERE v.numericValue IS NOT NULL
         ORDER BY r.recordType ASC,
             COALESCE(v.startEpochMillis, v.sampleEpochMillis, r.startEpochMillis) DESC,
             COALESCE(v.sequence, 2147483647) ASC
         """
     )
-    suspend fun latestNumericRows(): List<HealthCsvRow>
+    suspend fun latestNumericRowsFromLatestNumericRecords(): List<HealthCsvRow>
 
     @Query(
         """

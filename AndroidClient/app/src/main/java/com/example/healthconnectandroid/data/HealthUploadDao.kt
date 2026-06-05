@@ -100,7 +100,7 @@ interface HealthUploadDao {
                   r.startEpochMillis
               ) >= :startEpochMillis
           )
-        ORDER BY v.recordLocalId ASC, COALESCE(v.sequence, 2147483647) ASC, v.localId ASC
+        ORDER BY v.recordLocalId ASC, v.sequence ASC, v.localId ASC
         LIMIT :limit
         """
     )

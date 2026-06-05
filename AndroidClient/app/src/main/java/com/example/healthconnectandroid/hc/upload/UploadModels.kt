@@ -11,13 +11,15 @@ enum class UploadServerMode(val label: String) {
 enum class UploadTimeRange(val label: String) {
     ALL("All"),
     PAST_MONTH("Past month"),
-    PAST_WEEK("Past week");
+    PAST_WEEK("Past week"),
+    PAST_DAY("Past day");
 
     fun startEpochMillis(now: Instant = Instant.now()): Long? =
         when (this) {
             ALL -> null
             PAST_MONTH -> now.minus(30, ChronoUnit.DAYS).toEpochMilli()
             PAST_WEEK -> now.minus(7, ChronoUnit.DAYS).toEpochMilli()
+            PAST_DAY -> now.minus(1, ChronoUnit.DAYS).toEpochMilli()
         }
 }
 

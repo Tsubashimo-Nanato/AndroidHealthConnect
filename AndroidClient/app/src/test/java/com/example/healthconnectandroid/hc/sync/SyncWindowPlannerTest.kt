@@ -10,12 +10,18 @@ class SyncWindowPlannerTest {
     private val zoneId = ZoneId.of("Asia/Tokyo")
 
     @Test
-    fun missingDailyWindowsSkipsCoveredLocalDates() {
+    fun missingDailyWindowsSkipsFullyCoveredLocalDates() {
+        val coveredDate = LocalDate.parse("2026-05-02")
         val windows = SyncWindowPlanner.missingDailyWindows(
             requestedStart = Instant.parse("2026-05-01T00:00:00Z"),
             requestedEnd = Instant.parse("2026-05-04T00:00:00Z"),
             zoneId = zoneId,
-            coveredLocalDates = setOf(LocalDate.parse("2026-05-02"))
+            coveredWindows = listOf(
+                SyncCoverageWindow(
+                    start = coveredDate.atStartOfDay(zoneId).toInstant(),
+                    end = coveredDate.plusDays(1).atStartOfDay(zoneId).toInstant()
+                )
+            )
         )
 
         assertEquals(
@@ -29,12 +35,52 @@ class SyncWindowPlannerTest {
     }
 
     @Test
+    fun missingDailyWindowsKeepsPartiallyCoveredDays() {
+        val date = LocalDate.parse("2026-05-02")
+        val windows = SyncWindowPlanner.missingDailyWindows(
+            requestedStart = date.atStartOfDay(zoneId).toInstant(),
+            requestedEnd = date.plusDays(1).atStartOfDay(zoneId).toInstant(),
+            zoneId = zoneId,
+            coveredWindows = listOf(
+                SyncCoverageWindow(
+                    start = date.atTime(17, 0).atZone(zoneId).toInstant(),
+                    end = date.plusDays(1).atStartOfDay(zoneId).toInstant()
+                )
+            )
+        )
+
+        assertEquals(listOf(date), windows.map { it.localDate })
+    }
+
+    @Test
+    fun missingDailyWindowsMergesAdjacentCoverageWindows() {
+        val date = LocalDate.parse("2026-05-02")
+        val windows = SyncWindowPlanner.missingDailyWindows(
+            requestedStart = date.atStartOfDay(zoneId).toInstant(),
+            requestedEnd = date.plusDays(1).atStartOfDay(zoneId).toInstant(),
+            zoneId = zoneId,
+            coveredWindows = listOf(
+                SyncCoverageWindow(
+                    start = date.atStartOfDay(zoneId).toInstant(),
+                    end = date.atTime(12, 0).atZone(zoneId).toInstant()
+                ),
+                SyncCoverageWindow(
+                    start = date.atTime(12, 0).atZone(zoneId).toInstant(),
+                    end = date.plusDays(1).atStartOfDay(zoneId).toInstant()
+                )
+            )
+        )
+
+        assertEquals(emptyList<SyncDateWindow>(), windows)
+    }
+
+    @Test
     fun missingDailyWindowsClipsPartialBoundaryDays() {
         val windows = SyncWindowPlanner.missingDailyWindows(
             requestedStart = Instant.parse("2026-05-01T03:30:00Z"),
             requestedEnd = Instant.parse("2026-05-02T07:15:00Z"),
             zoneId = ZoneId.of("UTC"),
-            coveredLocalDates = emptySet()
+            coveredWindows = emptyList()
         )
 
         assertEquals(2, windows.size)
