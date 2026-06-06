@@ -55,4 +55,4 @@ Note: the Android test command emitted a Gradle manifest warning that the `packa
 - The Android project already has meaningful JVM tests around pure policy logic.
 - The server has no checked-in test project.
 - Several Android services combine platform access, database access, and orchestration. Future refactors should add characterization tests before moving that code.
-- API key handling in this stage should be treated carefully because later issue context indicates server security concerns existed around `95d9306`.
+- API key handling in this stage should be treated carefully because the project handles health data and later code changed server security behavior.

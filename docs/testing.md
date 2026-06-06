@@ -32,6 +32,11 @@ Results observed:
 
 - `v0.1.0`: passed with 0 warnings and 0 errors.
 - `v0.1.1`: passed with 0 warnings and 0 errors.
+- `refactor/repository-organization`: passed on 2026-06-06 with 0 warnings and 0 errors.
+
+## Read-only GitHub Inspection
+
+`gh` was not available locally. Read-only GitHub API requests on 2026-06-06 returned no issues and no pull requests for `Tsubashimo-Nanato/AndroidHealthConnect`.
 
 ## Current Test Layout
 
@@ -63,7 +68,7 @@ The server currently has no checked-in test project.
 
 ## Recommended Next Tests
 
-- Add tests for the open timezone issue around samples within two hours of midnight in UTC, Asia/Tokyo, and a negative-offset timezone.
+- Add tests for daily grouping around samples within two hours of midnight in UTC, Asia/Tokyo, and a negative-offset timezone.
 - Add Room-backed tests for DAO queries that group by day or calculate detail chart windows.
 - Add .NET tests for `ApiKeyMiddleware`, upload DTO validation, and upload persistence idempotency.
 - Add a minimal server integration test for `GET /health/api/v1/status` and `POST /health/api/v1/ingest/batches`.

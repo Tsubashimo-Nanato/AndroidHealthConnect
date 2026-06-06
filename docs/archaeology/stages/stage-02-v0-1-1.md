@@ -55,5 +55,5 @@ Note: the Android test command emitted the same Gradle manifest warning about th
 
 - Upload and sync policies became more explicit and gained tests.
 - The transition added significant behavior in one stage, so review is easier through the synthetic transition branch.
-- GitHub issue context at this stage references upload contract mismatch, aggregate sync coverage semantics, daily timezone grouping, and server API-key/logging risks.
+- Local archaeology identified risk areas around upload contract compatibility, aggregate sync coverage semantics, daily timezone grouping, and server API-key/logging behavior.
 - Current `main` has one additional commit after this tag that appears to address several server and sync/upload concerns.

@@ -17,7 +17,7 @@ This archaeology pass is local-only and non-destructive. Existing tags were pres
 - Existing docs at start: `README.md`, `docs/README.md`.
 - Issue/PR templates at start: none observed.
 - GitHub CLI: not available locally.
-- GitHub connector: available read-only for repository, issue, and PR searches.
+- GitHub issue/PR inspection: `gh` was not available locally; a read-only GitHub API check on 2026-06-06 returned no issues and no pull requests.
 
 ## Chronological Stages
 
@@ -36,10 +36,11 @@ Both tags are annotated tags and reachable from current `main`.
 
 ## Issue and PR Context
 
-Read-only GitHub connector inspection found:
+Read-only GitHub API inspection on 2026-06-06 found:
 
-- Open issue #3: daily grouping timezone semantics.
-- Closed-issue search results for issues #1, #2, and #4, which correspond to upload contract, aggregate sync coverage, and API-key/sensitive logging concerns.
-- No pull requests returned by the connector search.
+- No issues returned by `GET /repos/Tsubashimo-Nanato/AndroidHealthConnect/issues?state=all`.
+- No pull requests returned by `GET /repos/Tsubashimo-Nanato/AndroidHealthConnect/pulls?state=all`.
+
+The PR plan still maps local technical risks to future workstreams, but it does not rely on external issue numbers.
 
 No GitHub issues or PRs were modified.

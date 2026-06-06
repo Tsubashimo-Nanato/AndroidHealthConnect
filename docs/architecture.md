@@ -85,7 +85,7 @@ Avoid dependencies from core/domain logic back into Compose, Android widgets, Wo
 
 ## Known Limitations
 
-- Open GitHub issue #3 reports inconsistent daily grouping timezone semantics. Current code has targeted timezone-aware heart-rate query work, but the repository still needs an explicit end-to-end daily grouping contract.
+- Daily grouping timezone semantics remain a known risk. Current code has targeted timezone-aware heart-rate query work, but the repository still needs an explicit end-to-end daily grouping contract.
 - Server-side behavior has no checked-in test project yet.
 - Some Compose screens remain large and contain orchestration logic that should move behind view-model/service boundaries over time.
 - DAO SQL is powerful but dense; high-risk query changes should be covered by Room or integration tests before broad refactors.

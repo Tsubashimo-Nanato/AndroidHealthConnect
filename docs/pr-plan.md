@@ -56,9 +56,11 @@ This plan prepares the current local work for review without pushing or opening 
 - Test commands: documentation review plus latest build/test commands.
 - Review notes: make sure docs match the actual final branch state.
 
-## Issue Mapping
+## Issue and Risk Mapping
 
-- GitHub issue #3, daily grouping timezone semantics: map to PR 2 and PR 4. Add tests first, then choose an explicit daily grouping contract.
-- GitHub issue #1, local server API upload contract: current `main` includes `/health/api/v1/status` and `/health/api/v1/ingest/batches`; keep regression tests in PR 2.
-- GitHub issue #2, aggregate sync coverage success semantics: current `main` has aggregate-error-aware severity policy; keep coverage tests in PR 2.
-- GitHub issue #4, API keys and sensitive EF logging: current `main` reads keys from config and gates sensitive logging; add server tests before further changes.
+Read-only GitHub API inspection on 2026-06-06 returned no issues and no pull requests. The following workstreams are mapped from local code and archaeology findings instead of external issue numbers:
+
+- Daily grouping timezone semantics: map to PR 2 and PR 4. Add tests first, then choose an explicit daily grouping contract.
+- Local server API upload contract: current `main` includes `/health/api/v1/status` and `/health/api/v1/ingest/batches`; keep regression tests in PR 2.
+- Aggregate sync coverage success semantics: current `main` has aggregate-error-aware severity policy; keep coverage tests in PR 2.
+- API keys and sensitive EF logging: current `main` reads keys from config and gates sensitive logging; add server tests before further changes.
