@@ -113,7 +113,7 @@ fun LineChart(
         )
     }
     val visiblePoints = remember(sorted, xBounds) {
-        sorted.filter { point -> point.epochMillis.toDouble() in xBounds.min..xBounds.max }
+        visibleChartPointWindow(sorted, xBounds)
     }
     val drawPoints = remember(visiblePoints) {
         ChartDrawDownsampler.downsampleMinMax(visiblePoints)
@@ -324,6 +324,45 @@ internal fun lineMinViewportFraction(
         ?.takeIf { it > 0f }
         ?.let { (it / 8f).coerceAtLeast(0.001f) }
     return minOf(sampleBasedFloor, preferredFloor ?: sampleBasedFloor).coerceIn(0.001f, 1f)
+}
+
+internal fun visibleChartPointWindow(
+    points: List<InspectorChartPoint>,
+    xBounds: NumericBounds
+): List<InspectorChartPoint> {
+    if (points.isEmpty()) return emptyList()
+    val startIndex = lowerEpochBound(points, xBounds.min)
+    val endIndex = upperEpochBound(points, xBounds.max)
+    if (startIndex >= endIndex) return emptyList()
+    return points.subList(startIndex, endIndex)
+}
+
+private fun lowerEpochBound(points: List<InspectorChartPoint>, epochMillis: Double): Int {
+    var low = 0
+    var high = points.size
+    while (low < high) {
+        val mid = (low + high) / 2
+        if (points[mid].epochMillis.toDouble() < epochMillis) {
+            low = mid + 1
+        } else {
+            high = mid
+        }
+    }
+    return low
+}
+
+private fun upperEpochBound(points: List<InspectorChartPoint>, epochMillis: Double): Int {
+    var low = 0
+    var high = points.size
+    while (low < high) {
+        val mid = (low + high) / 2
+        if (points[mid].epochMillis.toDouble() <= epochMillis) {
+            low = mid + 1
+        } else {
+            high = mid
+        }
+    }
+    return low
 }
 
 private fun lineFullXBounds(
