@@ -496,15 +496,40 @@ private fun syncProgressCounterText(
 
 fun statusToneForMessage(message: String): StatusTone {
     val lower = message.lowercase()
+    val withoutZeroProblemCounts = lower.withoutZeroProblemCounts()
     return when {
-        "failed" in lower || "error" in lower -> StatusTone.Error
-        "missing" in lower || "grant" in lower || "skipped" in lower -> StatusTone.Warning
+        "failed" in lower || "failure" in lower -> StatusTone.Error
+        "partial_error" in lower ||
+            hasNonZeroProblemCounts(lower) ||
+            "timeout" in withoutZeroProblemCounts ||
+            "cancelled" in withoutZeroProblemCounts -> StatusTone.Warning
+        "missing" in lower || "grant" in lower || "skipped" in withoutZeroProblemCounts -> StatusTone.Warning
         "cleared" in lower -> StatusTone.Destructive
-        "exported" in lower || "synced" in lower || "success" in lower -> StatusTone.Success
+        "exported" in lower ||
+            "synced" in lower ||
+            "success" in lower ||
+            "complete" in lower -> StatusTone.Success
+        "error" in withoutZeroProblemCounts -> StatusTone.Warning
         "syncing" in lower || "querying" in lower -> StatusTone.Info
         else -> StatusTone.Neutral
     }
 }
+
+private val NonZeroProblemCountPatterns = listOf(
+    Regex("""\b(errors?|skipped|timeouts?|cancelled)[ =:]([1-9]\d*)\b"""),
+    Regex("""\b([1-9]\d*) (errors?|skipped|timeouts?|cancelled)\b""")
+)
+
+private val ZeroProblemCountPatterns = listOf(
+    Regex("""\b(errors?|skipped|timeouts?|cancelled)[ =:]0\b"""),
+    Regex("""\b0 (errors?|skipped|timeouts?|cancelled)\b""")
+)
+
+private fun hasNonZeroProblemCounts(message: String): Boolean =
+    NonZeroProblemCountPatterns.any { it.containsMatchIn(message) }
+
+private fun String.withoutZeroProblemCounts(): String =
+    ZeroProblemCountPatterns.fold(this) { current, pattern -> pattern.replace(current, "") }
 
 fun isBusyMessage(message: String): Boolean {
     val lower = message.lowercase()

@@ -9,12 +9,20 @@ object PeriodicSyncPreferences {
     private const val KEY_LAST_FINISHED_EPOCH_MILLIS = "last_finished_epoch_millis"
     private const val KEY_LAST_STATUS = "last_status"
     private const val KEY_LAST_SUMMARY = "last_summary"
+    private const val KEY_AUTO_UPLOAD_AFTER_SYNC = "auto_upload_after_sync"
 
     fun isEnabled(context: Context): Boolean =
         prefs(context).getBoolean(KEY_ENABLED, false)
 
     fun setEnabled(context: Context, enabled: Boolean) {
         prefs(context).edit().putBoolean(KEY_ENABLED, enabled).apply()
+    }
+
+    fun autoUploadAfterSync(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_AUTO_UPLOAD_AFTER_SYNC, false)
+
+    fun setAutoUploadAfterSync(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(KEY_AUTO_UPLOAD_AFTER_SYNC, enabled).apply()
     }
 
     fun lastFinishedAt(context: Context): Instant? {
