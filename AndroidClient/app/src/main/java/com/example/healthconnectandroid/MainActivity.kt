@@ -78,6 +78,7 @@ import com.example.healthconnectandroid.hc.sync.SyncRangePolicy
 import com.example.healthconnectandroid.hc.sync.SyncResultSeverity
 import com.example.healthconnectandroid.hc.sync.SyncResultSeverityPolicy
 import com.example.healthconnectandroid.hc.sync.SyncRunStatus
+import com.example.healthconnectandroid.hc.upload.AutoUploadPolicy
 import com.example.healthconnectandroid.hc.upload.HealthUploadService
 import com.example.healthconnectandroid.hc.upload.HealthUploadWorker
 import com.example.healthconnectandroid.hc.upload.UploadPendingCounts
@@ -93,7 +94,6 @@ import com.example.healthconnectandroid.ui.data.DataCatalogScreen
 import com.example.healthconnectandroid.ui.data.HealthDataDetailScreen
 import com.example.healthconnectandroid.ui.dashboard.DashboardScreen
 import com.example.healthconnectandroid.ui.settings.DebugScreen
-import com.example.healthconnectandroid.ui.settings.SettingsAppearanceScreen
 import com.example.healthconnectandroid.ui.settings.SettingsDataScreen
 import com.example.healthconnectandroid.ui.settings.SettingsPermissionsScreen
 import com.example.healthconnectandroid.ui.settings.SettingsPreferencesScreen
@@ -303,6 +303,9 @@ class MainActivity : ComponentActivity() {
         var periodicEnabled by remember {
             mutableStateOf(PeriodicSyncPreferences.isEnabled(this@MainActivity))
         }
+        var autoUploadAfterSync by remember {
+            mutableStateOf(PeriodicSyncPreferences.autoUploadAfterSync(this@MainActivity))
+        }
         var lastPeriodicSync by remember {
             mutableStateOf(PeriodicSyncPreferences.lastFinishedAt(this@MainActivity))
         }
@@ -360,6 +363,22 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        fun queueAutoUploadAfterSync(mode: SyncMode, results: List<HealthDataTypeSyncResult>): Boolean {
+            val shouldQueue = AutoUploadPolicy.shouldQueueAfterSync(
+                enabled = autoUploadAfterSync,
+                mode = mode,
+                results = results,
+                settings = uploadSettings
+            )
+            if (!shouldQueue) return false
+
+            HealthUploadWorker.enqueue(this@MainActivity)
+            return true
+        }
+
+        fun statusWithAutoUpload(summary: String, queued: Boolean): String =
+            if (queued) "$summary. Auto upload queued." else summary
+
         LaunchedEffect(Unit) {
             val granted = grantedHealthConnectPermissions()
             grantedPermissions = granted
@@ -377,6 +396,7 @@ class MainActivity : ComponentActivity() {
                 if (e == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
                     platformGranted = hasPlatformPerm()
                     periodicEnabled = PeriodicSyncPreferences.isEnabled(this@MainActivity)
+                    autoUploadAfterSync = PeriodicSyncPreferences.autoUploadAfterSync(this@MainActivity)
                     lastPeriodicSync = PeriodicSyncPreferences.lastFinishedAt(this@MainActivity)
                     lastPeriodicStatus = PeriodicSyncPreferences.lastStatus(this@MainActivity)
                     lastPeriodicSummary = PeriodicSyncPreferences.lastSummary(this@MainActivity)
@@ -435,7 +455,6 @@ class MainActivity : ComponentActivity() {
                             onOpenSync = { nav.openSettingsSection(SettingsDestination.Sync) },
                             onOpenUpload = { nav.openSettingsSection(SettingsDestination.Upload) },
                             onOpenDataSettings = { nav.openSettingsSection(SettingsDestination.DataSettings) },
-                            onOpenAppearance = { nav.openSettingsSection(SettingsDestination.Appearance) },
                             onOpenDebug = { nav.openSettingsSection(SettingsDestination.Debug) },
                             modifier = Modifier.padding(pad)
                         )
@@ -453,10 +472,22 @@ class MainActivity : ComponentActivity() {
                             )
                             SettingsDestination.Preferences -> SettingsPreferencesScreen(
                                 userPreferences = userPreferences,
+                                themeMode = themeMode,
+                                themePalette = themePalette,
                                 onUserPreferencesSave = { preferences ->
                                     userPreferences = preferences
                                     AppPreferences.setUserPreferences(this@MainActivity, preferences)
                                     status = "Preferences saved"
+                                },
+                                onThemeModeChange = { mode ->
+                                    themeMode = mode
+                                    AppPreferences.setThemeMode(this@MainActivity, mode)
+                                    status = "Appearance saved"
+                                },
+                                onThemePaletteChange = { palette ->
+                                    themePalette = palette
+                                    AppPreferences.setThemePalette(this@MainActivity, palette)
+                                    status = "Appearance saved"
                                 },
                                 modifier = Modifier.padding(pad)
                             )
@@ -483,6 +514,7 @@ class MainActivity : ComponentActivity() {
                                 periodicEnabled = periodicEnabled,
                                 backgroundReadAvailable = backgroundReadAvailable,
                                 backgroundReadGranted = backgroundReadGranted,
+                                autoUploadAfterSync = autoUploadAfterSync,
                                 lastPeriodicSync = lastPeriodicSync,
                                 lastPeriodicStatus = lastPeriodicStatus,
                                 lastPeriodicSummary = lastPeriodicSummary,
@@ -569,6 +601,7 @@ class MainActivity : ComponentActivity() {
                                         }
                                         diagnostics.recordSyncResults(SyncMode.PERIODIC, results)
                                         val summary = syncAllStatusText(results, "Background sync now")
+                                        val autoUploadQueued = queueAutoUploadAfterSync(SyncMode.PERIODIC, results)
                                         PeriodicSyncPreferences.markFinished(
                                             this@MainActivity,
                                             Instant.now(),
@@ -582,10 +615,22 @@ class MainActivity : ComponentActivity() {
                                         lastPeriodicSync = PeriodicSyncPreferences.lastFinishedAt(this@MainActivity)
                                         lastPeriodicStatus = PeriodicSyncPreferences.lastStatus(this@MainActivity)
                                         lastPeriodicSummary = PeriodicSyncPreferences.lastSummary(this@MainActivity)
-                                        status = summary
+                                        status = statusWithAutoUpload(summary, autoUploadQueued)
                                         demoStatus = runCatching { dashboardQueries.demoStatus() }.getOrNull()
                                         refreshUploadStatus()
                                         actionInProgress = null
+                                    }
+                                },
+                                onToggleAutoUpload = {
+                                    autoUploadAfterSync = !autoUploadAfterSync
+                                    PeriodicSyncPreferences.setAutoUploadAfterSync(
+                                        this@MainActivity,
+                                        autoUploadAfterSync
+                                    )
+                                    status = if (autoUploadAfterSync) {
+                                        "Auto upload after sync enabled"
+                                    } else {
+                                        "Auto upload after sync disabled"
                                     }
                                 },
                                 modifier = Modifier.padding(pad)
@@ -695,19 +740,6 @@ class MainActivity : ComponentActivity() {
                                 onRequestClear = { showClearConfirm = true },
                                 modifier = Modifier.padding(pad)
                             )
-                            SettingsDestination.Appearance -> SettingsAppearanceScreen(
-                                themeMode = themeMode,
-                                themePalette = themePalette,
-                                onThemeModeChange = { mode ->
-                                    themeMode = mode
-                                    AppPreferences.setThemeMode(this@MainActivity, mode)
-                                },
-                                onThemePaletteChange = { palette ->
-                                    themePalette = palette
-                                    AppPreferences.setThemePalette(this@MainActivity, palette)
-                                },
-                                modifier = Modifier.padding(pad)
-                            )
                             SettingsDestination.Debug -> DebugScreen(
                                 modifier = Modifier.padding(pad),
                                 platformGranted = platformGranted,
@@ -813,9 +845,11 @@ class MainActivity : ComponentActivity() {
                                             dashboardStatusTone = StatusTone.Error
                                             actionInProgress = null
                                             return@launch
-                                        }
+                                    }
                                     diagnostics.recordSyncResults(SyncMode.SMART, results)
-                                    status = syncAllStatusText(results, "Smart sync")
+                                    val summary = syncAllStatusText(results, "Smart sync")
+                                    val autoUploadQueued = queueAutoUploadAfterSync(SyncMode.SMART, results)
+                                    status = statusWithAutoUpload(summary, autoUploadQueued)
                                     dashboardStatusTone = syncResultsStatusTone(results)
                                     demoStatus = runCatching { dashboardQueries.demoStatus() }.getOrNull()
                                     refreshUploadStatus()

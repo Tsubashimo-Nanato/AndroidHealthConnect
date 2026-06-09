@@ -8,9 +8,13 @@ import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
+import com.example.healthconnectandroid.AppPreferences
 import com.example.healthconnectandroid.data.AppDb
 import com.example.healthconnectandroid.hc.sync.HealthSyncService
+import com.example.healthconnectandroid.hc.sync.SyncMode
 import com.example.healthconnectandroid.hc.sync.SyncRunStatus
+import com.example.healthconnectandroid.hc.upload.AutoUploadPolicy
+import com.example.healthconnectandroid.hc.upload.HealthUploadWorker
 import java.time.Instant
 import java.util.concurrent.TimeUnit
 
@@ -52,6 +56,16 @@ class PeriodicHealthSyncWorker(
             summary = summary
         )
         Log.i(TAG, "Periodic sync status=$status $summary")
+        if (AutoUploadPolicy.shouldQueueAfterSync(
+                enabled = PeriodicSyncPreferences.autoUploadAfterSync(applicationContext),
+                mode = SyncMode.PERIODIC,
+                results = results,
+                settings = AppPreferences.uploadSettings(applicationContext)
+            )
+        ) {
+            HealthUploadWorker.enqueue(applicationContext)
+            Log.i(TAG, "Auto upload queued after periodic sync")
+        }
 
         return if (errorCount > 0) Result.retry() else Result.success()
     }

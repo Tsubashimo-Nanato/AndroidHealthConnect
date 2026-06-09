@@ -83,7 +83,6 @@ fun SettingsScreen(
     onOpenSync: () -> Unit,
     onOpenUpload: () -> Unit,
     onOpenDataSettings: () -> Unit,
-    onOpenAppearance: () -> Unit,
     onOpenDebug: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -96,14 +95,13 @@ fun SettingsScreen(
     ) {
         Text(uiText("Settings"), modifier = Modifier.rowFadeIn(0), style = MaterialTheme.typography.headlineSmall)
         SettingsNavCard("Profile", profileBrief(userProfile), onOpenProfile, Modifier.rowFadeIn(1))
-        SettingsNavCard("Preferences", "Units, week, timezone", onOpenPreferences, Modifier.rowFadeIn(2))
+        SettingsNavCard("Preferences", "Units, week, timezone, appearance", onOpenPreferences, Modifier.rowFadeIn(2))
         SettingsNavCard("Permissions", "Health Connect access", onOpenPermissions, Modifier.rowFadeIn(3))
         SettingsNavCard("Sync", if (periodicEnabled) "Periodic on" else "Periodic off", onOpenSync, Modifier.rowFadeIn(4))
         SettingsNavCard("Upload", "Server upload", onOpenUpload, Modifier.rowFadeIn(5))
         SettingsNavCard("Data Settings", "Exports and local data", onOpenDataSettings, Modifier.rowFadeIn(6))
-        SettingsNavCard("Appearance", "Mode and palette", onOpenAppearance, Modifier.rowFadeIn(7))
-        SettingsNavCard("Debug", "Legacy tools", onOpenDebug, Modifier.rowFadeIn(8))
-        StatusMessageCard(status, modifier = Modifier.rowFadeIn(9))
+        SettingsNavCard("Debug", "Legacy tools", onOpenDebug, Modifier.rowFadeIn(7))
+        StatusMessageCard(status, modifier = Modifier.rowFadeIn(8))
     }
 }
 
@@ -119,7 +117,11 @@ private fun SettingsNavCard(title: String, subtitle: String, onClick: () -> Unit
 @Composable
 fun SettingsPreferencesScreen(
     userPreferences: UserPreferences,
+    themeMode: AppThemeMode,
+    themePalette: AppThemePalette,
     onUserPreferencesSave: (UserPreferences) -> Unit,
+    onThemeModeChange: (AppThemeMode) -> Unit,
+    onThemePaletteChange: (AppThemePalette) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var weekStart by rememberSaveable(userPreferences) { mutableStateOf(userPreferences.weekStart) }
@@ -141,7 +143,7 @@ fun SettingsPreferencesScreen(
             .padding(18.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        AppSection(title = "Preferences", subtitle = "Display only", modifier = Modifier.rowFadeIn(0)) {
+        AppSection(title = "Preferences", subtitle = "Display and appearance", modifier = Modifier.rowFadeIn(0)) {
             Text(uiText("Language"), style = MaterialTheme.typography.titleSmall)
             AppActionRow {
                 AppLanguagePreference.values().forEach { option ->
@@ -254,6 +256,46 @@ fun SettingsPreferencesScreen(
             )
             Text(
                 uiText("Preferences change display grouping and units only. Stored data and CSV export remain canonical."),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+
+        AppSection(title = "Appearance", subtitle = "Mode and palette", modifier = Modifier.rowFadeIn(1)) {
+            Text(uiText("Mode"), style = MaterialTheme.typography.titleSmall)
+            SegmentedSwitch(
+                options = AppThemeMode.values().toList(),
+                selected = themeMode,
+                label = { it.label },
+                onSelected = onThemeModeChange
+            )
+
+            Text(uiText("Palette"), style = MaterialTheme.typography.titleSmall)
+            AppThemePalette.values().toList().chunked(2).forEach { rowOptions ->
+                AppActionRow {
+                    rowOptions.forEach { palette ->
+                        val selected = palette == themePalette
+                        if (selected) {
+                            PrimaryActionButton(
+                                modifier = Modifier.weight(1f),
+                                label = palette.label,
+                                onClick = { onThemePaletteChange(palette) }
+                            )
+                        } else {
+                            SecondaryActionButton(
+                                modifier = Modifier.weight(1f),
+                                label = palette.label,
+                                onClick = { onThemePaletteChange(palette) }
+                            )
+                        }
+                    }
+                    if (rowOptions.size == 1) {
+                        Text("", modifier = Modifier.weight(1f))
+                    }
+                }
+            }
+            Text(
+                uiText(themePalette.description),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -441,6 +483,7 @@ fun SettingsSyncScreen(
     periodicEnabled: Boolean,
     backgroundReadAvailable: Boolean,
     backgroundReadGranted: Boolean,
+    autoUploadAfterSync: Boolean,
     lastPeriodicSync: Instant?,
     lastPeriodicStatus: String?,
     lastPeriodicSummary: String?,
@@ -451,6 +494,7 @@ fun SettingsSyncScreen(
     onFullResync: () -> Unit,
     onCancelFullResync: () -> Unit,
     onRunBackgroundNow: () -> Unit,
+    onToggleAutoUpload: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -464,6 +508,7 @@ fun SettingsSyncScreen(
             AppActionRow {
                 StatusBadge(if (periodicEnabled) "Scheduled" else "Off", if (periodicEnabled) StatusTone.Success else StatusTone.Neutral)
                 StatusBadge(if (backgroundReadGranted) "Background ready" else "Manual only", if (backgroundReadGranted) StatusTone.Success else StatusTone.Warning)
+                StatusBadge(if (autoUploadAfterSync) "Auto upload on" else "Auto upload off", if (autoUploadAfterSync) StatusTone.Info else StatusTone.Neutral)
             }
             Text(
                 uiText(periodicSyncStatusText(periodicEnabled, lastPeriodicSync, lastPeriodicStatus, lastPeriodicSummary)),
@@ -475,6 +520,11 @@ fun SettingsSyncScreen(
                 onClick = onTogglePeriodic
             )
             SecondaryActionButton("Run Now", enabled = backgroundReadAvailable && !busy, onClick = onRunBackgroundNow)
+            SecondaryActionButton(
+                if (autoUploadAfterSync) "Disable Auto Upload" else "Enable Auto Upload",
+                enabled = !busy,
+                onClick = onToggleAutoUpload
+            )
             SecondaryActionButton("Full Resync", enabled = !busy, onClick = onFullResync)
             if (syncProgress != null) {
                 SyncProgressCard(syncProgress)
@@ -482,6 +532,11 @@ fun SettingsSyncScreen(
             if (syncProgress?.mode == SyncMode.FULL_HISTORY && syncProgress.isCancellable) {
                 SecondaryActionButton("Cancel Full Resync", onClick = onCancelFullResync)
             }
+            Text(
+                uiText("Auto upload queues server upload after smart sync, Run Now, and periodic sync when upload settings are valid. Full resync is excluded."),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
             Text(
                 uiText("Full resync reads from the full historical floor to now and can be slow. Periodic sync uses WorkManager smart sync; Android may delay it, so it is not real-time."),
                 style = MaterialTheme.typography.bodySmall,
@@ -676,63 +731,6 @@ fun SettingsDataScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             StatusMessageCard(status)
-        }
-    }
-}
-
-@Composable
-fun SettingsAppearanceScreen(
-    themeMode: AppThemeMode,
-    themePalette: AppThemePalette,
-    onThemeModeChange: (AppThemeMode) -> Unit,
-    onThemePaletteChange: (AppThemePalette) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Column(
-        modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(18.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        AppSection(title = "Appearance", subtitle = "Saved locally", modifier = Modifier.rowFadeIn(0)) {
-            Text(uiText("Mode"), style = MaterialTheme.typography.titleSmall)
-            SegmentedSwitch(
-                options = AppThemeMode.values().toList(),
-                selected = themeMode,
-                label = { it.label },
-                onSelected = onThemeModeChange
-            )
-
-            Text(uiText("Palette"), style = MaterialTheme.typography.titleSmall)
-            AppThemePalette.values().toList().chunked(2).forEach { rowOptions ->
-                AppActionRow {
-                    rowOptions.forEach { palette ->
-                        val selected = palette == themePalette
-                        if (selected) {
-                            PrimaryActionButton(
-                                modifier = Modifier.weight(1f),
-                                label = palette.label,
-                                onClick = { onThemePaletteChange(palette) }
-                            )
-                        } else {
-                            SecondaryActionButton(
-                                modifier = Modifier.weight(1f),
-                                label = palette.label,
-                                onClick = { onThemePaletteChange(palette) }
-                            )
-                        }
-                    }
-                    if (rowOptions.size == 1) {
-                        Text("", modifier = Modifier.weight(1f))
-                    }
-                }
-            }
-            Text(
-                uiText(themePalette.description),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
         }
     }
 }
