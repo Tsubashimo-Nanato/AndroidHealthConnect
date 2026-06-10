@@ -26,7 +26,7 @@ object UploadEndpointPolicy {
         if (settings.serverMode == UploadServerMode.LOCAL_DEBUG && parsed.scheme !in setOf("http", "https")) {
             return UploadEndpointValidation.Invalid("Local server must use HTTP or HTTPS")
         }
-        if (settings.serverMode == UploadServerMode.LOCAL_DEBUG && parsed.scheme == "http" && !parsed.host.isLocalDebugHost()) {
+        if (settings.serverMode == UploadServerMode.LOCAL_DEBUG && parsed.scheme == "http" && !isLocalDebugHost(parsed.host)) {
             return UploadEndpointValidation.Invalid("HTTP local debug upload must use a local/private host")
         }
 
@@ -52,8 +52,8 @@ object UploadEndpointPolicy {
         return if (trimmed.endsWith("/")) trimmed else "$trimmed/"
     }
 
-    private fun String.isLocalDebugHost(): Boolean {
-        val lower = lowercase()
+    fun isLocalDebugHost(host: String): Boolean {
+        val lower = host.lowercase()
         if (lower == "localhost" || lower == "127.0.0.1" || lower == "::1" || lower == "10.0.2.2") {
             return true
         }

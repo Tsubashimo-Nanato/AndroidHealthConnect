@@ -103,6 +103,7 @@ object AppPreferences {
     private const val KEY_TIMEZONE_MODE = "timezone_mode"
     private const val KEY_CUSTOM_TIMEZONE = "custom_timezone"
     private const val KEY_LANGUAGE = "language"
+    private const val KEY_DEBUG_MODE_ENABLED = "debug_mode_enabled"
     private const val KEY_UPLOAD_SERVER_MODE = "upload_server_mode"
     private const val KEY_UPLOAD_LOCAL_URL = "upload_local_url"
     private const val KEY_UPLOAD_API_KEY = "upload_api_key"
@@ -138,6 +139,13 @@ object AppPreferences {
 
     fun setThemePalette(context: Context, palette: AppThemePalette) {
         prefs(context).edit().putString(KEY_THEME_PALETTE, palette.name).apply()
+    }
+
+    fun debugModeEnabled(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_DEBUG_MODE_ENABLED, false)
+
+    fun setDebugModeEnabled(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(KEY_DEBUG_MODE_ENABLED, enabled).apply()
     }
 
     fun userAge(context: Context): Int? {

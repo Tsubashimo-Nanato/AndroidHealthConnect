@@ -60,7 +60,6 @@ import com.example.healthconnectandroid.debug.DeviceSmokeDiagnostics
 import com.example.healthconnectandroid.data.AppDb
 import com.example.healthconnectandroid.hc.DemoStatus
 import com.example.healthconnectandroid.hc.HealthDataTypeRegistry
-import com.example.healthconnectandroid.hc.HealthDataTypeSyncResult
 import com.example.healthconnectandroid.hc.PeriodicHealthSyncWorker
 import com.example.healthconnectandroid.hc.PeriodicSyncPreferences
 import com.example.healthconnectandroid.hc.buildHcPermissionIntent
@@ -74,15 +73,17 @@ import com.example.healthconnectandroid.hc.query.HealthRecordDetailQueryService
 import com.example.healthconnectandroid.hc.sync.HealthSyncService
 import com.example.healthconnectandroid.hc.sync.SyncMode
 import com.example.healthconnectandroid.hc.sync.SyncProgress
-import com.example.healthconnectandroid.hc.sync.SyncRangePolicy
-import com.example.healthconnectandroid.hc.sync.SyncResultSeverity
-import com.example.healthconnectandroid.hc.sync.SyncResultSeverityPolicy
 import com.example.healthconnectandroid.hc.sync.SyncRunStatus
+import com.example.healthconnectandroid.hc.sync.syncAllStatusText
 import com.example.healthconnectandroid.hc.upload.HealthUploadService
 import com.example.healthconnectandroid.hc.upload.HealthUploadWorker
+import com.example.healthconnectandroid.hc.upload.UploadDebugModePolicy
+import com.example.healthconnectandroid.hc.upload.UploadPairingApplyResult
+import com.example.healthconnectandroid.hc.upload.UploadPairingPolicy
 import com.example.healthconnectandroid.hc.upload.UploadPendingCounts
 import com.example.healthconnectandroid.hc.upload.UploadProgress
 import com.example.healthconnectandroid.hc.upload.UploadResultSeverity
+import com.example.healthconnectandroid.hc.upload.UploadSettings
 import com.example.healthconnectandroid.hc.upload.UploadTimeRange
 import com.example.healthconnectandroid.hc.upload.toStatus
 import com.example.healthconnectandroid.navigation.AppDestination
@@ -106,6 +107,13 @@ import com.example.healthconnectandroid.ui.i18n.LocalAppLanguage
 import com.example.healthconnectandroid.ui.i18n.uiText
 import com.example.healthconnectandroid.ui.theme.HealthConnectAndroidTheme
 import com.example.healthconnectandroid.ui.StatusTone
+import com.example.healthconnectandroid.ui.UploadRetryAction
+import com.example.healthconnectandroid.ui.syncResultsStatusTone
+import com.example.healthconnectandroid.ui.uploadCompletionStatus
+import com.example.healthconnectandroid.ui.uploadStartStatus
+import com.google.mlkit.vision.barcode.common.Barcode
+import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
+import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 import java.time.Instant
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -319,6 +327,7 @@ class MainActivity : ComponentActivity() {
         var syncProgress by remember { mutableStateOf<SyncProgress?>(null) }
         var fullSyncJob by remember { mutableStateOf<Job?>(null) }
         var showClearConfirm by remember { mutableStateOf(false) }
+        var debugEnabled by remember { mutableStateOf(AppPreferences.debugModeEnabled(this@MainActivity)) }
         var themeMode by remember { mutableStateOf(AppPreferences.themeMode(this@MainActivity)) }
         var themePalette by remember { mutableStateOf(AppPreferences.themePalette(this@MainActivity)) }
         var userProfile by remember { mutableStateOf(AppPreferences.userProfile(this@MainActivity)) }
@@ -360,6 +369,254 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        fun applyUploadPairingText(rawText: String) {
+            when (val result = UploadPairingPolicy.applyPairingText(uploadSettings, rawText)) {
+                is UploadPairingApplyResult.Success -> {
+                    val update = UploadDebugModePolicy.applyPairingSuccess(
+                        currentStatus = uploadStatus,
+                        debugEnabled = debugEnabled,
+                        success = result
+                    )
+                    uploadSettings = update.settings
+                    uploadStatus = update.status
+                    debugEnabled = update.debugEnabled
+                    AppPreferences.setUploadSettings(this@MainActivity, update.settings)
+                    AppPreferences.setUploadStatus(this@MainActivity, update.status)
+                    AppPreferences.setDebugModeEnabled(this@MainActivity, update.debugEnabled)
+                    status = update.message
+                    refreshUploadStatus()
+                }
+                is UploadPairingApplyResult.Invalid -> {
+                    status = "QR pairing failed: ${result.message}"
+                }
+            }
+        }
+
+        fun scanUploadPairingQr() {
+            status = "Opening QR scanner..."
+            val options = GmsBarcodeScannerOptions.Builder()
+                .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
+                .build()
+            GmsBarcodeScanning.getClient(this@MainActivity, options)
+                .startScan()
+                .addOnSuccessListener { barcode ->
+                    val rawValue = barcode.rawValue?.trim()
+                    if (rawValue.isNullOrBlank()) {
+                        status = "QR pairing failed: empty code"
+                    } else {
+                        applyUploadPairingText(rawValue)
+                    }
+                }
+                .addOnCanceledListener {
+                    status = "QR pairing cancelled"
+                }
+                .addOnFailureListener { throwable ->
+                    status = "QR scan failed: ${throwable.message ?: throwable.javaClass.simpleName}. Paste pairing text instead."
+                }
+        }
+
+        fun togglePeriodicSync() {
+            actionInProgress = "periodic_toggle"
+            if (periodicEnabled) {
+                PeriodicHealthSyncWorker.cancel(this@MainActivity)
+                periodicEnabled = false
+                status = "Periodic sync disabled"
+            } else if (!backgroundReadAvailable) {
+                status = "Background read is unavailable on this device"
+            } else if (!backgroundReadGranted) {
+                status = "Grant sync permissions first"
+                requestHealthConnectPermissions(setOf(HealthDataTypeRegistry.backgroundReadPermission))
+            } else {
+                PeriodicHealthSyncWorker.schedule(this@MainActivity)
+                periodicEnabled = true
+                lastPeriodicSync = PeriodicSyncPreferences.lastFinishedAt(this@MainActivity)
+                lastPeriodicStatus = PeriodicSyncPreferences.lastStatus(this@MainActivity)
+                lastPeriodicSummary = PeriodicSyncPreferences.lastSummary(this@MainActivity)
+                status = "Periodic sync scheduled"
+            }
+            actionInProgress = null
+        }
+
+        fun runFullResync() {
+            fullSyncJob = scope.launch {
+                actionInProgress = "full_resync"
+                syncProgress = null
+                status = "Running full historical resync..."
+                val results = try {
+                    syncService.runFullHistorySync { progress ->
+                        syncProgress = progress
+                        diagnostics.recordSyncProgress(progress)
+                    }
+                } catch (t: CancellationException) {
+                    status = "Full resync cancelled"
+                    diagnostics.recordSyncCancelled(SyncMode.FULL_HISTORY)
+                    syncProgress = syncProgress?.copy(
+                        isCancellable = false,
+                        message = "Full resync cancelled"
+                    )
+                    actionInProgress = null
+                    fullSyncJob = null
+                    return@launch
+                } catch (t: Throwable) {
+                    status = "Full resync failed: ${t.message}"
+                    diagnostics.recordSyncFailure(SyncMode.FULL_HISTORY, null, null, null)
+                    actionInProgress = null
+                    fullSyncJob = null
+                    return@launch
+                }
+                diagnostics.recordSyncResults(SyncMode.FULL_HISTORY, results)
+                status = syncAllStatusText(results, "Full resync")
+                demoStatus = runCatching { dashboardQueries.demoStatus() }.getOrNull()
+                refreshUploadStatus()
+                actionInProgress = null
+                fullSyncJob = null
+            }
+        }
+
+        fun runBackgroundSyncNow() {
+            scope.launch {
+                actionInProgress = "background_now"
+                syncProgress = null
+                status = "Running background sync now..."
+                val results = runCatching {
+                    syncService.runPeriodicSmartSync(
+                        requireBackgroundReadPermission = backgroundReadGranted
+                    ) { progress ->
+                        syncProgress = progress
+                        diagnostics.recordSyncProgress(progress)
+                    }
+                }.getOrElse {
+                    status = "Background sync failed: ${it.message}"
+                    diagnostics.recordSyncFailure(SyncMode.PERIODIC, null, null, null)
+                    actionInProgress = null
+                    return@launch
+                }
+                diagnostics.recordSyncResults(SyncMode.PERIODIC, results)
+                val summary = syncAllStatusText(results, "Background sync now")
+                PeriodicSyncPreferences.markFinished(
+                    this@MainActivity,
+                    Instant.now(),
+                    if (results.any { it.errorMessage != null || it.terminalStatus == SyncRunStatus.TIMEOUT }) {
+                        "partial_error"
+                    } else {
+                        "success"
+                    },
+                    summary
+                )
+                lastPeriodicSync = PeriodicSyncPreferences.lastFinishedAt(this@MainActivity)
+                lastPeriodicStatus = PeriodicSyncPreferences.lastStatus(this@MainActivity)
+                lastPeriodicSummary = PeriodicSyncPreferences.lastSummary(this@MainActivity)
+                status = summary
+                demoStatus = runCatching { dashboardQueries.demoStatus() }.getOrNull()
+                refreshUploadStatus()
+                actionInProgress = null
+            }
+        }
+
+        fun saveUploadSettings(settings: UploadSettings) {
+            uploadSettings = settings
+            AppPreferences.setUploadSettings(this@MainActivity, settings)
+            uploadStatus = uploadStatus.copy(serverMode = settings.serverMode)
+            AppPreferences.setUploadStatus(this@MainActivity, uploadStatus)
+            status = "Upload settings saved"
+            refreshUploadStatus()
+        }
+
+        fun testUploadConnection(settings: UploadSettings) {
+            scope.launch {
+                try {
+                    actionInProgress = "upload_test"
+                    uploadSettings = settings
+                    AppPreferences.setUploadSettings(this@MainActivity, settings)
+                    status = "Testing upload server..."
+                    val counts = runCatching { uploadService.pendingCounts(settings) }
+                        .getOrDefault(UploadPendingCounts.Empty)
+                    uploadPendingCounts = counts
+                    val result = uploadService.testConnection(settings)
+                    uploadStatus = result.toStatus(uploadStatus, counts.total)
+                    AppPreferences.setUploadStatus(this@MainActivity, uploadStatus)
+                    status = result.message
+                } catch (t: CancellationException) {
+                    throw t
+                } catch (t: Throwable) {
+                    Log.e(TAG, "Upload connection test failed", t)
+                    val message = "Upload test failed: ${t.message ?: t.javaClass.simpleName}"
+                    uploadStatus = uploadStatus.copy(
+                        connectionResult = message,
+                        severity = UploadResultSeverity.ERROR
+                    )
+                    AppPreferences.setUploadStatus(this@MainActivity, uploadStatus)
+                    status = message
+                } finally {
+                    actionInProgress = null
+                }
+            }
+        }
+
+        fun uploadNow(settings: UploadSettings, range: UploadTimeRange) {
+            scope.launch {
+                try {
+                    actionInProgress = "upload"
+                    uploadProgress = null
+                    uploadSettings = settings
+                    AppPreferences.setUploadSettings(this@MainActivity, settings)
+                    status = uploadStartStatus(range)
+                    val result = uploadService.uploadPending(settings, range) { progress ->
+                        uploadProgress = progress
+                    }
+                    uploadStatus = result.toStatus()
+                    AppPreferences.setUploadStatus(this@MainActivity, uploadStatus)
+                    uploadPendingCounts = result.pendingCounts
+                    val completion = uploadCompletionStatus(result, range)
+                    if (completion.retryAction == UploadRetryAction.QUEUE_ALL) {
+                        HealthUploadWorker.enqueue(this@MainActivity)
+                    }
+                    status = completion.message
+                } catch (t: CancellationException) {
+                    throw t
+                } catch (t: Throwable) {
+                    Log.e(TAG, "Upload failed", t)
+                    val message = "Upload failed: ${t.message ?: t.javaClass.simpleName}"
+                    uploadStatus = uploadStatus.copy(
+                        lastResult = message,
+                        severity = UploadResultSeverity.ERROR
+                    )
+                    AppPreferences.setUploadStatus(this@MainActivity, uploadStatus)
+                    status = message
+                } finally {
+                    uploadProgress = null
+                    actionInProgress = null
+                }
+            }
+        }
+
+        fun runSmartSync() {
+            scope.launch {
+                actionInProgress = "smart_sync"
+                syncProgress = null
+                dashboardStatusTone = StatusTone.Info
+                status = "Smart syncing recent Health Connect data..."
+                val results = runCatching {
+                    syncService.runSmartSync { progress ->
+                        syncProgress = progress
+                        diagnostics.recordSyncProgress(progress)
+                    }
+                }.getOrElse {
+                    status = "Smart sync failed: ${it.message}"
+                    diagnostics.recordSyncFailure(SyncMode.SMART, null, null, null)
+                    dashboardStatusTone = StatusTone.Error
+                    actionInProgress = null
+                    return@launch
+                }
+                diagnostics.recordSyncResults(SyncMode.SMART, results)
+                status = syncAllStatusText(results, "Smart sync")
+                dashboardStatusTone = syncResultsStatusTone(results)
+                demoStatus = runCatching { dashboardQueries.demoStatus() }.getOrNull()
+                refreshUploadStatus()
+                actionInProgress = null
+            }
+        }
+
         LaunchedEffect(Unit) {
             val granted = grantedHealthConnectPermissions()
             grantedPermissions = granted
@@ -376,6 +633,7 @@ class MainActivity : ComponentActivity() {
             val obs = androidx.lifecycle.LifecycleEventObserver { _, e ->
                 if (e == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
                     platformGranted = hasPlatformPerm()
+                    debugEnabled = AppPreferences.debugModeEnabled(this@MainActivity)
                     periodicEnabled = PeriodicSyncPreferences.isEnabled(this@MainActivity)
                     lastPeriodicSync = PeriodicSyncPreferences.lastFinishedAt(this@MainActivity)
                     lastPeriodicStatus = PeriodicSyncPreferences.lastStatus(this@MainActivity)
@@ -399,6 +657,12 @@ class MainActivity : ComponentActivity() {
         }
 
         val nav = remember { AppNavigationState() }
+
+        LaunchedEffect(nav.destination, debugEnabled) {
+            if (!debugEnabled && nav.destination == AppDestination.SettingsSection(SettingsDestination.Debug)) {
+                nav.goBack()
+            }
+        }
 
         BackHandler(enabled = nav.destination != AppDestination.Dashboard) {
             nav.goBack()
@@ -428,6 +692,7 @@ class MainActivity : ComponentActivity() {
                         SettingsScreen(
                             userProfile = userProfile,
                             periodicEnabled = periodicEnabled,
+                            debugEnabled = debugEnabled,
                             status = status,
                             onOpenProfile = { nav.openSettingsSection(SettingsDestination.Profile) },
                             onOpenPreferences = { nav.openSettingsSection(SettingsDestination.Preferences) },
@@ -436,6 +701,21 @@ class MainActivity : ComponentActivity() {
                             onOpenUpload = { nav.openSettingsSection(SettingsDestination.Upload) },
                             onOpenDataSettings = { nav.openSettingsSection(SettingsDestination.DataSettings) },
                             onOpenAppearance = { nav.openSettingsSection(SettingsDestination.Appearance) },
+                            onToggleDebug = {
+                                val nextDebugEnabled = !debugEnabled
+                                val update = UploadDebugModePolicy.setDebugMode(
+                                    currentSettings = uploadSettings,
+                                    currentStatus = uploadStatus,
+                                    enabled = nextDebugEnabled
+                                )
+                                debugEnabled = update.debugEnabled
+                                uploadSettings = update.settings
+                                uploadStatus = update.status
+                                AppPreferences.setDebugModeEnabled(this@MainActivity, update.debugEnabled)
+                                AppPreferences.setUploadSettings(this@MainActivity, update.settings)
+                                AppPreferences.setUploadStatus(this@MainActivity, update.status)
+                                status = update.message
+                            },
                             onOpenDebug = { nav.openSettingsSection(SettingsDestination.Debug) },
                             modifier = Modifier.padding(pad)
                         )
@@ -489,188 +769,31 @@ class MainActivity : ComponentActivity() {
                                 status = status,
                                 busy = actionInProgress in setOf("periodic_toggle", "full_resync", "background_now"),
                                 syncProgress = syncProgress,
-                                onTogglePeriodic = {
-                                    actionInProgress = "periodic_toggle"
-                                    if (periodicEnabled) {
-                                        PeriodicHealthSyncWorker.cancel(this@MainActivity)
-                                        periodicEnabled = false
-                                        status = "Periodic sync disabled"
-                                    } else if (!backgroundReadAvailable) {
-                                        status = "Background read is unavailable on this device"
-                                    } else if (!backgroundReadGranted) {
-                                        status = "Grant sync permissions first"
-                                        requestHealthConnectPermissions(setOf(HealthDataTypeRegistry.backgroundReadPermission))
-                                    } else {
-                                        PeriodicHealthSyncWorker.schedule(this@MainActivity)
-                                        periodicEnabled = true
-                                        lastPeriodicSync = PeriodicSyncPreferences.lastFinishedAt(this@MainActivity)
-                                        lastPeriodicStatus = PeriodicSyncPreferences.lastStatus(this@MainActivity)
-                                        lastPeriodicSummary = PeriodicSyncPreferences.lastSummary(this@MainActivity)
-                                        status = "Periodic sync scheduled"
-                                    }
-                                    actionInProgress = null
-                                },
-                                onFullResync = {
-                                    fullSyncJob = scope.launch {
-                                        actionInProgress = "full_resync"
-                                        syncProgress = null
-                                        status = "Running full historical resync..."
-                                        val results = try {
-                                            syncService.runFullHistorySync { progress ->
-                                                syncProgress = progress
-                                                diagnostics.recordSyncProgress(progress)
-                                            }
-                                        } catch (t: CancellationException) {
-                                            status = "Full resync cancelled"
-                                            diagnostics.recordSyncCancelled(SyncMode.FULL_HISTORY)
-                                            syncProgress = syncProgress?.copy(
-                                                isCancellable = false,
-                                                message = "Full resync cancelled"
-                                            )
-                                            actionInProgress = null
-                                            fullSyncJob = null
-                                            return@launch
-                                        } catch (t: Throwable) {
-                                            status = "Full resync failed: ${t.message}"
-                                            diagnostics.recordSyncFailure(SyncMode.FULL_HISTORY, null, null, null)
-                                            actionInProgress = null
-                                            fullSyncJob = null
-                                            return@launch
-                                        }
-                                        diagnostics.recordSyncResults(SyncMode.FULL_HISTORY, results)
-                                        status = syncAllStatusText(results, "Full resync")
-                                        demoStatus = runCatching { dashboardQueries.demoStatus() }.getOrNull()
-                                        refreshUploadStatus()
-                                        actionInProgress = null
-                                        fullSyncJob = null
-                                    }
-                                },
+                                onTogglePeriodic = ::togglePeriodicSync,
+                                onFullResync = ::runFullResync,
                                 onCancelFullResync = {
                                     status = "Cancelling full resync..."
                                     fullSyncJob?.cancel()
                                 },
-                                onRunBackgroundNow = {
-                                    scope.launch {
-                                        actionInProgress = "background_now"
-                                        syncProgress = null
-                                        status = "Running background sync now..."
-                                        val results = runCatching {
-                                            syncService.runPeriodicSmartSync(
-                                                requireBackgroundReadPermission = backgroundReadGranted
-                                            ) { progress ->
-                                                syncProgress = progress
-                                                diagnostics.recordSyncProgress(progress)
-                                            }
-                                        }.getOrElse {
-                                            status = "Background sync failed: ${it.message}"
-                                            diagnostics.recordSyncFailure(SyncMode.PERIODIC, null, null, null)
-                                            actionInProgress = null
-                                            return@launch
-                                        }
-                                        diagnostics.recordSyncResults(SyncMode.PERIODIC, results)
-                                        val summary = syncAllStatusText(results, "Background sync now")
-                                        PeriodicSyncPreferences.markFinished(
-                                            this@MainActivity,
-                                            Instant.now(),
-                                            if (results.any { it.errorMessage != null || it.terminalStatus == SyncRunStatus.TIMEOUT }) {
-                                                "partial_error"
-                                            } else {
-                                                "success"
-                                            },
-                                            summary
-                                        )
-                                        lastPeriodicSync = PeriodicSyncPreferences.lastFinishedAt(this@MainActivity)
-                                        lastPeriodicStatus = PeriodicSyncPreferences.lastStatus(this@MainActivity)
-                                        lastPeriodicSummary = PeriodicSyncPreferences.lastSummary(this@MainActivity)
-                                        status = summary
-                                        demoStatus = runCatching { dashboardQueries.demoStatus() }.getOrNull()
-                                        refreshUploadStatus()
-                                        actionInProgress = null
-                                    }
-                                },
+                                onRunBackgroundNow = ::runBackgroundSyncNow,
                                 modifier = Modifier.padding(pad)
                             )
                             SettingsDestination.Upload -> SettingsUploadScreen(
                                 settings = uploadSettings,
                                 uploadStatus = uploadStatus,
                                 pendingCounts = uploadPendingCounts,
+                                debugEnabled = debugEnabled,
+                                status = status,
                                 busy = actionInProgress == "upload" || actionInProgress == "upload_test",
                                 progress = uploadProgress,
-                                onSaveSettings = { settings ->
-                                    uploadSettings = settings
-                                    AppPreferences.setUploadSettings(this@MainActivity, settings)
-                                    uploadStatus = uploadStatus.copy(serverMode = settings.serverMode)
-                                    AppPreferences.setUploadStatus(this@MainActivity, uploadStatus)
-                                    status = "Upload settings saved"
-                                    refreshUploadStatus()
+                                onSaveSettings = ::saveUploadSettings,
+                                onTestConnection = ::testUploadConnection,
+                                onUploadNow = ::uploadNow,
+                                onScanPairingQr = {
+                                    scanUploadPairingQr()
                                 },
-                                onTestConnection = { settings ->
-                                    scope.launch {
-                                        try {
-                                            actionInProgress = "upload_test"
-                                            uploadSettings = settings
-                                            AppPreferences.setUploadSettings(this@MainActivity, settings)
-                                            status = "Testing upload server..."
-                                            val counts = runCatching { uploadService.pendingCounts(settings) }
-                                                .getOrDefault(UploadPendingCounts.Empty)
-                                            uploadPendingCounts = counts
-                                            val result = uploadService.testConnection(settings)
-                                            uploadStatus = result.toStatus(uploadStatus, counts.total)
-                                            AppPreferences.setUploadStatus(this@MainActivity, uploadStatus)
-                                            status = result.message
-                                        } catch (t: CancellationException) {
-                                            throw t
-                                        } catch (t: Throwable) {
-                                            Log.e(TAG, "Upload connection test failed", t)
-                                            val message = "Upload test failed: ${t.message ?: t.javaClass.simpleName}"
-                                            uploadStatus = uploadStatus.copy(
-                                                connectionResult = message,
-                                                severity = UploadResultSeverity.ERROR
-                                            )
-                                            AppPreferences.setUploadStatus(this@MainActivity, uploadStatus)
-                                            status = message
-                                        } finally {
-                                            actionInProgress = null
-                                        }
-                                    }
-                                },
-                                onUploadNow = { settings, range ->
-                                    scope.launch {
-                                        try {
-                                            actionInProgress = "upload"
-                                            uploadProgress = null
-                                            uploadSettings = settings
-                                            AppPreferences.setUploadSettings(this@MainActivity, settings)
-                                            status = uploadStartStatus(range)
-                                            val result = uploadService.uploadPending(settings, range) { progress ->
-                                                uploadProgress = progress
-                                            }
-                                            uploadStatus = result.toStatus()
-                                            AppPreferences.setUploadStatus(this@MainActivity, uploadStatus)
-                                            uploadPendingCounts = result.pendingCounts
-                                            status = result.message
-                                            if (!result.success && result.retryable && range == UploadTimeRange.ALL) {
-                                                HealthUploadWorker.enqueue(this@MainActivity)
-                                                status = "${result.message}. Retry queued."
-                                            } else if (!result.success && result.retryable) {
-                                                status = "${result.message}. Retry ${range.label} manually."
-                                            }
-                                        } catch (t: CancellationException) {
-                                            throw t
-                                        } catch (t: Throwable) {
-                                            Log.e(TAG, "Upload failed", t)
-                                            val message = "Upload failed: ${t.message ?: t.javaClass.simpleName}"
-                                            uploadStatus = uploadStatus.copy(
-                                                lastResult = message,
-                                                severity = UploadResultSeverity.ERROR
-                                            )
-                                            AppPreferences.setUploadStatus(this@MainActivity, uploadStatus)
-                                            status = message
-                                        } finally {
-                                            uploadProgress = null
-                                            actionInProgress = null
-                                        }
-                                    }
+                                onApplyPairingText = { pairingText ->
+                                    applyUploadPairingText(pairingText)
                                 },
                                 modifier = Modifier.padding(pad)
                             )
@@ -795,33 +918,7 @@ class MainActivity : ComponentActivity() {
                             syncing = actionInProgress == "smart_sync",
                             syncProgress = syncProgress,
                             displayPreferences = displayPreferences,
-                            onSyncAll = {
-                                scope.launch {
-                                    actionInProgress = "smart_sync"
-                                    syncProgress = null
-                                    dashboardStatusTone = StatusTone.Info
-                                    status = "Smart syncing recent Health Connect data..."
-                                    val results = runCatching {
-                                        syncService.runSmartSync { progress ->
-                                            syncProgress = progress
-                                            diagnostics.recordSyncProgress(progress)
-                                        }
-                                    }
-                                        .getOrElse {
-                                            status = "Smart sync failed: ${it.message}"
-                                            diagnostics.recordSyncFailure(SyncMode.SMART, null, null, null)
-                                            dashboardStatusTone = StatusTone.Error
-                                            actionInProgress = null
-                                            return@launch
-                                        }
-                                    diagnostics.recordSyncResults(SyncMode.SMART, results)
-                                    status = syncAllStatusText(results, "Smart sync")
-                                    dashboardStatusTone = syncResultsStatusTone(results)
-                                    demoStatus = runCatching { dashboardQueries.demoStatus() }.getOrNull()
-                                    refreshUploadStatus()
-                                    actionInProgress = null
-                                }
-                            }
+                            onSyncAll = ::runSmartSync
                         )
                     }
                 }
@@ -955,46 +1052,6 @@ class MainActivity : ComponentActivity() {
         java.time.LocalDateTime.now()
             .format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd_HHmm"))
 
-    private fun uploadStartStatus(range: UploadTimeRange): String =
-        if (range == UploadTimeRange.ALL) {
-            "Uploading local data..."
-        } else {
-            "Uploading local data (${range.label})..."
-        }
-
-    private fun syncAllStatusText(
-        results: List<HealthDataTypeSyncResult>,
-        label: String = "Sync"
-    ): String {
-        val inserted = results.sumOf { it.recordsInserted }
-        val updated = results.sumOf { it.recordsUpdated }
-        val duplicates = results.sumOf { it.recordsSkippedDuplicate }
-        val summaries = results.sumOf { it.aggregateRowsStored }
-        val skipped = results.count { it.skippedReason != null }
-        val timeouts = results.count { it.terminalStatus == SyncRunStatus.TIMEOUT }
-        val cancelled = results.count { it.terminalStatus == SyncRunStatus.CANCELLED }
-        val errors = results.count {
-            it.errorMessage != null && it.terminalStatus !in setOf(SyncRunStatus.TIMEOUT, SyncRunStatus.CANCELLED)
-        }
-        val start = results.mapNotNull { it.requestedStart }.minOrNull()
-        val end = results.mapNotNull { it.requestedEnd }.maxOrNull()
-        val range = if (start != null && end != null) {
-            ", ${syncRangeText(start, end)}"
-        } else {
-            ""
-        }
-        return "$label complete: types ${results.size}, inserted $inserted, updated $updated, duplicates $duplicates, " +
-            "summaries $summaries, skipped $skipped, timeouts $timeouts, cancelled $cancelled, errors $errors$range"
-    }
-
-    private fun syncResultsStatusTone(results: List<HealthDataTypeSyncResult>): StatusTone =
-        when (SyncResultSeverityPolicy.fromResults(results)) {
-            SyncResultSeverity.NEUTRAL -> StatusTone.Neutral
-            SyncResultSeverity.SUCCESS -> StatusTone.Success
-            SyncResultSeverity.WARNING -> StatusTone.Warning
-            SyncResultSeverity.ERROR -> StatusTone.Error
-        }
-
     private fun requestHealthConnectPermissions(permissions: Set<String>) {
         if (permissions.isEmpty()) return
         val client = healthConnectClientOrNull() ?: return
@@ -1028,19 +1085,5 @@ class MainActivity : ComponentActivity() {
         !available -> "not available on this device"
         granted -> "available and granted"
         else -> "available, permission missing"
-    }
-
-    private fun shortInstant(value: Instant): String =
-        java.time.format.DateTimeFormatter.ofPattern("M/d HH:mm")
-            .withZone(java.time.ZoneId.systemDefault())
-            .format(value)
-
-    private fun syncRangeText(start: Instant, end: Instant): String {
-        val startText = if (start == SyncRangePolicy.FULL_HISTORY_START) {
-            "range full history (${start})"
-        } else {
-            "range ${shortInstant(start)}"
-        }
-        return "$startText to ${shortInstant(end)}"
     }
 }
