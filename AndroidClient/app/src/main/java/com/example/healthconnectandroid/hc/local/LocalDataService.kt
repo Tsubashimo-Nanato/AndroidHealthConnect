@@ -13,7 +13,7 @@ class LocalDataService(
     private val aggregateDao = db.healthAggregateDao()
     private val uploadDao = db.healthUploadDao()
 
-    /** Clear local normalized data, aggregates, sync/upload metadata, and legacy heart-rate rows. */
+    /** Clear local normalized data, aggregates, sync/upload metadata, and older heart-rate rows. */
     suspend fun clearDb(): Int {
         val before = dao.count()
         db.withTransaction {

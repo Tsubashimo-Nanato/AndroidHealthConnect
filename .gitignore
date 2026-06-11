@@ -37,6 +37,8 @@ Server/bin/
 Server/obj/
 Server/**/bin/
 Server/**/obj/
+Server.Tests/bin/
+Server.Tests/obj/
 Server/*.csproj.user
 Server/*.db
 Server/*.db-*

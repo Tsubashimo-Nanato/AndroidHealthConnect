@@ -58,7 +58,7 @@ dependencies {
     // Network upload
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
 
-    // QR pairing
+    // QR scanning
     implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
 
     // Material (for theme parent)

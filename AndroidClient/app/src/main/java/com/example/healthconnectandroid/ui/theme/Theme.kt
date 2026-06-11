@@ -9,7 +9,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import com.example.healthconnectandroid.AppThemePalette
 
-private data class DemoPaletteTokens(
+private data class AppPaletteTokens(
     val background: Color,
     val surface: Color,
     val surface2: Color,
@@ -43,11 +43,11 @@ private fun appColorScheme(
     palette: AppThemePalette,
     darkTheme: Boolean
 ): ColorScheme {
-    val tokens = demoTokens(palette = palette, darkTheme = darkTheme)
+    val tokens = paletteTokens(palette = palette, darkTheme = darkTheme)
     return if (darkTheme) tokens.toDarkColorScheme() else tokens.toLightColorScheme()
 }
 
-private fun DemoPaletteTokens.toLightColorScheme(): ColorScheme = lightColorScheme(
+private fun AppPaletteTokens.toLightColorScheme(): ColorScheme = lightColorScheme(
     primary = primary,
     onPrimary = Color.White,
     primaryContainer = primary,
@@ -79,7 +79,7 @@ private fun DemoPaletteTokens.toLightColorScheme(): ColorScheme = lightColorSche
     scrim = Color(0xFF000000)
 )
 
-private fun DemoPaletteTokens.toDarkColorScheme(): ColorScheme = darkColorScheme(
+private fun AppPaletteTokens.toDarkColorScheme(): ColorScheme = darkColorScheme(
     primary = primary,
     onPrimary = Color(0xFF17131A),
     primaryContainer = primary2,
@@ -111,12 +111,12 @@ private fun DemoPaletteTokens.toDarkColorScheme(): ColorScheme = darkColorScheme
     scrim = Color(0xFF000000)
 )
 
-private fun demoTokens(
+private fun paletteTokens(
     palette: AppThemePalette,
     darkTheme: Boolean
-): DemoPaletteTokens = when (palette) {
+): AppPaletteTokens = when (palette) {
     AppThemePalette.PAPER -> if (darkTheme) {
-        DemoPaletteTokens(
+        AppPaletteTokens(
             background = StudioPaperDark,
             surface = Color(0xFF111A28),
             surface2 = Color(0xFF1F2B3D),
@@ -133,7 +133,7 @@ private fun demoTokens(
             info = Color(0xFF75B7FF)
         )
     } else {
-        DemoPaletteTokens(
+        AppPaletteTokens(
             background = StudioPaper,
             surface = Color(0xFFFBFAF7),
             surface2 = Color(0xFFE2EAEE),
@@ -152,7 +152,7 @@ private fun demoTokens(
     }
 
     AppThemePalette.RAIN -> if (darkTheme) {
-        DemoPaletteTokens(
+        AppPaletteTokens(
             background = Color(0xFF0A121A),
             surface = Color(0xFF121E2A),
             surface2 = Color(0xFF1C2B37),
@@ -169,7 +169,7 @@ private fun demoTokens(
             info = Color(0xFF94C9FF)
         )
     } else {
-        DemoPaletteTokens(
+        AppPaletteTokens(
             background = Color(0xFFEEF4F6),
             surface = Color(0xFFFBFDFD),
             surface2 = Color(0xFFDDE7EA),
@@ -188,7 +188,7 @@ private fun demoTokens(
     }
 
     AppThemePalette.MILK -> if (darkTheme) {
-        DemoPaletteTokens(
+        AppPaletteTokens(
             background = Color(0xFF1C1512),
             surface = Color(0xFF2A211D),
             surface2 = Color(0xFF3A2B25),
@@ -205,7 +205,7 @@ private fun demoTokens(
             info = Color(0xFF9FB4C8)
         )
     } else {
-        DemoPaletteTokens(
+        AppPaletteTokens(
             background = Color(0xFFF4E9DD),
             surface = Color(0xFFFFF8EF),
             surface2 = Color(0xFFEBD9CA),
@@ -224,7 +224,7 @@ private fun demoTokens(
     }
 
     AppThemePalette.HOODIE -> if (darkTheme) {
-        DemoPaletteTokens(
+        AppPaletteTokens(
             background = Color(0xFF171719),
             surface = Color(0xFF232326),
             surface2 = Color(0xFF303034),
@@ -241,7 +241,7 @@ private fun demoTokens(
             info = Color(0xFF96B0BF)
         )
     } else {
-        DemoPaletteTokens(
+        AppPaletteTokens(
             background = Color(0xFFE7E1DA),
             surface = Color(0xFFF2EEE8),
             surface2 = Color(0xFFD8D1C9),
@@ -260,7 +260,7 @@ private fun demoTokens(
     }
 
     AppThemePalette.SAGE -> if (darkTheme) {
-        DemoPaletteTokens(
+        AppPaletteTokens(
             background = Color(0xFF1A1F19),
             surface = Color(0xFF273027),
             surface2 = Color(0xFF334032),
@@ -277,7 +277,7 @@ private fun demoTokens(
             info = Color(0xFF94ACB6)
         )
     } else {
-        DemoPaletteTokens(
+        AppPaletteTokens(
             background = Color(0xFFECE9DF),
             surface = Color(0xFFFAF7EF),
             surface2 = Color(0xFFDDE7D4),

@@ -72,7 +72,6 @@ import com.example.healthconnectandroid.ui.sleep.sleepSessionModels
 import com.example.healthconnectandroid.ui.sleep.sleepShiftWindowDate
 import com.example.healthconnectandroid.ui.sleep.sleepVisibleEndDate
 import com.example.healthconnectandroid.ui.sleep.sleepVisibleStartDate
-import com.example.healthconnectandroid.ui.sleep.sleepWindowEndInstant
 import com.example.healthconnectandroid.ui.sleep.sleepWindowLabel
 import com.example.healthconnectandroid.ui.sleep.toSleepInput
 import com.example.healthconnectandroid.ui.format.DisplayPreferences
@@ -82,7 +81,6 @@ import com.example.healthconnectandroid.ui.i18n.uiText
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
-import java.time.temporal.ChronoUnit
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -136,17 +134,25 @@ fun HealthDataDetailScreen(
     val isHeartRate = descriptor.key == HealthDataTypeKeys.HEART_RATE
 
     fun detailEndInstant(): Instant =
-        if (isSleep) sleepWindowEndInstant(range, sleepWindowEndDate, weekStart, zoneId) else Instant.now()
+        DetailSyncRanges.detailEnd(
+            isSleep = isSleep,
+            range = range,
+            sleepWindowEndDate = sleepWindowEndDate,
+            weekStart = weekStart,
+            zoneId = zoneId
+        )
 
-    fun selectedSyncRange(): Pair<Instant, Instant> {
-        val end = detailEndInstant()
-        return range.startBefore(end, zoneId) to end
-    }
+    fun selectedSyncRange(): Pair<Instant, Instant> =
+        DetailSyncRanges.selectedRange(
+            isSleep = isSleep,
+            range = range,
+            sleepWindowEndDate = sleepWindowEndDate,
+            weekStart = weekStart,
+            zoneId = zoneId
+        )
 
-    fun quickSyncRange(): Pair<Instant, Instant> {
-        val end = Instant.now()
-        return end.minus(31, ChronoUnit.DAYS) to end
-    }
+    fun quickSyncRange(): Pair<Instant, Instant> =
+        DetailSyncRanges.quickRange()
 
     fun launchSelectedSync(label: String, syncRange: Pair<Instant, Instant>) {
         selectedSyncJob = scope.launch {

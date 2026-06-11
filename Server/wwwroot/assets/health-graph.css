@@ -1,0 +1,124 @@
+.health-graph-page {
+    margin: 0;
+    background: #f7f8fb;
+    color: #1f2937;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.health-graph-shell {
+    box-sizing: border-box;
+    width: min(1120px, 100%);
+    min-height: 100vh;
+    margin: 0 auto;
+    padding: 24px;
+}
+
+.health-graph-header {
+    margin-bottom: 18px;
+}
+
+.health-graph-header h1 {
+    margin: 0 0 6px;
+    font-size: clamp(1.7rem, 2vw, 2.2rem);
+    line-height: 1.15;
+}
+
+.health-graph-header p,
+.health-graph-status {
+    margin: 0;
+    color: #5f6b7a;
+}
+
+.health-graph-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: end;
+    margin-bottom: 14px;
+}
+
+.health-graph-field {
+    display: grid;
+    gap: 4px;
+}
+
+.health-graph-field label {
+    font-size: 0.82rem;
+    font-weight: 650;
+    color: #4b5563;
+}
+
+.health-graph-field select,
+.health-graph-field input,
+.health-graph-controls button {
+    min-height: 38px;
+    border: 1px solid #c7d0dc;
+    border-radius: 6px;
+    font: inherit;
+}
+
+.health-graph-field select,
+.health-graph-field input {
+    box-sizing: border-box;
+    width: 220px;
+    padding: 7px 9px;
+    background: #ffffff;
+    color: #1f2937;
+}
+
+.health-graph-key input {
+    width: min(320px, calc(100vw - 48px));
+}
+
+.health-graph-controls button {
+    padding: 7px 12px;
+    background: #1d4ed8;
+    color: #ffffff;
+    cursor: pointer;
+}
+
+.health-graph-controls button:disabled {
+    cursor: not-allowed;
+    opacity: 0.62;
+}
+
+.health-graph-controls button#clearKey {
+    background: #ffffff;
+    color: #1f2937;
+}
+
+.health-graph-status {
+    min-height: 1.35em;
+}
+
+.health-graph-plot {
+    box-sizing: border-box;
+    width: 100%;
+    height: 70vh;
+    min-height: 360px;
+    margin-top: 10px;
+    border: 1px solid #d8dee8;
+    border-radius: 8px;
+    background: #ffffff;
+}
+
+@media (max-width: 640px) {
+    .health-graph-shell {
+        padding: 18px;
+    }
+
+    .health-graph-controls {
+        align-items: stretch;
+    }
+
+    .health-graph-field,
+    .health-graph-field select,
+    .health-graph-field input,
+    .health-graph-controls button {
+        width: 100%;
+    }
+
+    .health-graph-key input {
+        width: 100%;
+    }
+}

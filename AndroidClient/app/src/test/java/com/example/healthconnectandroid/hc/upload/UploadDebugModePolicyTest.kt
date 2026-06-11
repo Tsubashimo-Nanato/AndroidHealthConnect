@@ -15,16 +15,16 @@ class UploadDebugModePolicyTest {
 
     @Test
     fun localPairingEnablesDebugMode() {
-        val pairedSettings = productionSettings.copy(
+        val scannedSettings = productionSettings.copy(
             serverMode = UploadServerMode.LOCAL_DEBUG,
             localBaseUrl = "http://10.0.2.2:8000/health/api/v1/"
         )
 
-        val result = UploadDebugModePolicy.applyPairingSuccess(
+        val result = UploadDebugModePolicy.applyScanSuccess(
             currentStatus = productionStatus,
             debugEnabled = false,
-            success = UploadPairingApplyResult.Success(
-                settings = pairedSettings,
+            success = UploadScanApplyResult.Success(
+                settings = scannedSettings,
                 message = "Paired Local debug upload endpoint"
             )
         )
@@ -37,10 +37,10 @@ class UploadDebugModePolicyTest {
 
     @Test
     fun productionPairingDoesNotChangeDebugMode() {
-        val result = UploadDebugModePolicy.applyPairingSuccess(
+        val result = UploadDebugModePolicy.applyScanSuccess(
             currentStatus = productionStatus,
             debugEnabled = false,
-            success = UploadPairingApplyResult.Success(
+            success = UploadScanApplyResult.Success(
                 settings = productionSettings,
                 message = "Paired Production upload endpoint"
             )

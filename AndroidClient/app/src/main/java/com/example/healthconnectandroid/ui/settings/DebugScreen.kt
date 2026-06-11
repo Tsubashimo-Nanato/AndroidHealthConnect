@@ -67,8 +67,8 @@ fun DebugScreen(
         }
 
         AppSection(
-            title = "Legacy Heart-Rate Tools",
-            subtitle = "Kept for compatibility with the original demo",
+            title = "Heart-Rate Compatibility Tools",
+            subtitle = "Kept for older heart-rate debug paths",
             modifier = Modifier.rowFadeIn(1)
         ) {
             Text(

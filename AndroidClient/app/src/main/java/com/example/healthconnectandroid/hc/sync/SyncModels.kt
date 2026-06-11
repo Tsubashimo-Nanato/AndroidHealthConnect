@@ -9,7 +9,7 @@ enum class SyncMode(val label: String) {
     FULL_HISTORY("Full Resync"),
     SELECTED_TYPE("Selected Sync"),
     PERIODIC("Periodic Sync"),
-    LEGACY_HR_DEBUG("Legacy HR Debug")
+    LEGACY_HR_DEBUG("Heart-Rate Compatibility Debug")
 }
 
 enum class SyncRunStatus(val id: String) {

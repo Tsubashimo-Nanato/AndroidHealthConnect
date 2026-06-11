@@ -8,14 +8,17 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -24,6 +27,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.example.healthconnectandroid.hc.upload.UploadEndpointPolicy
 import com.example.healthconnectandroid.hc.upload.UploadEndpointValidation
@@ -59,21 +63,21 @@ fun SettingsUploadScreen(
     onTestConnection: (UploadSettings) -> Unit,
     onUploadNow: (UploadSettings, UploadTimeRange) -> Unit,
     onScanPairingQr: () -> Unit,
-    onApplyPairingText: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var serverMode by rememberSaveable(settings, debugEnabled) {
         mutableStateOf(if (debugEnabled) settings.serverMode else UploadServerMode.PRODUCTION)
     }
+    var productionUrl by rememberSaveable(settings) { mutableStateOf(settings.productionBaseUrl) }
     var localUrl by rememberSaveable(settings) { mutableStateOf(settings.localBaseUrl) }
     var apiKey by rememberSaveable(settings) { mutableStateOf(settings.apiKey) }
-    var pairingDialogOpen by rememberSaveable { mutableStateOf(false) }
-    var pairingText by rememberSaveable { mutableStateOf("") }
-    val editedSettings = remember(serverMode, localUrl, apiKey, settings.deviceId) {
+    var apiKeyVisible by rememberSaveable { mutableStateOf(false) }
+    val editedSettings = remember(serverMode, productionUrl, localUrl, apiKey, settings.deviceId) {
         UploadSettings(
             serverMode = serverMode,
+            productionBaseUrl = productionUrl,
             localBaseUrl = localUrl,
-            apiKey = apiKey,
+            apiKey = apiKey.trim(),
             deviceId = settings.deviceId
         )
     }
@@ -105,14 +109,17 @@ fun SettingsUploadScreen(
                     StatusBadge("Production", StatusTone.Info)
                 }
             }
-            OutlinedTextField(
-                modifier = Modifier.fillMaxWidth(),
-                value = UploadEndpointPolicy.PRODUCTION_BASE_URL,
-                onValueChange = {},
-                label = { Text(uiText("Production URL")) },
-                enabled = false,
-                singleLine = true
-            )
+            if (!debugEnabled || serverMode == UploadServerMode.PRODUCTION) {
+                OutlinedTextField(
+                    modifier = Modifier.fillMaxWidth(),
+                    value = productionUrl,
+                    onValueChange = { productionUrl = it.trim().take(200) },
+                    label = { Text(uiText("Production URL")) },
+                    placeholder = { Text(UploadEndpointPolicy.PRODUCTION_BASE_URL) },
+                    enabled = debugEnabled && !busy,
+                    singleLine = true
+                )
+            }
             if (debugEnabled && serverMode == UploadServerMode.LOCAL_DEBUG) {
                 OutlinedTextField(
                     modifier = Modifier.fillMaxWidth(),
@@ -122,13 +129,26 @@ fun SettingsUploadScreen(
                     placeholder = { Text(UploadEndpointPolicy.DEFAULT_LOCAL_BASE_URL) },
                     singleLine = true
                 )
+                Text(
+                    uiText("Emulator: use 10.0.2.2. Physical phone: start the website in LAN mode and use the PC LAN IP. Do not use localhost, 127.0.0.1, or PC-LAN-IP."),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
             OutlinedTextField(
                 modifier = Modifier.fillMaxWidth(),
                 value = apiKey,
-                onValueChange = { apiKey = it.take(256) },
+                onValueChange = { apiKey = it.trim().take(256) },
                 label = { Text(uiText("API key")) },
-                visualTransformation = PasswordVisualTransformation(),
+                visualTransformation = if (apiKeyVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                trailingIcon = {
+                    IconButton(onClick = { apiKeyVisible = !apiKeyVisible }) {
+                        Icon(
+                            imageVector = if (apiKeyVisible) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                            contentDescription = uiText(if (apiKeyVisible) "Hide API key" else "Show API key")
+                        )
+                    }
+                },
                 singleLine = true
             )
             AppActionRow {
@@ -142,23 +162,13 @@ fun SettingsUploadScreen(
             )
             AppActionRow {
                 SecondaryActionButton(
-                    modifier = Modifier.weight(1f),
                     label = "Scan Pairing QR",
                     enabled = !busy,
                     onClick = onScanPairingQr
                 )
-                SecondaryActionButton(
-                    modifier = Modifier.weight(1f),
-                    label = "Paste Pairing Text",
-                    enabled = !busy,
-                    onClick = {
-                        pairingText = ""
-                        pairingDialogOpen = true
-                    }
-                )
             }
             Text(
-                uiText("Pairing accepts a QR with upload URL, API key, or both. Local/private URLs switch to Local debug automatically."),
+                uiText("The website Pairing QR uses the production HTTPS endpoint. For local HTTP upload, use a Debug APK and enter the LAN debug URL manually."),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -237,46 +247,6 @@ fun SettingsUploadScreen(
                 }
             }
         }
-    }
-
-    if (pairingDialogOpen) {
-        AlertDialog(
-            onDismissRequest = { pairingDialogOpen = false },
-            title = { Text(uiText("Paste pairing text")) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text(
-                        uiText("Use this if QR scanning is unavailable. Paste the QR content, upload URL, or API key."),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    OutlinedTextField(
-                        modifier = Modifier.fillMaxWidth(),
-                        value = pairingText,
-                        onValueChange = { pairingText = it.take(1200) },
-                        label = { Text(uiText("Pairing text")) },
-                        minLines = 3
-                    )
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    enabled = pairingText.isNotBlank(),
-                    onClick = {
-                        val text = pairingText
-                        pairingDialogOpen = false
-                        pairingText = ""
-                        onApplyPairingText(text)
-                    }
-                ) {
-                    Text(uiText("Apply"))
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { pairingDialogOpen = false }) {
-                    Text(uiText("Cancel"))
-                }
-            }
-        )
     }
 }
 

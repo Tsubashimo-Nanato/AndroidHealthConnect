@@ -8,7 +8,6 @@ namespace HC_server.Controllers;
 [ApiController]
 public class HealthController : ControllerBase
 {
-    // POST /ingest
     [HttpPost("/ingest")]
     public async Task<IActionResult> Ingest([FromBody] IngestBatchDto body, [FromServices] AppDbContext db)
     {
@@ -31,7 +30,6 @@ public class HealthController : ControllerBase
         return Ok(new { inserted = rows.Count });
     }
 
-    // GET /samples/day?metric=heart_rate&date=2025-12-04
     [HttpGet("/samples/day")]
     public async Task<IActionResult> GetDay([FromQuery] string metric, [FromQuery] DateTime date, [FromServices] AppDbContext db)
     {
@@ -48,12 +46,10 @@ public class HealthController : ControllerBase
         return Ok(list);
     }
 
-    // GET /samples/dayLocal?metric=...&date=YYYY-MM-DD&tzOffsetMinutes=540
     [HttpGet("/samples/dayLocal")]
     public async Task<IActionResult> GetDayLocal([FromQuery] string metric, [FromQuery] DateTime date, [FromQuery] int tzOffsetMinutes,
                                                  [FromServices] AppDbContext db)
     {
-        // convert local date to UTC range by subtracting tz offset
         var startLocal = new DateTime(date.Year, date.Month, date.Day, 0, 0, 0, DateTimeKind.Unspecified);
         var startUtc = startLocal.AddMinutes(-tzOffsetMinutes);
         var endUtc = startUtc.AddDays(1);

@@ -6,6 +6,7 @@ internal static class UploadBatchValidation
 {
     public static string? ErrorFor(UploadBatchDto body)
     {
+        // Item-level idempotency is handled after lookup; this boundary only rejects unusable batch envelopes.
         if (string.IsNullOrWhiteSpace(body.DeviceId))
         {
             return "deviceId is required";

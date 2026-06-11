@@ -18,7 +18,6 @@ public class HealthDb : DbContext
             .HasIndex(x => new { x.Metric, x.EpochSecond })
             .IsUnique();
 
-        // Reasonable max lengths
         b.Entity<SampleRecord>()
             .Property(x => x.Metric).HasMaxLength(64);
         b.Entity<SampleRecord>()

@@ -8,7 +8,7 @@ on:
 
 jobs:
   android:
-    name: Android compile
+    name: Android test and compile
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -16,14 +16,14 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-      - name: Compile debug Kotlin
+      - name: Test and compile debug Kotlin
         working-directory: AndroidClient
         run: |
           chmod +x ./gradlew
-          ./gradlew :app:compileDebugKotlin
+          ./gradlew :app:testDebugUnitTest :app:compileDebugKotlin
 
   server:
-    name: Server build
+    name: Server build and test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -32,4 +32,7 @@ jobs:
           dotnet-version: "8.0.x"
       - name: Build server
         working-directory: Server
-        run: dotnet build --configuration Release
+        run: dotnet build HC_server.sln --configuration Release
+      - name: Test server
+        working-directory: Server
+        run: dotnet test HC_server.sln --configuration Release --no-build

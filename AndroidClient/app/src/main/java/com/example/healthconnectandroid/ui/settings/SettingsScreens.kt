@@ -75,13 +75,13 @@ fun SettingsScreen(
                 )
             }
             Text(
-                uiText("Turn on only when testing local server upload or legacy diagnostics."),
+                uiText("Turn on only when testing local server upload or debug diagnostics."),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
         if (debugEnabled) {
-            SettingsNavCard("Debug", "Legacy tools", onOpenDebug, Modifier.rowFadeIn(9))
+            SettingsNavCard("Debug", "Compatibility tools", onOpenDebug, Modifier.rowFadeIn(9))
         }
         StatusMessageCard(status, modifier = Modifier.rowFadeIn(if (debugEnabled) 10 else 9))
     }

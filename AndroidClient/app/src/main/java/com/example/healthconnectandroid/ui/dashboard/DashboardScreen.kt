@@ -11,7 +11,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import com.example.healthconnectandroid.hc.DemoStatus
+import com.example.healthconnectandroid.hc.LocalHealthStatus
 import com.example.healthconnectandroid.hc.HealthDataTypeRegistry
 import com.example.healthconnectandroid.hc.sync.SyncProgress
 import com.example.healthconnectandroid.ui.AppActionRow
@@ -30,7 +30,7 @@ import com.example.healthconnectandroid.ui.i18n.uiText
 @Composable
 fun DashboardScreen(
     modifier: Modifier,
-    demoStatus: DemoStatus?,
+    localHealthStatus: LocalHealthStatus?,
     grantedPermissions: Set<String>,
     backgroundReadAvailable: Boolean,
     backgroundReadGranted: Boolean,
@@ -55,7 +55,7 @@ fun DashboardScreen(
         ) {
             Text(uiText("Health Connect Data Sync"), style = MaterialTheme.typography.headlineSmall)
             Text(
-                uiText("Local health data viewer, CSV exporter, and sync demo."),
+                uiText("Local health data viewer, CSV exporter, and sync tool."),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -65,13 +65,13 @@ fun DashboardScreen(
             MetricCard(
                 modifier = Modifier.weight(1f),
                 label = "Records",
-                value = demoStatus?.localRecordCount?.let(MetricDisplayFormatter::formatCount) ?: "...",
+                value = localHealthStatus?.localRecordCount?.let(MetricDisplayFormatter::formatCount) ?: "...",
                 supporting = "Local SQLite"
             )
             MetricCard(
                 modifier = Modifier.weight(1f),
                 label = "Types",
-                value = demoStatus?.localDataTypeCount?.let(MetricDisplayFormatter::formatCount) ?: "...",
+                value = localHealthStatus?.localDataTypeCount?.let(MetricDisplayFormatter::formatCount) ?: "...",
                 supporting = "With local data"
             )
         }
@@ -98,7 +98,10 @@ fun DashboardScreen(
                 },
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            Text(uiText(demoStatusText(demoStatus, displayPreferences)), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                uiText(localHealthStatusText(localHealthStatus, displayPreferences)),
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
             StatusMessageCard(status, tone = statusTone)
         }
 
@@ -124,10 +127,13 @@ fun DashboardScreen(
     }
 }
 
-private fun demoStatusText(demoStatus: DemoStatus?, displayPreferences: DisplayPreferences): String {
-    if (demoStatus == null) return "Local records are loading."
-    val lastSync = MetricDisplayFormatter.formatShortInstant(demoStatus.lastSync, displayPreferences.zoneId)
-    val syncStatus = demoStatus.lastSyncStatus ?: "no sync yet"
+private fun localHealthStatusText(
+    localHealthStatus: LocalHealthStatus?,
+    displayPreferences: DisplayPreferences
+): String {
+    if (localHealthStatus == null) return "Local records are loading."
+    val lastSync = MetricDisplayFormatter.formatShortInstant(localHealthStatus.lastSync, displayPreferences.zoneId)
+    val syncStatus = localHealthStatus.lastSyncStatus ?: "no sync yet"
     return "Last sync: $lastSync ($syncStatus)"
 }
 

@@ -105,6 +105,7 @@ object AppPreferences {
     private const val KEY_LANGUAGE = "language"
     private const val KEY_DEBUG_MODE_ENABLED = "debug_mode_enabled"
     private const val KEY_UPLOAD_SERVER_MODE = "upload_server_mode"
+    private const val KEY_UPLOAD_PRODUCTION_URL = "upload_production_url"
     private const val KEY_UPLOAD_LOCAL_URL = "upload_local_url"
     private const val KEY_UPLOAD_API_KEY = "upload_api_key"
     private const val KEY_UPLOAD_DEVICE_ID = "upload_device_id"
@@ -232,9 +233,12 @@ object AppPreferences {
             ?: UploadServerMode.PRODUCTION
         val localUrl = prefs.getString(KEY_UPLOAD_LOCAL_URL, UploadEndpointPolicy.DEFAULT_LOCAL_BASE_URL)
             ?: UploadEndpointPolicy.DEFAULT_LOCAL_BASE_URL
+        val productionUrl = prefs.getString(KEY_UPLOAD_PRODUCTION_URL, UploadEndpointPolicy.PRODUCTION_BASE_URL)
+            ?: UploadEndpointPolicy.PRODUCTION_BASE_URL
         val apiKey = prefs.getString(KEY_UPLOAD_API_KEY, "") ?: ""
         return UploadSettings(
             serverMode = mode,
+            productionBaseUrl = productionUrl,
             localBaseUrl = localUrl,
             apiKey = apiKey,
             deviceId = uploadDeviceId(context)
@@ -244,8 +248,9 @@ object AppPreferences {
     fun setUploadSettings(context: Context, settings: UploadSettings) {
         prefs(context).edit().apply {
             putString(KEY_UPLOAD_SERVER_MODE, settings.serverMode.name)
+            putString(KEY_UPLOAD_PRODUCTION_URL, settings.productionBaseUrl.trim())
             putString(KEY_UPLOAD_LOCAL_URL, settings.localBaseUrl.trim())
-            putString(KEY_UPLOAD_API_KEY, settings.apiKey)
+            putString(KEY_UPLOAD_API_KEY, settings.apiKey.trim())
             putString(KEY_UPLOAD_DEVICE_ID, settings.deviceId)
         }.apply()
     }

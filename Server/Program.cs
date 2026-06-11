@@ -5,7 +5,6 @@ using Microsoft.OpenApi.Models;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// DB
 builder.Services.AddDbContext<AppDbContext>(opt =>
 {
     var connectionString = builder.Configuration.GetConnectionString("HealthDb") ?? "Data Source=hc.db";
@@ -37,10 +36,8 @@ if (!builder.Environment.IsDevelopment())
     }
 }
 
-// Controllers
 builder.Services.AddControllers();
 
-// Swagger + API key
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {
@@ -61,7 +58,6 @@ builder.Services.AddSwaggerGen(c =>
 builder.Services.AddTransient<ApiKeyMiddleware>();
 var app = builder.Build();
 
-// Ensure DB exists
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -69,7 +65,6 @@ using (var scope = app.Services.CreateScope())
     await UploadSchemaInitializer.EnsureUploadTablesAsync(db);
 }
 
-// Static files (index.html)
 app.UseDefaultFiles();
 app.UseStaticFiles();
 
@@ -79,7 +74,6 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
-// API key on everything except swagger & static
 app.UseMiddleware<ApiKeyMiddleware>();
 
 app.MapControllers();

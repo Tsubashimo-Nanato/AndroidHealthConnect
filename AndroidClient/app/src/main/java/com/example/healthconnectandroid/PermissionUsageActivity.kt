@@ -42,7 +42,7 @@ class PermissionUsageActivity : ComponentActivity() {
                         Text(uiText("Why We Access Health Data"), style = MaterialTheme.typography.headlineSmall)
                         AppSection(
                             title = "Local viewing and export",
-                            subtitle = "Health Connect read permissions are used only for this app's demo data flow"
+                            subtitle = "Health Connect read permissions are used only for this app's local data flow"
                         ) {
                             Text(
                                 uiText(
@@ -54,7 +54,7 @@ class PermissionUsageActivity : ComponentActivity() {
                             Text(
                                 uiText(
                                     "Data is stored locally in this app's database for inspection, charting, CSV export, " +
-                                        "and manual or periodic sync demos. The app does not write Health Connect data."
+                                        "and manual or periodic sync actions. The app does not write Health Connect data."
                                 )
                             )
                             Text(

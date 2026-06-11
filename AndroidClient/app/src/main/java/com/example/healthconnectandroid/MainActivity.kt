@@ -1,5 +1,3 @@
-@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
-
 package com.example.healthconnectandroid
 
 import android.content.pm.PackageManager
@@ -12,33 +10,14 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.result.contract.ActivityResultContracts.CreateDocument
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.List
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -49,8 +28,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.health.connect.client.HealthConnectClient
@@ -58,7 +35,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import com.example.healthconnectandroid.debug.DeviceSmokeDiagnostics
 import com.example.healthconnectandroid.data.AppDb
-import com.example.healthconnectandroid.hc.DemoStatus
+import com.example.healthconnectandroid.hc.LocalHealthStatus
 import com.example.healthconnectandroid.hc.HealthDataTypeRegistry
 import com.example.healthconnectandroid.hc.PeriodicHealthSyncWorker
 import com.example.healthconnectandroid.hc.PeriodicSyncPreferences
@@ -78,18 +55,19 @@ import com.example.healthconnectandroid.hc.sync.syncAllStatusText
 import com.example.healthconnectandroid.hc.upload.HealthUploadService
 import com.example.healthconnectandroid.hc.upload.HealthUploadWorker
 import com.example.healthconnectandroid.hc.upload.UploadDebugModePolicy
-import com.example.healthconnectandroid.hc.upload.UploadPairingApplyResult
-import com.example.healthconnectandroid.hc.upload.UploadPairingPolicy
 import com.example.healthconnectandroid.hc.upload.UploadPendingCounts
 import com.example.healthconnectandroid.hc.upload.UploadProgress
 import com.example.healthconnectandroid.hc.upload.UploadResultSeverity
+import com.example.healthconnectandroid.hc.upload.UploadScanApplyResult
+import com.example.healthconnectandroid.hc.upload.UploadScanPolicy
 import com.example.healthconnectandroid.hc.upload.UploadSettings
 import com.example.healthconnectandroid.hc.upload.UploadTimeRange
 import com.example.healthconnectandroid.hc.upload.toStatus
 import com.example.healthconnectandroid.navigation.AppDestination
 import com.example.healthconnectandroid.navigation.AppNavigationState
-import com.example.healthconnectandroid.navigation.AppTab
 import com.example.healthconnectandroid.navigation.SettingsDestination
+import com.example.healthconnectandroid.ui.AppTopBar
+import com.example.healthconnectandroid.ui.BottomNavigationBar
 import com.example.healthconnectandroid.ui.data.DataCatalogScreen
 import com.example.healthconnectandroid.ui.data.HealthDataDetailScreen
 import com.example.healthconnectandroid.ui.dashboard.DashboardScreen
@@ -121,7 +99,7 @@ import kotlinx.coroutines.launch
 
 private val HR_PERMISSION = HealthDataTypeRegistry.heartRate.requiredReadPermission
     ?: error("Heart rate record must expose a Health Connect read permission")
-private const val TAG = "HCHRDemo"
+private const val TAG = "HealthConnect"
 
 class MainActivity : ComponentActivity() {
     private var pendingTypeExportKey: String? = null
@@ -129,7 +107,9 @@ class MainActivity : ComponentActivity() {
     private var reportActionBusy: ((Boolean) -> Unit)? = null
 
     private val requestHrPermission =
-        registerForActivityResult(ActivityResultContracts.RequestPermission()) { /* refresh on resume */ }
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) {
+            // Permission dialogs can return before Health Connect state settles; resume refresh is the stable source.
+        }
 
     private fun hasHrPermission(): Boolean =
         ContextCompat.checkSelfPermission(this, HR_PERMISSION) == PackageManager.PERMISSION_GRANTED
@@ -152,7 +132,9 @@ class MainActivity : ComponentActivity() {
     private var hcClient: HealthConnectClient? = null
     private val hcPermissions = HealthDataTypeRegistry.implementedReadPermissions
     private val requestHcPermissions =
-        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { /* refresh on resume */ }
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+            // Health Connect permissions are re-read on resume to keep platform and HC state in one path.
+        }
 
     private val createHrCsv =
         registerForActivityResult(CreateDocument("text/csv")) { uri ->
@@ -168,7 +150,7 @@ class MainActivity : ComponentActivity() {
                 }.onFailure { Log.e(TAG, "CSV export failed", it) }
                     .getOrDefault(-1)
                 val message = if (count >= 0) {
-                    "Exported legacy heart-rate CSV: $count rows"
+                    "Exported heart-rate compatibility CSV: $count rows"
                 } else {
                     "Heart-rate CSV export failed"
                 }
@@ -320,10 +302,10 @@ class MainActivity : ComponentActivity() {
         var lastPeriodicSummary by remember {
             mutableStateOf(PeriodicSyncPreferences.lastSummary(this@MainActivity))
         }
-        var demoStatus by remember { mutableStateOf<DemoStatus?>(null) }
+        var localHealthStatus by remember { mutableStateOf<LocalHealthStatus?>(null) }
         var status by remember { mutableStateOf("Ready") }
         var dashboardStatusTone by remember { mutableStateOf(StatusTone.Neutral) }
-        var actionInProgress by remember { mutableStateOf<String?>(null) }
+        var actionInProgress by remember { mutableStateOf<AppAction?>(null) }
         var syncProgress by remember { mutableStateOf<SyncProgress?>(null) }
         var fullSyncJob by remember { mutableStateOf<Job?>(null) }
         var showClearConfirm by remember { mutableStateOf(false) }
@@ -357,7 +339,7 @@ class MainActivity : ComponentActivity() {
 
         fun refreshLocalStatus() {
             scope.launch {
-                demoStatus = runCatching { dashboardQueries.demoStatus() }.getOrNull()
+                localHealthStatus = runCatching { dashboardQueries.localHealthStatus() }.getOrNull()
             }
         }
 
@@ -369,10 +351,10 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        fun applyUploadPairingText(rawText: String) {
-            when (val result = UploadPairingPolicy.applyPairingText(uploadSettings, rawText)) {
-                is UploadPairingApplyResult.Success -> {
-                    val update = UploadDebugModePolicy.applyPairingSuccess(
+        fun applyScannedUploadText(rawText: String) {
+            when (val result = UploadScanPolicy.applyScannedText(uploadSettings, rawText)) {
+                is UploadScanApplyResult.Success -> {
+                    val update = UploadDebugModePolicy.applyScanSuccess(
                         currentStatus = uploadStatus,
                         debugEnabled = debugEnabled,
                         success = result
@@ -386,14 +368,14 @@ class MainActivity : ComponentActivity() {
                     status = update.message
                     refreshUploadStatus()
                 }
-                is UploadPairingApplyResult.Invalid -> {
-                    status = "QR pairing failed: ${result.message}"
+                is UploadScanApplyResult.Invalid -> {
+                    status = "QR scan failed: ${result.message}"
                 }
             }
         }
 
-        fun scanUploadPairingQr() {
-            status = "Opening QR scanner..."
+        fun scanUploadQr() {
+            status = "Opening pairing scanner..."
             val options = GmsBarcodeScannerOptions.Builder()
                 .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
                 .build()
@@ -402,21 +384,21 @@ class MainActivity : ComponentActivity() {
                 .addOnSuccessListener { barcode ->
                     val rawValue = barcode.rawValue?.trim()
                     if (rawValue.isNullOrBlank()) {
-                        status = "QR pairing failed: empty code"
+                        status = "QR scan failed: empty code"
                     } else {
-                        applyUploadPairingText(rawValue)
+                        applyScannedUploadText(rawValue)
                     }
                 }
                 .addOnCanceledListener {
-                    status = "QR pairing cancelled"
+                    status = "Pairing scan cancelled"
                 }
                 .addOnFailureListener { throwable ->
-                    status = "QR scan failed: ${throwable.message ?: throwable.javaClass.simpleName}. Paste pairing text instead."
+                    status = "QR scan failed: ${throwable.message ?: throwable.javaClass.simpleName}"
                 }
         }
 
         fun togglePeriodicSync() {
-            actionInProgress = "periodic_toggle"
+            actionInProgress = AppAction.PERIODIC_TOGGLE
             if (periodicEnabled) {
                 PeriodicHealthSyncWorker.cancel(this@MainActivity)
                 periodicEnabled = false
@@ -439,7 +421,7 @@ class MainActivity : ComponentActivity() {
 
         fun runFullResync() {
             fullSyncJob = scope.launch {
-                actionInProgress = "full_resync"
+                actionInProgress = AppAction.FULL_RESYNC
                 syncProgress = null
                 status = "Running full historical resync..."
                 val results = try {
@@ -466,7 +448,7 @@ class MainActivity : ComponentActivity() {
                 }
                 diagnostics.recordSyncResults(SyncMode.FULL_HISTORY, results)
                 status = syncAllStatusText(results, "Full resync")
-                demoStatus = runCatching { dashboardQueries.demoStatus() }.getOrNull()
+                localHealthStatus = runCatching { dashboardQueries.localHealthStatus() }.getOrNull()
                 refreshUploadStatus()
                 actionInProgress = null
                 fullSyncJob = null
@@ -475,7 +457,7 @@ class MainActivity : ComponentActivity() {
 
         fun runBackgroundSyncNow() {
             scope.launch {
-                actionInProgress = "background_now"
+                actionInProgress = AppAction.BACKGROUND_NOW
                 syncProgress = null
                 status = "Running background sync now..."
                 val results = runCatching {
@@ -507,7 +489,7 @@ class MainActivity : ComponentActivity() {
                 lastPeriodicStatus = PeriodicSyncPreferences.lastStatus(this@MainActivity)
                 lastPeriodicSummary = PeriodicSyncPreferences.lastSummary(this@MainActivity)
                 status = summary
-                demoStatus = runCatching { dashboardQueries.demoStatus() }.getOrNull()
+                localHealthStatus = runCatching { dashboardQueries.localHealthStatus() }.getOrNull()
                 refreshUploadStatus()
                 actionInProgress = null
             }
@@ -525,7 +507,7 @@ class MainActivity : ComponentActivity() {
         fun testUploadConnection(settings: UploadSettings) {
             scope.launch {
                 try {
-                    actionInProgress = "upload_test"
+                    actionInProgress = AppAction.UPLOAD_TEST
                     uploadSettings = settings
                     AppPreferences.setUploadSettings(this@MainActivity, settings)
                     status = "Testing upload server..."
@@ -556,7 +538,7 @@ class MainActivity : ComponentActivity() {
         fun uploadNow(settings: UploadSettings, range: UploadTimeRange) {
             scope.launch {
                 try {
-                    actionInProgress = "upload"
+                    actionInProgress = AppAction.UPLOAD
                     uploadProgress = null
                     uploadSettings = settings
                     AppPreferences.setUploadSettings(this@MainActivity, settings)
@@ -592,7 +574,7 @@ class MainActivity : ComponentActivity() {
 
         fun runSmartSync() {
             scope.launch {
-                actionInProgress = "smart_sync"
+                actionInProgress = AppAction.SMART_SYNC
                 syncProgress = null
                 dashboardStatusTone = StatusTone.Info
                 status = "Smart syncing recent Health Connect data..."
@@ -611,7 +593,7 @@ class MainActivity : ComponentActivity() {
                 diagnostics.recordSyncResults(SyncMode.SMART, results)
                 status = syncAllStatusText(results, "Smart sync")
                 dashboardStatusTone = syncResultsStatusTone(results)
-                demoStatus = runCatching { dashboardQueries.demoStatus() }.getOrNull()
+                localHealthStatus = runCatching { dashboardQueries.localHealthStatus() }.getOrNull()
                 refreshUploadStatus()
                 actionInProgress = null
             }
@@ -624,7 +606,7 @@ class MainActivity : ComponentActivity() {
             hrHcGranted = HR_PERMISSION in granted
             backgroundReadAvailable = syncService.backgroundReadFeatureAvailable()
             backgroundReadGranted = HealthDataTypeRegistry.backgroundReadPermission in granted
-            demoStatus = runCatching { dashboardQueries.demoStatus() }.getOrNull()
+            localHealthStatus = runCatching { dashboardQueries.localHealthStatus() }.getOrNull()
             uploadPendingCounts = runCatching { uploadService.pendingCounts(uploadSettings) }
                 .getOrDefault(UploadPendingCounts.Empty)
         }
@@ -646,7 +628,7 @@ class MainActivity : ComponentActivity() {
                         hrHcGranted = HR_PERMISSION in granted
                         backgroundReadAvailable = syncService.backgroundReadFeatureAvailable()
                         backgroundReadGranted = HealthDataTypeRegistry.backgroundReadPermission in granted
-                        demoStatus = runCatching { dashboardQueries.demoStatus() }.getOrNull()
+                        localHealthStatus = runCatching { dashboardQueries.localHealthStatus() }.getOrNull()
                         uploadPendingCounts = runCatching { uploadService.pendingCounts(uploadSettings) }
                             .getOrDefault(UploadPendingCounts.Empty)
                     }
@@ -767,7 +749,7 @@ class MainActivity : ComponentActivity() {
                                 lastPeriodicStatus = lastPeriodicStatus,
                                 lastPeriodicSummary = lastPeriodicSummary,
                                 status = status,
-                                busy = actionInProgress in setOf("periodic_toggle", "full_resync", "background_now"),
+                                busy = actionInProgress?.blocksSyncSettings == true,
                                 syncProgress = syncProgress,
                                 onTogglePeriodic = ::togglePeriodicSync,
                                 onFullResync = ::runFullResync,
@@ -784,34 +766,29 @@ class MainActivity : ComponentActivity() {
                                 pendingCounts = uploadPendingCounts,
                                 debugEnabled = debugEnabled,
                                 status = status,
-                                busy = actionInProgress == "upload" || actionInProgress == "upload_test",
+                                busy = actionInProgress?.blocksUpload == true,
                                 progress = uploadProgress,
                                 onSaveSettings = ::saveUploadSettings,
                                 onTestConnection = ::testUploadConnection,
                                 onUploadNow = ::uploadNow,
-                                onScanPairingQr = {
-                                    scanUploadPairingQr()
-                                },
-                                onApplyPairingText = { pairingText ->
-                                    applyUploadPairingText(pairingText)
-                                },
+                                onScanPairingQr = ::scanUploadQr,
                                 modifier = Modifier.padding(pad)
                             )
                             SettingsDestination.DataSettings -> SettingsDataScreen(
                                 status = status,
-                                busy = actionInProgress?.startsWith("export") == true,
+                                busy = actionInProgress?.isExport == true,
                                 onExportHrCsv = {
-                                    actionInProgress = "export_hr"
+                                    actionInProgress = AppAction.EXPORT_HR
                                     status = "Choose heart-rate CSV destination..."
                                     createHrCsv.launch("hr_export_${exportFileStamp()}.csv")
                                 },
                                 onExportAllCsv = {
-                                    actionInProgress = "export_all"
+                                    actionInProgress = AppAction.EXPORT_ALL
                                     status = "Choose all-data CSV destination..."
                                     createAllCsv.launch("health_connect_all_${exportFileStamp()}.csv")
                                 },
                                 onExportZip = {
-                                    actionInProgress = "export_zip"
+                                    actionInProgress = AppAction.EXPORT_ZIP
                                     status = "Choose ZIP destination..."
                                     createCsvZip.launch("health_connect_csv_${exportFileStamp()}.zip")
                                 },
@@ -892,7 +869,7 @@ class MainActivity : ComponentActivity() {
                             userPreferences = userPreferences,
                             diagnostics = diagnostics,
                             onExportType = { key ->
-                                actionInProgress = "export_type"
+                                actionInProgress = AppAction.EXPORT_TYPE
                                 status = "Choose ${key} CSV destination..."
                                 pendingTypeExportKey = key
                                 createTypeCsv.launch("${key}_${exportFileStamp()}.csv")
@@ -908,14 +885,14 @@ class MainActivity : ComponentActivity() {
                     AppDestination.Dashboard -> {
                         DashboardScreen(
                             modifier = Modifier.padding(pad),
-                            demoStatus = demoStatus,
+                            localHealthStatus = localHealthStatus,
                             grantedPermissions = grantedPermissions,
                             backgroundReadAvailable = backgroundReadAvailable,
                             backgroundReadGranted = backgroundReadGranted,
                             periodicEnabled = periodicEnabled,
                             status = status,
                             statusTone = dashboardStatusTone,
-                            syncing = actionInProgress == "smart_sync",
+                            syncing = actionInProgress == AppAction.SMART_SYNC,
                             syncProgress = syncProgress,
                             displayPreferences = displayPreferences,
                             onSyncAll = ::runSmartSync
@@ -931,7 +908,7 @@ class MainActivity : ComponentActivity() {
                     text = {
                         Text(
                             uiText(
-                                "This removes cached records, aggregates, legacy heart-rate rows, and sync history " +
+                                "This removes cached records, aggregates, older heart-rate rows, and sync history " +
                                     "from this app. Health Connect data itself is not deleted."
                             )
                         )
@@ -942,8 +919,8 @@ class MainActivity : ComponentActivity() {
                                 showClearConfirm = false
                                 scope.launch {
                                     val removed = localDataService.clearDb()
-                                    status = "Removed local data ($removed legacy heart-rate rows)"
-                                    demoStatus = runCatching { dashboardQueries.demoStatus() }.getOrNull()
+                                    status = "Removed local data ($removed older heart-rate rows)"
+                                    localHealthStatus = runCatching { dashboardQueries.localHealthStatus() }.getOrNull()
                                     uploadPendingCounts = runCatching { uploadService.pendingCounts(uploadSettings) }
                                         .getOrDefault(UploadPendingCounts.Empty)
                                 }
@@ -956,95 +933,6 @@ class MainActivity : ComponentActivity() {
                 )
             }
             }
-        }
-    }
-
-    @Composable
-    private fun AppTopBar(
-        nav: AppNavigationState,
-        onBack: () -> Unit
-    ) {
-        TopAppBar(
-            title = {
-                Text(uiText(nav.title()), fontWeight = FontWeight.SemiBold)
-            },
-            navigationIcon = {
-                if (nav.destination != AppDestination.Dashboard) {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                }
-            },
-            actions = {},
-            colors = TopAppBarDefaults.topAppBarColors(
-                containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
-                scrolledContainerColor = MaterialTheme.colorScheme.surface,
-                titleContentColor = MaterialTheme.colorScheme.onSurface,
-                navigationIconContentColor = MaterialTheme.colorScheme.onSurface
-            )
-        )
-    }
-
-    @Composable
-    private fun BottomNavigationBar(
-        selectedTab: AppTab,
-        onSelectTab: (AppTab) -> Unit
-    ) {
-        NavigationBar(
-            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
-            tonalElevation = 10.dp
-        ) {
-            NavigationBarItem(
-                selected = selectedTab == AppTab.Dashboard,
-                onClick = { onSelectTab(AppTab.Dashboard) },
-                icon = { AnimatedNavIcon(selected = selectedTab == AppTab.Dashboard) {
-                    Icon(Icons.Default.Home, contentDescription = null)
-                } },
-                label = { Text(uiText(AppTab.Dashboard.label)) },
-                colors = studioNavigationItemColors()
-            )
-            NavigationBarItem(
-                selected = selectedTab == AppTab.Data,
-                onClick = { onSelectTab(AppTab.Data) },
-                icon = { AnimatedNavIcon(selected = selectedTab == AppTab.Data) {
-                    Icon(Icons.AutoMirrored.Filled.List, contentDescription = null)
-                } },
-                label = { Text(uiText(AppTab.Data.label)) },
-                colors = studioNavigationItemColors()
-            )
-            NavigationBarItem(
-                selected = selectedTab == AppTab.Settings,
-                onClick = { onSelectTab(AppTab.Settings) },
-                icon = { AnimatedNavIcon(selected = selectedTab == AppTab.Settings) {
-                    Icon(Icons.Default.Settings, contentDescription = null)
-                } },
-                label = { Text(uiText(AppTab.Settings.label)) },
-                colors = studioNavigationItemColors()
-            )
-        }
-    }
-
-    @Composable
-    private fun studioNavigationItemColors() = NavigationBarItemDefaults.colors(
-        selectedIconColor = MaterialTheme.colorScheme.primary,
-        selectedTextColor = MaterialTheme.colorScheme.primary,
-        indicatorColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f),
-        unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-        unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
-    )
-
-    @Composable
-    private fun AnimatedNavIcon(
-        selected: Boolean,
-        content: @Composable () -> Unit
-    ) {
-        val scale by animateFloatAsState(
-            targetValue = if (selected) 1.08f else 1f,
-            animationSpec = tween(180),
-            label = "bottom-nav-icon-scale"
-        )
-        Row(Modifier.graphicsLayer { scaleX = scale; scaleY = scale }) {
-            content()
         }
     }
 

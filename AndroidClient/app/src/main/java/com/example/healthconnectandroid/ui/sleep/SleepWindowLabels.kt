@@ -82,19 +82,20 @@ fun sleepWindowEndInstant(
     range: InspectorTimeRange,
     anchorDate: LocalDate,
     weekStart: DayOfWeek = DayOfWeek.SUNDAY,
-    zoneId: ZoneId = ZoneId.systemDefault()
+    zoneId: ZoneId = ZoneId.systemDefault(),
+    now: Instant = Instant.now()
 ): Instant {
-    val today = LocalDate.now(zoneId)
+    val today = now.atZone(zoneId).toLocalDate()
     return if (range == InspectorTimeRange.MONTHLY) {
         val monthStart = anchorDate.withDayOfMonth(1)
         val currentMonthStart = today.withDayOfMonth(1)
         if (monthStart == currentMonthStart) {
-            Instant.now()
+            now
         } else {
             monthStart.plusMonths(1).atStartOfDay(zoneId).toInstant()
         }
     } else if (sleepVisibleEndDate(range, anchorDate, weekStart) >= today) {
-        Instant.now()
+        now
     } else {
         sleepVisibleEndDate(range, anchorDate, weekStart).plusDays(1).atStartOfDay(zoneId).toInstant()
     }

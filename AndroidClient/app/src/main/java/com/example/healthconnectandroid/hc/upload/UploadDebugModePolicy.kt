@@ -8,10 +8,10 @@ data class UploadDebugModeUpdate(
 )
 
 object UploadDebugModePolicy {
-    fun applyPairingSuccess(
+    fun applyScanSuccess(
         currentStatus: UploadStatus,
         debugEnabled: Boolean,
-        success: UploadPairingApplyResult.Success
+        success: UploadScanApplyResult.Success
     ): UploadDebugModeUpdate {
         val enablesLocalDebug = success.settings.serverMode == UploadServerMode.LOCAL_DEBUG && !debugEnabled
         val nextDebugEnabled = debugEnabled || enablesLocalDebug

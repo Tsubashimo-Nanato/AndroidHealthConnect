@@ -25,6 +25,7 @@ enum class UploadTimeRange(val label: String) {
 
 data class UploadSettings(
     val serverMode: UploadServerMode = UploadServerMode.PRODUCTION,
+    val productionBaseUrl: String = UploadEndpointPolicy.PRODUCTION_BASE_URL,
     val localBaseUrl: String = UploadEndpointPolicy.DEFAULT_LOCAL_BASE_URL,
     val apiKey: String = "",
     val deviceId: String

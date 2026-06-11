@@ -32,7 +32,7 @@ import java.time.temporal.ChronoUnit
 import kotlin.math.abs
 import kotlinx.coroutines.CancellationException
 
-private const val TAG = "HCHRDemo"
+private const val TAG = "HealthConnectSync"
 
 private data class StoreNormalizedResult(
     val inserted: Int,

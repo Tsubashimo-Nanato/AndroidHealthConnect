@@ -114,7 +114,7 @@ data class RecordFullDetails(
     val rawDetails: String?
 )
 
-data class DemoStatus(
+data class LocalHealthStatus(
     val localRecordCount: Int,
     val localDataTypeCount: Int,
     val lastSync: Instant?,
