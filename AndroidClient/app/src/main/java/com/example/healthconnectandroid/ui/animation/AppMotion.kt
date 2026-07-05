@@ -20,6 +20,7 @@ fun Modifier.rowFadeIn(
     enabled: Boolean = true,
     maxAnimatedIndex: Int = 16
 ): Modifier {
+    // Long local lists can contain many rows; animating only the first screen keeps scroll setup cheap.
     if (!enabled || index > maxAnimatedIndex) return this
     val density = LocalDensity.current
     val progress = remember(index) { Animatable(0f) }

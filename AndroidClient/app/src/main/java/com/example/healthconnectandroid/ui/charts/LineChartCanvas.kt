@@ -119,8 +119,7 @@ fun LineChart(
         ChartDrawDownsampler.downsampleMinMax(visiblePoints)
     }
     val visibleValues = remember(visiblePoints, sorted) {
-        visiblePoints.flatMap { listOfNotNull(it.value, it.value2) }
-            .ifEmpty { sorted.flatMap { listOfNotNull(it.value, it.value2) } }
+        collectChartValues(visiblePoints).ifEmpty { collectChartValues(sorted) }
     }
     val yBounds = if (heartRateZones != null) {
         val bounds = HeartRateAnalysis.stableChartBounds(visibleValues, heartRateZones)
@@ -243,22 +242,27 @@ fun LineChart(
             valueOf: (InspectorChartPoint) -> Double?,
             color: androidx.compose.ui.graphics.Color
         ) {
-            val series = drawPoints.mapNotNull { point ->
-                valueOf(point)?.let { Offset(pointX(point.epochMillis), pointY(it)) }
-            }
-            if (series.isEmpty()) return
             val pointRadius = seriesStyle.pointRadiusDp.dp.toPx()
-            if (pointRadius > 0f) {
-                for (point in series) {
-                    drawCircle(color, radius = pointRadius, center = point)
+            var pointCount = 0
+            var path: Path? = null
+
+            for (point in drawPoints) {
+                val value = valueOf(point) ?: continue
+                val x = pointX(point.epochMillis)
+                val y = pointY(value)
+                if (pointRadius > 0f) {
+                    drawCircle(color, radius = pointRadius, center = Offset(x, y))
                 }
+                if (path == null) {
+                    path = Path().apply { moveTo(x, y) }
+                } else {
+                    path.lineTo(x, y)
+                }
+                pointCount += 1
             }
-            if (series.size >= 2) {
-                val path = Path().apply {
-                    moveTo(series.first().x, series.first().y)
-                    for (point in series.drop(1)) lineTo(point.x, point.y)
-                }
-                drawPath(path, color, style = Stroke(width = seriesStyle.strokeDp.dp.toPx(), cap = StrokeCap.Round))
+
+            path?.takeIf { pointCount >= 2 }?.let { seriesPath ->
+                drawPath(seriesPath, color, style = Stroke(width = seriesStyle.strokeDp.dp.toPx(), cap = StrokeCap.Round))
             }
         }
 
@@ -300,6 +304,16 @@ private data class LineSeriesStyle(
     val strokeDp: Float,
     val pointRadiusDp: Float
 )
+
+private fun collectChartValues(points: List<InspectorChartPoint>): List<Double> {
+    val values = ArrayList<Double>(points.size * 2)
+    for (point in points) {
+        values.add(point.value)
+        val secondary = point.value2
+        if (secondary != null) values.add(secondary)
+    }
+    return values
+}
 
 private fun adaptiveLineStyle(visiblePointCount: Int): LineSeriesStyle =
     when {

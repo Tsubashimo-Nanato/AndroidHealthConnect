@@ -12,8 +12,8 @@ android {
         applicationId = "com.example.healthconnectandroid"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "0.1.1"
+        versionCode = 4
+        versionName = "0.1.4"
     }
 
     buildFeatures { compose = true }
@@ -42,6 +42,7 @@ dependencies {
 
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.6")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.6")
+    implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.work:work-runtime-ktx:2.9.1")
 
     // Health Connect

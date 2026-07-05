@@ -39,6 +39,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.healthconnectandroid.UnitSystemPreference
@@ -154,7 +155,8 @@ private fun DataStatusStrip(
     displayPreferences: DisplayPreferences,
     onRefresh: () -> Unit
 ) {
-    val latestSync: Instant? = categories.mapNotNull { it.lastSynced }.maxOrNull()
+    val latestSync: Instant? = remember(categories) { categories.mapNotNull { it.lastSynced }.maxOrNull() }
+    val totalRecords = remember(categories) { categories.sumOf { it.recordCount } }
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
@@ -174,7 +176,7 @@ private fun DataStatusStrip(
                         StatusBadge("${MetricDisplayFormatter.formatCount(categories.size)} types", StatusTone.Info)
                         StatusBadge("Local cache", StatusTone.Info)
                         StatusBadge(
-                            MetricDisplayFormatter.formatRecordCount(categories.sumOf { it.recordCount }),
+                            MetricDisplayFormatter.formatRecordCount(totalRecords),
                             StatusTone.Neutral
                         )
                     }
@@ -281,6 +283,7 @@ private fun HealthMetricCard(
                 enabled = clickable,
                 interactionSource = interactionSource,
                 indication = null,
+                role = Role.Button,
                 onClick = onClick
             ),
         colors = CardDefaults.cardColors(

@@ -8,6 +8,7 @@ import com.example.healthconnectandroid.hc.HealthDataTypeRegistry
 
 sealed interface AppDestination {
     data object Dashboard : AppDestination
+    data object Medicine : AppDestination
     data object Data : AppDestination
     data class DataDetail(val dataTypeKey: String) : AppDestination
     data object Settings : AppDestination
@@ -16,6 +17,7 @@ sealed interface AppDestination {
 
 enum class AppTab(val label: String) {
     Dashboard("Dashboard"),
+    Medicine("Medicine"),
     Data("Data"),
     Settings("Settings")
 }
@@ -24,6 +26,7 @@ enum class SettingsDestination(val title: String) {
     Profile("Profile"),
     Preferences("Preferences"),
     Permissions("Permissions"),
+    Medicine("Medicine"),
     Sync("Sync"),
     Upload("Upload"),
     DataSettings("Data Settings"),
@@ -43,6 +46,7 @@ class AppNavigationState(
 
     val selectedTab: AppTab
         get() = when (destination) {
+            AppDestination.Medicine -> AppTab.Medicine
             AppDestination.Data,
             is AppDestination.DataDetail -> AppTab.Data
             AppDestination.Settings,
@@ -56,6 +60,7 @@ class AppNavigationState(
     fun selectTab(tab: AppTab) {
         destination = when (tab) {
             AppTab.Dashboard -> AppDestination.Dashboard
+            AppTab.Medicine -> AppDestination.Medicine
             AppTab.Data -> AppDestination.Data
             AppTab.Settings -> AppDestination.Settings
         }
@@ -75,6 +80,7 @@ class AppNavigationState(
             is AppDestination.DataDetail -> AppDestination.Data
             is AppDestination.SettingsSection -> AppDestination.Settings
             AppDestination.Data,
+            AppDestination.Medicine,
             AppDestination.Settings -> AppDestination.Dashboard
             AppDestination.Dashboard -> return false
         }
@@ -84,6 +90,7 @@ class AppNavigationState(
     fun title(): String =
         when (val current = destination) {
             AppDestination.Dashboard -> "Dashboard"
+            AppDestination.Medicine -> "Medicine"
             AppDestination.Data -> "Local Data"
             is AppDestination.DataDetail -> HealthDataTypeRegistry.require(current.dataTypeKey).displayName
             AppDestination.Settings -> "Settings"

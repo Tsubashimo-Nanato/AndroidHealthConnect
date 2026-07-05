@@ -1,7 +1,8 @@
 package com.example.healthconnectandroid
 
-import android.content.pm.PackageManager
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
@@ -63,17 +64,29 @@ import com.example.healthconnectandroid.hc.upload.UploadScanPolicy
 import com.example.healthconnectandroid.hc.upload.UploadSettings
 import com.example.healthconnectandroid.hc.upload.UploadTimeRange
 import com.example.healthconnectandroid.hc.upload.toStatus
+import com.example.healthconnectandroid.medicine.EmptyMedicineSnapshot
+import com.example.healthconnectandroid.medicine.MedicineDoseStatus
+import com.example.healthconnectandroid.medicine.MedicineLogSource
+import com.example.healthconnectandroid.medicine.MedicineReminderIntents
+import com.example.healthconnectandroid.medicine.MedicineReminderNotifier
+import com.example.healthconnectandroid.medicine.MedicineReminderScheduler
+import com.example.healthconnectandroid.medicine.MedicineRepository
+import com.example.healthconnectandroid.medicine.MedicineSlot
+import com.example.healthconnectandroid.medicine.MedicineSlotPolicy
 import com.example.healthconnectandroid.navigation.AppDestination
 import com.example.healthconnectandroid.navigation.AppNavigationState
+import com.example.healthconnectandroid.navigation.AppTab
 import com.example.healthconnectandroid.navigation.SettingsDestination
 import com.example.healthconnectandroid.ui.AppTopBar
 import com.example.healthconnectandroid.ui.BottomNavigationBar
 import com.example.healthconnectandroid.ui.data.DataCatalogScreen
 import com.example.healthconnectandroid.ui.data.HealthDataDetailScreen
 import com.example.healthconnectandroid.ui.dashboard.DashboardScreen
+import com.example.healthconnectandroid.ui.medicine.MedicineScreen
 import com.example.healthconnectandroid.ui.settings.DebugScreen
 import com.example.healthconnectandroid.ui.settings.SettingsAppearanceScreen
 import com.example.healthconnectandroid.ui.settings.SettingsDataScreen
+import com.example.healthconnectandroid.ui.settings.SettingsMedicineScreen
 import com.example.healthconnectandroid.ui.settings.SettingsPermissionsScreen
 import com.example.healthconnectandroid.ui.settings.SettingsPreferencesScreen
 import com.example.healthconnectandroid.ui.settings.SettingsProfileScreen
@@ -105,6 +118,8 @@ class MainActivity : ComponentActivity() {
     private var pendingTypeExportKey: String? = null
     private var reportExportStatus: ((String) -> Unit)? = null
     private var reportActionBusy: ((Boolean) -> Unit)? = null
+    private var reportNotificationPermission: ((Boolean) -> Unit)? = null
+    private var openMedicineFromIntent: ((MedicineSlot?) -> Unit)? = null
 
     private val requestHrPermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) {
@@ -129,11 +144,25 @@ class MainActivity : ComponentActivity() {
         requested?.contains(HR_PERMISSION) == true
     } catch (_: Exception) { false }
 
+    private fun hasNotificationPermission(): Boolean =
+        MedicineReminderNotifier.canNotify(this)
+
+    private fun medicineSlotFromIntent(intent: Intent?): MedicineSlot? {
+        if (intent?.action != MedicineReminderIntents.ACTION_OPEN_MEDICINE) return null
+        return intent.getStringExtra(MedicineReminderIntents.EXTRA_SLOT)
+            ?.let(MedicineSlot::fromId)
+    }
+
     private var hcClient: HealthConnectClient? = null
     private val hcPermissions = HealthDataTypeRegistry.implementedReadPermissions
     private val requestHcPermissions =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
             // Health Connect permissions are re-read on resume to keep platform and HC state in one path.
+        }
+
+    private val requestNotificationPermission =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) {
+            reportNotificationPermission?.invoke(hasNotificationPermission())
         }
 
     private val createHrCsv =
@@ -253,6 +282,7 @@ class MainActivity : ComponentActivity() {
         val localDataService = LocalDataService(db)
         val syncService = HealthSyncService(this, db)
         val uploadService = HealthUploadService(db)
+        val medicineRepository = MedicineRepository(db)
         setContent {
             App(
                 dashboardQueries = dashboardQueries,
@@ -262,9 +292,18 @@ class MainActivity : ComponentActivity() {
                 localDataService = localDataService,
                 syncService = syncService,
                 uploadService = uploadService,
+                medicineRepository = medicineRepository,
                 manifestDeclares = ::manifestDeclaresHr,
                 hasPlatformPerm = ::hasHrPermission
             )
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent.action == MedicineReminderIntents.ACTION_OPEN_MEDICINE) {
+            openMedicineFromIntent?.invoke(medicineSlotFromIntent(intent))
         }
     }
 
@@ -277,6 +316,7 @@ class MainActivity : ComponentActivity() {
         localDataService: LocalDataService,
         syncService: HealthSyncService,
         uploadService: HealthUploadService,
+        medicineRepository: MedicineRepository,
         manifestDeclares: () -> Boolean,
         hasPlatformPerm: () -> Boolean
     ) {
@@ -318,6 +358,12 @@ class MainActivity : ComponentActivity() {
         var uploadStatus by remember { mutableStateOf(AppPreferences.uploadStatus(this@MainActivity)) }
         var uploadPendingCounts by remember { mutableStateOf(UploadPendingCounts.Empty) }
         var uploadProgress by remember { mutableStateOf<UploadProgress?>(null) }
+        var medicineSnapshot by remember { mutableStateOf(EmptyMedicineSnapshot) }
+        var medicineStatus by remember { mutableStateOf("Medicine ready") }
+        var notificationPermissionGranted by remember { mutableStateOf(hasNotificationPermission()) }
+        var medicineDefaultSlot by remember {
+            mutableStateOf(medicineSlotFromIntent(intent) ?: MedicineSlot.MORNING)
+        }
         val diagnostics = remember { DeviceSmokeDiagnostics() }
         val userAge = userProfile.age
         val displayPreferences = remember(userPreferences) { userPreferences.toDisplayPreferences() }
@@ -331,9 +377,18 @@ class MainActivity : ComponentActivity() {
         DisposableEffect(Unit) {
             reportExportStatus = { status = it }
             reportActionBusy = { busy -> if (!busy) actionInProgress = null }
+            reportNotificationPermission = { granted ->
+                notificationPermissionGranted = granted
+                medicineStatus = if (granted) {
+                    "Medicine notifications enabled"
+                } else {
+                    "Medicine notifications are not enabled"
+                }
+            }
             onDispose {
                 reportExportStatus = null
                 reportActionBusy = null
+                reportNotificationPermission = null
             }
         }
 
@@ -348,6 +403,94 @@ class MainActivity : ComponentActivity() {
             scope.launch {
                 uploadPendingCounts = runCatching { uploadService.pendingCounts(uploadSettings) }
                     .getOrDefault(UploadPendingCounts.Empty)
+            }
+        }
+
+        fun refreshMedicineSnapshot() {
+            scope.launch {
+                medicineSnapshot = runCatching {
+                    medicineRepository.snapshot(displayPreferences.zoneId)
+                }.getOrElse { throwable ->
+                    medicineStatus = "Medicine load failed: ${throwable.message}"
+                    EmptyMedicineSnapshot
+                }
+            }
+        }
+
+        fun refreshMedicineAndReminders() {
+            scope.launch {
+                medicineSnapshot = runCatching {
+                    medicineRepository.snapshot(displayPreferences.zoneId)
+                }.getOrElse { throwable ->
+                    medicineStatus = "Medicine load failed: ${throwable.message}"
+                    EmptyMedicineSnapshot
+                }
+                runCatching {
+                    MedicineReminderScheduler.scheduleAll(
+                        context = this@MainActivity,
+                        repository = medicineRepository,
+                        zoneId = displayPreferences.zoneId
+                    )
+                }.onFailure { throwable ->
+                    medicineStatus = "Medicine reminder schedule failed: ${throwable.message}"
+                }
+            }
+        }
+
+        fun addMedicine(name: String, slots: Set<MedicineSlot>) {
+            scope.launch {
+                val result = medicineRepository.addMedicine(name, slots)
+                medicineStatus = result.message
+                status = result.message
+                if (result.success) refreshMedicineAndReminders()
+            }
+        }
+
+        fun archiveMedicine(medicineLocalId: Long) {
+            scope.launch {
+                val result = medicineRepository.archiveMedicine(medicineLocalId)
+                medicineStatus = result.message
+                status = result.message
+                if (result.success) refreshMedicineAndReminders()
+            }
+        }
+
+        fun saveMedicineReminder(slot: MedicineSlot, rawTime: String, enabled: Boolean) {
+            scope.launch {
+                val result = medicineRepository.saveReminderTime(slot, rawTime, enabled)
+                medicineStatus = result.message
+                status = result.message
+                if (result.success) refreshMedicineAndReminders()
+            }
+        }
+
+        fun logMedicineDose(
+            slot: MedicineSlot,
+            doseStatus: MedicineDoseStatus,
+            medicineIds: Set<Long>,
+            extraMedicineName: String?
+        ) {
+            scope.launch {
+                val result = medicineRepository.logDose(
+                    slot = slot,
+                    status = doseStatus,
+                    medicineLocalIds = medicineIds,
+                    extraMedicineName = extraMedicineName,
+                    source = MedicineLogSource.MANUAL,
+                    zoneId = displayPreferences.zoneId
+                )
+                medicineStatus = result.message
+                status = result.message
+                refreshMedicineSnapshot()
+            }
+        }
+
+        fun requestMedicineNotifications() {
+            if (Build.VERSION.SDK_INT >= 33 && !hasNotificationPermission()) {
+                requestNotificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+            } else {
+                notificationPermissionGranted = true
+                medicineStatus = "Medicine notifications enabled"
             }
         }
 
@@ -609,6 +752,22 @@ class MainActivity : ComponentActivity() {
             localHealthStatus = runCatching { dashboardQueries.localHealthStatus() }.getOrNull()
             uploadPendingCounts = runCatching { uploadService.pendingCounts(uploadSettings) }
                 .getOrDefault(UploadPendingCounts.Empty)
+            runCatching {
+                medicineRepository.seedTestingMedicines()
+            }.onSuccess { result ->
+                if (result.changedRows > 0) {
+                    medicineStatus = result.message
+                }
+            }.onFailure { throwable ->
+                medicineStatus = "Medicine seed failed: ${throwable.message}"
+            }
+            medicineSnapshot = runCatching { medicineRepository.snapshot(displayPreferences.zoneId) }
+                .getOrDefault(EmptyMedicineSnapshot)
+            MedicineReminderScheduler.scheduleAll(
+                context = this@MainActivity,
+                repository = medicineRepository,
+                zoneId = displayPreferences.zoneId
+            )
         }
 
         DisposableEffect(lifecycleOwner) {
@@ -631,6 +790,9 @@ class MainActivity : ComponentActivity() {
                         localHealthStatus = runCatching { dashboardQueries.localHealthStatus() }.getOrNull()
                         uploadPendingCounts = runCatching { uploadService.pendingCounts(uploadSettings) }
                             .getOrDefault(UploadPendingCounts.Empty)
+                        medicineSnapshot = runCatching { medicineRepository.snapshot(displayPreferences.zoneId) }
+                            .getOrDefault(EmptyMedicineSnapshot)
+                        notificationPermissionGranted = hasNotificationPermission()
                     }
                 }
             }
@@ -639,6 +801,22 @@ class MainActivity : ComponentActivity() {
         }
 
         val nav = remember { AppNavigationState() }
+
+        DisposableEffect(nav) {
+            openMedicineFromIntent = { slot ->
+                slot?.let { medicineDefaultSlot = it }
+                nav.selectTab(AppTab.Medicine)
+                refreshMedicineSnapshot()
+            }
+            onDispose { openMedicineFromIntent = null }
+        }
+
+        LaunchedEffect(Unit) {
+            if (intent?.action == MedicineReminderIntents.ACTION_OPEN_MEDICINE) {
+                medicineSlotFromIntent(intent)?.let { medicineDefaultSlot = it }
+                nav.selectTab(AppTab.Medicine)
+            }
+        }
 
         LaunchedEffect(nav.destination, debugEnabled) {
             if (!debugEnabled && nav.destination == AppDestination.SettingsSection(SettingsDestination.Debug)) {
@@ -679,6 +857,7 @@ class MainActivity : ComponentActivity() {
                             onOpenProfile = { nav.openSettingsSection(SettingsDestination.Profile) },
                             onOpenPreferences = { nav.openSettingsSection(SettingsDestination.Preferences) },
                             onOpenPermissions = { nav.openSettingsSection(SettingsDestination.Permissions) },
+                            onOpenMedicine = { nav.openSettingsSection(SettingsDestination.Medicine) },
                             onOpenSync = { nav.openSettingsSection(SettingsDestination.Sync) },
                             onOpenUpload = { nav.openSettingsSection(SettingsDestination.Upload) },
                             onOpenDataSettings = { nav.openSettingsSection(SettingsDestination.DataSettings) },
@@ -739,6 +918,14 @@ class MainActivity : ComponentActivity() {
                                 },
                                 openAppSettings = { startActivity(it) },
                                 packageName = packageName,
+                                modifier = Modifier.padding(pad)
+                            )
+                            SettingsDestination.Medicine -> SettingsMedicineScreen(
+                                snapshot = medicineSnapshot,
+                                status = medicineStatus,
+                                onAddMedicine = ::addMedicine,
+                                onArchiveMedicine = ::archiveMedicine,
+                                onSaveReminder = ::saveMedicineReminder,
                                 modifier = Modifier.padding(pad)
                             )
                             SettingsDestination.Sync -> SettingsSyncScreen(
@@ -856,6 +1043,18 @@ class MainActivity : ComponentActivity() {
                             onOpenDetail = {
                                 nav.openDataDetail(it)
                             },
+                            modifier = Modifier.padding(pad)
+                        )
+                    }
+                    AppDestination.Medicine -> {
+                        MedicineScreen(
+                            snapshot = medicineSnapshot,
+                            zoneId = displayPreferences.zoneId,
+                            defaultSlot = medicineDefaultSlot,
+                            notificationPermissionGranted = notificationPermissionGranted,
+                            status = medicineStatus,
+                            onLogDose = ::logMedicineDose,
+                            onRequestNotificationPermission = ::requestMedicineNotifications,
                             modifier = Modifier.padding(pad)
                         )
                     }

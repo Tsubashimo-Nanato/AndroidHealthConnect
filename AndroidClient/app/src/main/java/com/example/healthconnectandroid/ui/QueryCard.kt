@@ -18,9 +18,6 @@ import java.time.LocalTime
 import java.time.ZoneId
 import java.time.ZonedDateTime
 
-/**
- * Card UI to pick a local date & time (using platform dialogs) and query HR.
- */
 @Composable
 fun QueryCard(
     onQuery: (Instant) -> Unit,
@@ -47,12 +44,13 @@ fun QueryCard(
     }
 
     fun openTimeDialog() {
+        val use24HourClock = true
         TimePickerDialog(
             context,
             { _, h, min -> localTime = LocalTime.of(h, min) },
             localTime.hour,
             localTime.minute,
-            true /* 24h */
+            use24HourClock
         ).show()
     }
 

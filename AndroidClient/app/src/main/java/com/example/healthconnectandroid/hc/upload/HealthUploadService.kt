@@ -52,7 +52,7 @@ class HealthUploadService(
             .get()
             .build()
 
-        // The website status route is public; the ingest request is the authoritative API-key check.
+        // Status checks reachability and the configured key; ingest remains the payload-shape check.
         runCatching { client.newCall(request).execute() }
             .fold(
                 onSuccess = { response ->
@@ -61,7 +61,7 @@ class HealthUploadService(
                             UploadConnectionResult(
                                 success = true,
                                 retryable = false,
-                                message = "Connection OK (${response.code}). API key is checked when uploading.",
+                                message = "Connection OK (${response.code}). Upload payloads are checked when sending data.",
                                 serverMode = settings.serverMode
                             )
                         } else {

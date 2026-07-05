@@ -3,7 +3,6 @@ package com.example.healthconnectandroid.hc
 import androidx.health.connect.client.records.metadata.Metadata
 import java.security.MessageDigest
 import java.time.Instant
-import java.time.LocalDate
 import java.time.ZoneOffset
 
 enum class NormalizedRecordKind(val id: String) {
@@ -148,12 +147,12 @@ data class NormalizedHealthValue(
 
 internal fun NormalizedHealthRecord.localDateString(): String {
     val offset = startZoneOffsetSeconds?.let(ZoneOffset::ofTotalSeconds) ?: ZoneOffset.UTC
-    return LocalDate.ofInstant(startTime, offset).toString()
+    return startTime.atOffset(offset).toLocalDate().toString()
 }
 
 internal fun NormalizedHealthValue.localDateString(record: NormalizedHealthRecord): String {
     val offset = record.startZoneOffsetSeconds?.let(ZoneOffset::ofTotalSeconds) ?: ZoneOffset.UTC
-    return LocalDate.ofInstant(sampleTime ?: record.startTime, offset).toString()
+    return (sampleTime ?: record.startTime).atOffset(offset).toLocalDate().toString()
 }
 
 internal fun NormalizedHealthRecord.dedupeKey(): String {

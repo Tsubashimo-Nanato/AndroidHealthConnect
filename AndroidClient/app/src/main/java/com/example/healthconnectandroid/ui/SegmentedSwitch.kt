@@ -5,7 +5,6 @@ import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
@@ -15,6 +14,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -24,7 +24,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.example.healthconnectandroid.ui.i18n.uiText
 
@@ -61,7 +63,7 @@ fun <T> SegmentedSwitch(
             )
             Surface(
                 modifier = Modifier
-                    .offset(x = selectedOffset)
+                    .offset { IntOffset(x = selectedOffset.roundToPx(), y = 0) }
                     .width(segmentWidth)
                     .fillMaxHeight(),
                 shape = RoundedCornerShape(topStart = 20.dp, topEnd = 26.dp, bottomEnd = 18.dp, bottomStart = 22.dp),
@@ -83,7 +85,11 @@ fun <T> SegmentedSwitch(
                         modifier = Modifier
                             .width(segmentWidth)
                             .fillMaxHeight()
-                            .clickable { onSelected(option) },
+                            .selectable(
+                                selected = selectedSegment,
+                                role = Role.RadioButton,
+                                onClick = { onSelected(option) }
+                            ),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(

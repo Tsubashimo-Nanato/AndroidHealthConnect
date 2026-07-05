@@ -7,6 +7,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -74,6 +75,17 @@ internal fun BottomNavigationBar(
                 }
             },
             label = { Text(uiText(AppTab.Dashboard.label)) },
+            colors = studioNavigationItemColors()
+        )
+        NavigationBarItem(
+            selected = selectedTab == AppTab.Medicine,
+            onClick = { onSelectTab(AppTab.Medicine) },
+            icon = {
+                AnimatedNavIcon(selected = selectedTab == AppTab.Medicine) {
+                    Icon(Icons.Default.Notifications, contentDescription = null)
+                }
+            },
+            label = { Text(uiText(AppTab.Medicine.label)) },
             colors = studioNavigationItemColors()
         )
         NavigationBarItem(

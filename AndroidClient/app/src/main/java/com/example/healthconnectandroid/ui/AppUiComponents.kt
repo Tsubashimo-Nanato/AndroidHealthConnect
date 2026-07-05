@@ -31,6 +31,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -273,7 +274,7 @@ fun StatusMessageCard(
         modifier = modifier
             .fillMaxWidth()
             .animateContentSize(animationSpec = tween(260, easing = StudioEase))
-            .clickable(enabled = expandable) { expanded = !expanded },
+            .clickable(enabled = expandable, role = Role.Button) { expanded = !expanded },
         shape = RoundedCornerShape(topStart = 20.dp, topEnd = 26.dp, bottomEnd = 18.dp, bottomStart = 23.dp),
         color = colors.container,
         border = BorderStroke(1.dp, colors.border)
@@ -414,7 +415,9 @@ fun SyncProgressCard(
                     modifier = Modifier
                         .fillMaxWidth()
                         .animateContentSize(animationSpec = tween(180, easing = StudioEase))
-                        .clickable(enabled = messageExpandable) { messageExpanded = !messageExpanded },
+                        .clickable(enabled = messageExpandable, role = Role.Button) {
+                            messageExpanded = !messageExpanded
+                        },
                     verticalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
                     if (messageExpandable) {

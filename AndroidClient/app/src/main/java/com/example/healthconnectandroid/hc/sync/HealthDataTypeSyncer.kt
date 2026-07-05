@@ -84,7 +84,7 @@ class HealthDataTypeSyncer(
         false
     }
 
-    /** Read ALL pages within [hours] and cache to Room. Returns number of *samples* saved. */
+    /** Legacy heart-rate sync path kept for single-type tools; multi-type sync uses [syncDataType]. */
     suspend fun syncLastHours(hours: Long): Int {
         ensureAvailable()?.let { throw IllegalStateException(it) }
 
@@ -337,7 +337,7 @@ class HealthDataTypeSyncer(
         val lo = atSec - toleranceSec
         val hi = atSec + toleranceSec
 
-        // 1) try local cache but only inside the window
+        // The tolerance window prevents an old cached sample from answering a nearby HR query.
         val local = dao.nearestInWindow(atSec = atSec, lo = lo, hi = hi)
         val picked = local ?: run {
             val e = HeartRateRecordReader.readEntities(
@@ -401,8 +401,8 @@ class HealthDataTypeSyncer(
         zoneId: ZoneId
     ): SyncAggregateResult {
         val aggregateReader = descriptor.aggregateReader ?: return SyncAggregateResult()
-        val startDate = LocalDate.ofInstant(start, zoneId)
-        val endDate = LocalDate.ofInstant(end, zoneId)
+        val startDate = start.atZone(zoneId).toLocalDate()
+        val endDate = end.atZone(zoneId).toLocalDate()
 
         return runCatching {
             val summaries = aggregateReader.readDaily(

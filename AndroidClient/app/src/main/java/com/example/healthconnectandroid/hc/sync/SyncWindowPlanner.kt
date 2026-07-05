@@ -25,8 +25,8 @@ object SyncWindowPlanner {
     ): List<SyncDateWindow> {
         if (!requestedStart.isBefore(requestedEnd)) return emptyList()
 
-        var date = LocalDate.ofInstant(requestedStart, zoneId)
-        val lastDate = LocalDate.ofInstant(requestedEnd.minusMillis(1), zoneId)
+        var date = requestedStart.localDateIn(zoneId)
+        val lastDate = requestedEnd.minusMillis(1).localDateIn(zoneId)
         val mergedCoverage = coveredWindows
             .filter { it.start.isBefore(it.end) }
             .sortedBy { it.start }
@@ -56,8 +56,8 @@ object SyncWindowPlanner {
         zoneId: ZoneId
     ): Int {
         if (!requestedStart.isBefore(requestedEnd)) return 0
-        val firstDate = LocalDate.ofInstant(requestedStart, zoneId)
-        val lastDate = LocalDate.ofInstant(requestedEnd.minusMillis(1), zoneId)
+        val firstDate = requestedStart.localDateIn(zoneId)
+        val lastDate = requestedEnd.minusMillis(1).localDateIn(zoneId)
         return ChronoUnit.DAYS.between(firstDate, lastDate).toInt() + 1
     }
 
@@ -82,3 +82,6 @@ object SyncWindowPlanner {
 private fun maxInstant(a: Instant, b: Instant): Instant = if (a.isAfter(b)) a else b
 
 private fun minInstant(a: Instant, b: Instant): Instant = if (a.isBefore(b)) a else b
+
+private fun Instant.localDateIn(zoneId: ZoneId): LocalDate =
+    atZone(zoneId).toLocalDate()

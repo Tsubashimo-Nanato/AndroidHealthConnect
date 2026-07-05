@@ -55,3 +55,9 @@ The server targets .NET 8.
 ## Local Files
 
 Generated build outputs, IDE folders, local Android SDK config, local databases, debug logs, and downloaded tool runtimes are ignored by the root `.gitignore`.
+
+## License
+
+Project source code in this repository is licensed under the GNU Affero General Public License v3.0 only (`AGPL-3.0-only`). See [LICENSE](LICENSE).
+
+Files that carry their own license notices remain governed by those notices.

@@ -13,7 +13,7 @@ interface HeartRateDao {
     @Query("SELECT * FROM heart_rate ORDER BY epochSecond DESC LIMIT :limit")
     suspend fun latest(limit: Int): List<HeartRateEntity>
 
-    // Nearest sample but ONLY if it is inside the tolerance window
+    // Keep specific-time lookups from drifting to stale samples outside the caller's window.
     @Query("""
         SELECT * FROM heart_rate
         WHERE epochSecond BETWEEN :lo AND :hi
@@ -22,7 +22,6 @@ interface HeartRateDao {
     """)
     suspend fun nearestInWindow(atSec: Long, lo: Long, hi: Long): HeartRateEntity?
 
-    // Lightweight projection for CSV/export
     @Query("SELECT epochSecond, bpm FROM heart_rate ORDER BY epochSecond ASC")
     suspend fun allAscRows(): List<HrRow>
 

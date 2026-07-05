@@ -15,9 +15,13 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         HealthSyncRunEntity::class,
         HealthSyncCoverageEntity::class,
         HealthAggregateEntity::class,
-        HealthUploadAckEntity::class
+        HealthUploadAckEntity::class,
+        MedicineItemEntity::class,
+        MedicineScheduleEntity::class,
+        MedicineReminderSettingEntity::class,
+        MedicineDoseLogEntity::class
     ],
-    version = 10,
+    version = 12,
     exportSchema = false
 )
 abstract class AppDb : RoomDatabase() {
@@ -27,6 +31,7 @@ abstract class AppDb : RoomDatabase() {
     abstract fun healthSyncCoverageDao(): HealthSyncCoverageDao
     abstract fun healthAggregateDao(): HealthAggregateDao
     abstract fun healthUploadDao(): HealthUploadDao
+    abstract fun medicineDao(): MedicineDao
 
     companion object {
         @Volatile private var INSTANCE: AppDb? = null
@@ -383,6 +388,80 @@ abstract class AppDb : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_10_11 = object : Migration(10, 11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `medicine_items` (
+                        `localId` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `name` TEXT NOT NULL,
+                        `notes` TEXT,
+                        `active` INTEGER NOT NULL,
+                        `createdEpochMillis` INTEGER NOT NULL,
+                        `updatedEpochMillis` INTEGER NOT NULL
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `medicine_schedules` (
+                        `medicineLocalId` INTEGER NOT NULL,
+                        `slot` TEXT NOT NULL,
+                        `createdEpochMillis` INTEGER NOT NULL,
+                        PRIMARY KEY(`medicineLocalId`, `slot`),
+                        FOREIGN KEY(`medicineLocalId`) REFERENCES `medicine_items`(`localId`)
+                            ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `medicine_reminder_settings` (
+                        `slot` TEXT NOT NULL,
+                        `hour` INTEGER NOT NULL,
+                        `minute` INTEGER NOT NULL,
+                        `enabled` INTEGER NOT NULL,
+                        `updatedEpochMillis` INTEGER NOT NULL,
+                        PRIMARY KEY(`slot`)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `medicine_dose_logs` (
+                        `localId` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `medicineLocalId` INTEGER,
+                        `medicineName` TEXT NOT NULL,
+                        `slot` TEXT NOT NULL,
+                        `localDate` TEXT NOT NULL,
+                        `scheduledEpochMillis` INTEGER,
+                        `recordedEpochMillis` INTEGER NOT NULL,
+                        `status` TEXT NOT NULL,
+                        `source` TEXT NOT NULL,
+                        `note` TEXT,
+                        `createdEpochMillis` INTEGER NOT NULL
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_medicine_items_active_name` ON `medicine_items` (`active`, `name`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_medicine_items_updatedEpochMillis` ON `medicine_items` (`updatedEpochMillis`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_medicine_schedules_slot` ON `medicine_schedules` (`slot`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_medicine_schedules_medicineLocalId` ON `medicine_schedules` (`medicineLocalId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_medicine_dose_logs_localDate_slot` ON `medicine_dose_logs` (`localDate`, `slot`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_medicine_dose_logs_medicineLocalId` ON `medicine_dose_logs` (`medicineLocalId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_medicine_dose_logs_status` ON `medicine_dose_logs` (`status`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_medicine_dose_logs_recordedEpochMillis` ON `medicine_dose_logs` (`recordedEpochMillis`)")
+            }
+        }
+
+        private val MIGRATION_11_12 = object : Migration(11, 12) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `medicine_items` ADD COLUMN `doseText` TEXT")
+                db.execSQL("ALTER TABLE `medicine_items` ADD COLUMN `summary` TEXT")
+                db.execSQL("ALTER TABLE `medicine_items` ADD COLUMN `details` TEXT")
+            }
+        }
+
         fun get(context: Context): AppDb =
             INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(
@@ -398,7 +477,9 @@ abstract class AppDb : RoomDatabase() {
                         MIGRATION_6_7,
                         MIGRATION_7_8,
                         MIGRATION_8_9,
-                        MIGRATION_9_10
+                        MIGRATION_9_10,
+                        MIGRATION_10_11,
+                        MIGRATION_11_12
                     )
                     .build()
                     .also { INSTANCE = it }

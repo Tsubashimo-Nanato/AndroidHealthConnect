@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.example.healthconnectandroid">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
-    <!-- Android 14/15 platform health permission -->
+    <!-- Android 14+ exposes several Health Connect reads as platform permissions. -->
     <uses-permission android:name="android.permission.health.READ_HEART_RATE" />
     <uses-permission android:name="android.permission.health.READ_WEIGHT" />
     <uses-permission android:name="android.permission.health.READ_BODY_FAT" />
@@ -26,7 +26,6 @@
         android:theme="@style/Theme.HealthConnectAndroid"
         android:networkSecurityConfig="@xml/network_security_config">
 
-        <!-- Launcher -->
         <activity
             android:name=".MainActivity"
             android:exported="true">
@@ -36,17 +35,20 @@
             </intent-filter>
         </activity>
 
-        <!-- REQUIRED by HC 1.1+ when your app requests Health Connect permissions -->
+        <!-- Health Connect uses this activity to explain requested health-data access. -->
         <activity
             android:name=".PermissionUsageActivity"
-            android:exported="true"
-            android:label="@string/app_name">
+            android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.VIEW_PERMISSION_USAGE" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.HEALTH_PERMISSIONS" />
             </intent-filter>
         </activity>
+
+        <receiver
+            android:name=".medicine.MedicineReminderActionReceiver"
+            android:exported="false" />
 
     </application>
 </manifest>

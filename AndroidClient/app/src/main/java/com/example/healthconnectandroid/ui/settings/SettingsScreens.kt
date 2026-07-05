@@ -14,6 +14,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import com.example.healthconnectandroid.UserProfile
 import com.example.healthconnectandroid.hc.sync.SyncMode
@@ -39,6 +40,7 @@ fun SettingsScreen(
     onOpenProfile: () -> Unit,
     onOpenPreferences: () -> Unit,
     onOpenPermissions: () -> Unit,
+    onOpenMedicine: () -> Unit,
     onOpenSync: () -> Unit,
     onOpenUpload: () -> Unit,
     onOpenDataSettings: () -> Unit,
@@ -58,14 +60,15 @@ fun SettingsScreen(
         SettingsNavCard("Profile", profileBrief(userProfile), onOpenProfile, Modifier.rowFadeIn(1))
         SettingsNavCard("Preferences", "Units, week, timezone", onOpenPreferences, Modifier.rowFadeIn(2))
         SettingsNavCard("Permissions", "Health Connect access", onOpenPermissions, Modifier.rowFadeIn(3))
-        SettingsNavCard("Sync", if (periodicEnabled) "Periodic on" else "Periodic off", onOpenSync, Modifier.rowFadeIn(4))
-        SettingsNavCard("Upload", "Server upload", onOpenUpload, Modifier.rowFadeIn(5))
-        SettingsNavCard("Data Settings", "Exports and local data", onOpenDataSettings, Modifier.rowFadeIn(6))
-        SettingsNavCard("Appearance", "Mode and palette", onOpenAppearance, Modifier.rowFadeIn(7))
+        SettingsNavCard("Medicine", "Schedule and dose checks", onOpenMedicine, Modifier.rowFadeIn(4))
+        SettingsNavCard("Sync", if (periodicEnabled) "Periodic on" else "Periodic off", onOpenSync, Modifier.rowFadeIn(5))
+        SettingsNavCard("Upload", "Server upload", onOpenUpload, Modifier.rowFadeIn(6))
+        SettingsNavCard("Data Settings", "Exports and local data", onOpenDataSettings, Modifier.rowFadeIn(7))
+        SettingsNavCard("Appearance", "Mode and palette", onOpenAppearance, Modifier.rowFadeIn(8))
         AppSection(
             title = "Debug Mode",
             subtitle = if (debugEnabled) "Debug tools and local upload are visible" else "Debug tools hidden",
-            modifier = Modifier.rowFadeIn(8)
+            modifier = Modifier.rowFadeIn(9)
         ) {
             AppActionRow {
                 StatusBadge(if (debugEnabled) "On" else "Off", if (debugEnabled) StatusTone.Warning else StatusTone.Neutral)
@@ -81,9 +84,9 @@ fun SettingsScreen(
             )
         }
         if (debugEnabled) {
-            SettingsNavCard("Debug", "Compatibility tools", onOpenDebug, Modifier.rowFadeIn(9))
+            SettingsNavCard("Debug", "Compatibility tools", onOpenDebug, Modifier.rowFadeIn(10))
         }
-        StatusMessageCard(status, modifier = Modifier.rowFadeIn(if (debugEnabled) 10 else 9))
+        StatusMessageCard(status, modifier = Modifier.rowFadeIn(if (debugEnabled) 11 else 10))
     }
 }
 
@@ -92,7 +95,7 @@ private fun SettingsNavCard(title: String, subtitle: String, onClick: () -> Unit
     AppSection(
         title = title,
         subtitle = subtitle,
-        modifier = modifier.clickable(onClick = onClick)
+        modifier = modifier.clickable(role = Role.Button, onClick = onClick)
     ) {}
 }
 
