@@ -38,6 +38,27 @@ fun SettingsProfileScreen(
     onUserProfileSave: (UserProfile) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    Column(
+        modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(18.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        ProfileSettingsSection(
+            userProfile = userProfile,
+            onUserProfileSave = onUserProfileSave,
+            modifier = Modifier.rowFadeIn(0)
+        )
+    }
+}
+
+@Composable
+fun ProfileSettingsSection(
+    userProfile: UserProfile,
+    onUserProfileSave: (UserProfile) -> Unit,
+    modifier: Modifier = Modifier
+) {
     var editing by rememberSaveable { mutableStateOf(false) }
     var sex by rememberSaveable(userProfile) { mutableStateOf(userProfile.sex) }
     var dobText by rememberSaveable(userProfile) { mutableStateOf(userProfile.dateOfBirthIso.orEmpty()) }
@@ -54,106 +75,98 @@ fun SettingsProfileScreen(
     val weightInvalid = weightText.isNotBlank() && weightText.toDoubleOrNull()?.let { it in 20.0..350.0 } != true
     val canSave = !dobInvalid && !weightInvalid
 
-    Column(
-        modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(18.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        AppSection(title = "Profile", subtitle = "Saved locally", modifier = Modifier.rowFadeIn(0)) {
-            if (editing) {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text(uiText("Sex"), style = MaterialTheme.typography.titleSmall)
-                    ProfileSex.values().toList().chunked(2).forEach { rowOptions ->
-                        AppActionRow {
-                            rowOptions.forEach { option ->
-                                if (option == sex) {
-                                    PrimaryActionButton(
-                                        modifier = Modifier.weight(1f),
-                                        label = profileSexShortLabel(option),
-                                        onClick = { sex = option }
-                                    )
-                                } else {
-                                    SecondaryActionButton(
-                                        modifier = Modifier.weight(1f),
-                                        label = profileSexShortLabel(option),
-                                        onClick = { sex = option }
-                                    )
-                                }
+    AppSection(title = "Profile", subtitle = "Saved locally", modifier = modifier) {
+        if (editing) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(uiText("Sex"), style = MaterialTheme.typography.titleSmall)
+                ProfileSex.values().toList().chunked(2).forEach { rowOptions ->
+                    AppActionRow {
+                        rowOptions.forEach { option ->
+                            if (option == sex) {
+                                PrimaryActionButton(
+                                    modifier = Modifier.weight(1f),
+                                    label = profileSexShortLabel(option),
+                                    onClick = { sex = option }
+                                )
+                            } else {
+                                SecondaryActionButton(
+                                    modifier = Modifier.weight(1f),
+                                    label = profileSexShortLabel(option),
+                                    onClick = { sex = option }
+                                )
                             }
                         }
                     }
-
-                    OutlinedTextField(
-                        modifier = Modifier.fillMaxWidth(),
-                        value = dobText,
-                        onValueChange = { dobText = it.filter { ch -> ch.isDigit() || ch == '-' }.take(10) },
-                        label = { Text(uiText("Date of birth")) },
-                        placeholder = { Text("YYYY-MM-DD") },
-                        supportingText = {
-                            Text(
-                                uiText(when {
-                                    dobInvalid -> "Use YYYY-MM-DD, not a future date."
-                                    derivedAge != null -> "Age $derivedAge"
-                                    else -> "Optional"
-                                })
-                            )
-                        },
-                        isError = dobInvalid,
-                        singleLine = true
-                    )
-                    OutlinedTextField(
-                        modifier = Modifier.fillMaxWidth(),
-                        value = weightText,
-                        onValueChange = { raw -> weightText = raw.filter { it.isDigit() || it == '.' }.take(6) },
-                        label = { Text(uiText("Weight (kg)")) },
-                        supportingText = { Text(uiText(if (weightInvalid) "Enter 20-350 kg." else "Optional")) },
-                        isError = weightInvalid,
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
-                    )
-                    AppActionRow {
-                        PrimaryActionButton(
-                            modifier = Modifier.weight(1f),
-                            label = "Save",
-                            enabled = canSave,
-                            onClick = {
-                                onUserProfileSave(
-                                    UserProfile(
-                                        sex = sex,
-                                        dateOfBirthIso = parsedDob?.toString(),
-                                        weightKg = weightText.toDoubleOrNull()?.takeIf { it in 20.0..350.0 }
-                                    )
-                                )
-                                editing = false
-                            }
-                        )
-                        SecondaryActionButton(
-                            modifier = Modifier.weight(1f),
-                            label = "Cancel",
-                            onClick = {
-                                sex = userProfile.sex
-                                dobText = userProfile.dateOfBirthIso.orEmpty()
-                                weightText = userProfile.weightKg?.let(::formatProfileWeight).orEmpty()
-                                editing = false
-                            }
-                        )
-                    }
                 }
-            } else {
-                ProfileValueRow("Sex", userProfile.sex.label)
-                ProfileValueRow("Date of birth", userProfile.dateOfBirthIso ?: "Not set")
-                ProfileValueRow("Age", userProfile.age?.let { "$it" } ?: "Not set")
-                ProfileValueRow("Weight", userProfile.weightKg?.let { "${formatProfileWeight(it)} kg" } ?: "Not set")
-                PrimaryActionButton("Edit", onClick = { editing = true })
+
+                OutlinedTextField(
+                    modifier = Modifier.fillMaxWidth(),
+                    value = dobText,
+                    onValueChange = { dobText = it.filter { ch -> ch.isDigit() || ch == '-' }.take(10) },
+                    label = { Text(uiText("Date of birth")) },
+                    placeholder = { Text("YYYY-MM-DD") },
+                    supportingText = {
+                        Text(
+                            uiText(when {
+                                dobInvalid -> "Use YYYY-MM-DD, not a future date."
+                                derivedAge != null -> "Age $derivedAge"
+                                else -> "Optional"
+                            })
+                        )
+                    },
+                    isError = dobInvalid,
+                    singleLine = true
+                )
+                OutlinedTextField(
+                    modifier = Modifier.fillMaxWidth(),
+                    value = weightText,
+                    onValueChange = { raw -> weightText = raw.filter { it.isDigit() || it == '.' }.take(6) },
+                    label = { Text(uiText("Weight (kg)")) },
+                    supportingText = { Text(uiText(if (weightInvalid) "Enter 20-350 kg." else "Optional")) },
+                    isError = weightInvalid,
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
+                )
+                AppActionRow {
+                    PrimaryActionButton(
+                        modifier = Modifier.weight(1f),
+                        label = "Save",
+                        enabled = canSave,
+                        onClick = {
+                            onUserProfileSave(
+                                UserProfile(
+                                    sex = sex,
+                                    dateOfBirthIso = parsedDob?.toString(),
+                                    weightKg = weightText.toDoubleOrNull()?.takeIf { it in 20.0..350.0 }
+                                )
+                            )
+                            editing = false
+                        }
+                    )
+                    SecondaryActionButton(
+                        modifier = Modifier.weight(1f),
+                        label = "Cancel",
+                        onClick = {
+                            sex = userProfile.sex
+                            dobText = userProfile.dateOfBirthIso.orEmpty()
+                            weightText = userProfile.weightKg?.let(::formatProfileWeight).orEmpty()
+                            editing = false
+                        }
+                    )
+                }
             }
-            Text(
-                uiText("DOB-derived age affects HR reference bands. Other values are saved for later."),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+        } else {
+            ProfileValueRow("Sex", userProfile.sex.label)
+            ProfileValueRow("Date of birth", userProfile.dateOfBirthIso ?: "Not set")
+            ProfileValueRow("Age", userProfile.age?.let { "$it" } ?: "Not set")
+            ProfileValueRow("Weight", userProfile.weightKg?.let { "${formatProfileWeight(it)} kg" } ?: "Not set")
+            PrimaryActionButton("Edit", onClick = { editing = true })
         }
+        Text(
+            uiText("DOB-derived age affects HR reference bands. Other values are saved for later."),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
 

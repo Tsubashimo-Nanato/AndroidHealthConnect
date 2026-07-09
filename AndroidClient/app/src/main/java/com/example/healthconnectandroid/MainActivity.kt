@@ -3,8 +3,10 @@ package com.example.healthconnectandroid
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings as AndroidSettings
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -55,6 +57,8 @@ import com.example.healthconnectandroid.hc.sync.SyncRunStatus
 import com.example.healthconnectandroid.hc.sync.syncAllStatusText
 import com.example.healthconnectandroid.hc.upload.HealthUploadService
 import com.example.healthconnectandroid.hc.upload.HealthUploadWorker
+import com.example.healthconnectandroid.hc.upload.UploadAutoQueueDecision
+import com.example.healthconnectandroid.hc.upload.UploadAutoQueuePolicy
 import com.example.healthconnectandroid.hc.upload.UploadDebugModePolicy
 import com.example.healthconnectandroid.hc.upload.UploadPendingCounts
 import com.example.healthconnectandroid.hc.upload.UploadProgress
@@ -83,16 +87,11 @@ import com.example.healthconnectandroid.ui.data.DataCatalogScreen
 import com.example.healthconnectandroid.ui.data.HealthDataDetailScreen
 import com.example.healthconnectandroid.ui.dashboard.DashboardScreen
 import com.example.healthconnectandroid.ui.medicine.MedicineScreen
-import com.example.healthconnectandroid.ui.settings.DebugScreen
-import com.example.healthconnectandroid.ui.settings.SettingsAppearanceScreen
-import com.example.healthconnectandroid.ui.settings.SettingsDataScreen
+import com.example.healthconnectandroid.ui.settings.SettingsAdvancedScreen
+import com.example.healthconnectandroid.ui.settings.SettingsDataFlowScreen
 import com.example.healthconnectandroid.ui.settings.SettingsMedicineScreen
-import com.example.healthconnectandroid.ui.settings.SettingsPermissionsScreen
 import com.example.healthconnectandroid.ui.settings.SettingsPreferencesScreen
-import com.example.healthconnectandroid.ui.settings.SettingsProfileScreen
 import com.example.healthconnectandroid.ui.settings.SettingsScreen
-import com.example.healthconnectandroid.ui.settings.SettingsSyncScreen
-import com.example.healthconnectandroid.ui.settings.SettingsUploadScreen
 import com.example.healthconnectandroid.ui.format.toDisplayPreferences
 import com.example.healthconnectandroid.ui.i18n.LocalAppLanguage
 import com.example.healthconnectandroid.ui.i18n.uiText
@@ -119,6 +118,7 @@ class MainActivity : ComponentActivity() {
     private var reportExportStatus: ((String) -> Unit)? = null
     private var reportActionBusy: ((Boolean) -> Unit)? = null
     private var reportNotificationPermission: ((Boolean) -> Unit)? = null
+    private var reportOverlayPermission: ((Boolean) -> Unit)? = null
     private var openMedicineFromIntent: ((MedicineSlot?) -> Unit)? = null
 
     private val requestHrPermission =
@@ -147,6 +147,15 @@ class MainActivity : ComponentActivity() {
     private fun hasNotificationPermission(): Boolean =
         MedicineReminderNotifier.canNotify(this)
 
+    private fun hasMedicineOverlayPermission(): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.M || AndroidSettings.canDrawOverlays(this)
+
+    private fun medicineOverlayPermissionIntent(): Intent =
+        Intent(
+            AndroidSettings.ACTION_MANAGE_OVERLAY_PERMISSION,
+            Uri.parse("package:$packageName")
+        )
+
     private fun medicineSlotFromIntent(intent: Intent?): MedicineSlot? {
         if (intent?.action != MedicineReminderIntents.ACTION_OPEN_MEDICINE) return null
         return intent.getStringExtra(MedicineReminderIntents.EXTRA_SLOT)
@@ -163,6 +172,11 @@ class MainActivity : ComponentActivity() {
     private val requestNotificationPermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) {
             reportNotificationPermission?.invoke(hasNotificationPermission())
+        }
+
+    private val requestOverlayPermission =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+            reportOverlayPermission?.invoke(hasMedicineOverlayPermission())
         }
 
     private val createHrCsv =
@@ -361,6 +375,10 @@ class MainActivity : ComponentActivity() {
         var medicineSnapshot by remember { mutableStateOf(EmptyMedicineSnapshot) }
         var medicineStatus by remember { mutableStateOf("Medicine ready") }
         var notificationPermissionGranted by remember { mutableStateOf(hasNotificationPermission()) }
+        var medicineOverlayReminderEnabled by remember {
+            mutableStateOf(AppPreferences.medicineOverlayReminderEnabled(this@MainActivity))
+        }
+        var medicineOverlayPermissionGranted by remember { mutableStateOf(hasMedicineOverlayPermission()) }
         var medicineDefaultSlot by remember {
             mutableStateOf(medicineSlotFromIntent(intent) ?: MedicineSlot.MORNING)
         }
@@ -385,10 +403,19 @@ class MainActivity : ComponentActivity() {
                     "Medicine notifications are not enabled"
                 }
             }
+            reportOverlayPermission = { granted ->
+                medicineOverlayPermissionGranted = granted
+                medicineStatus = if (granted) {
+                    "Overlay popup enabled"
+                } else {
+                    "Overlay permission is needed for direct popups."
+                }
+            }
             onDispose {
                 reportExportStatus = null
                 reportActionBusy = null
                 reportNotificationPermission = null
+                reportOverlayPermission = null
             }
         }
 
@@ -455,9 +482,14 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        fun saveMedicineReminder(slot: MedicineSlot, rawTime: String, enabled: Boolean) {
+        fun saveMedicineReminder(
+            slot: MedicineSlot,
+            rawTime: String,
+            enabled: Boolean,
+            alarmEnabled: Boolean
+        ) {
             scope.launch {
-                val result = medicineRepository.saveReminderTime(slot, rawTime, enabled)
+                val result = medicineRepository.saveReminderTime(slot, rawTime, enabled, alarmEnabled)
                 medicineStatus = result.message
                 status = result.message
                 if (result.success) refreshMedicineAndReminders()
@@ -485,6 +517,15 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        fun deleteMedicineDoseLogs(logIds: Set<Long>) {
+            scope.launch {
+                val result = medicineRepository.deleteDoseLogs(logIds)
+                medicineStatus = result.message
+                status = result.message
+                if (result.success) refreshMedicineSnapshot()
+            }
+        }
+
         fun requestMedicineNotifications() {
             if (Build.VERSION.SDK_INT >= 33 && !hasNotificationPermission()) {
                 requestNotificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
@@ -493,6 +534,38 @@ class MainActivity : ComponentActivity() {
                 medicineStatus = "Medicine notifications enabled"
             }
         }
+
+        fun setMedicineOverlayReminder(enabled: Boolean) {
+            AppPreferences.setMedicineOverlayReminderEnabled(this@MainActivity, enabled)
+            medicineOverlayReminderEnabled = enabled
+            medicineOverlayPermissionGranted = hasMedicineOverlayPermission()
+            medicineStatus = if (!enabled) {
+                "Overlay popup off"
+            } else if (medicineOverlayPermissionGranted) {
+                "Overlay popup enabled"
+            } else {
+                "Overlay permission is needed for direct popups."
+            }
+            status = medicineStatus
+            if (enabled && !medicineOverlayPermissionGranted) {
+                requestOverlayPermission.launch(medicineOverlayPermissionIntent())
+            }
+        }
+
+        fun requestMedicineOverlayPermission() {
+            requestOverlayPermission.launch(medicineOverlayPermissionIntent())
+        }
+
+        fun queueAutoUpload(settings: UploadSettings): String? =
+            when (val decision = UploadAutoQueuePolicy.decide(settings)) {
+                UploadAutoQueueDecision.Disabled -> null
+                is UploadAutoQueueDecision.Queue -> {
+                    HealthUploadWorker.enqueue(this@MainActivity)
+                    "Auto upload queued"
+                }
+                is UploadAutoQueueDecision.Invalid ->
+                    "Auto upload not queued: ${decision.reason}"
+            }
 
         fun applyScannedUploadText(rawText: String) {
             when (val result = UploadScanPolicy.applyScannedText(uploadSettings, rawText)) {
@@ -643,7 +716,16 @@ class MainActivity : ComponentActivity() {
             AppPreferences.setUploadSettings(this@MainActivity, settings)
             uploadStatus = uploadStatus.copy(serverMode = settings.serverMode)
             AppPreferences.setUploadStatus(this@MainActivity, uploadStatus)
-            status = "Upload settings saved"
+            val autoUploadMessage = queueAutoUpload(settings)
+            if (autoUploadMessage?.startsWith("Auto upload not queued:") == true) {
+                uploadStatus = uploadStatus.copy(
+                    connectionResult = autoUploadMessage,
+                    severity = UploadResultSeverity.WARNING,
+                    serverMode = settings.serverMode
+                )
+                AppPreferences.setUploadStatus(this@MainActivity, uploadStatus)
+            }
+            status = autoUploadMessage?.let { "Upload settings saved. $it" } ?: "Upload settings saved"
             refreshUploadStatus()
         }
 
@@ -780,6 +862,9 @@ class MainActivity : ComponentActivity() {
                     lastPeriodicStatus = PeriodicSyncPreferences.lastStatus(this@MainActivity)
                     lastPeriodicSummary = PeriodicSyncPreferences.lastSummary(this@MainActivity)
                     uploadStatus = AppPreferences.uploadStatus(this@MainActivity)
+                    medicineOverlayReminderEnabled =
+                        AppPreferences.medicineOverlayReminderEnabled(this@MainActivity)
+                    medicineOverlayPermissionGranted = hasMedicineOverlayPermission()
                     scope.launch {
                         val granted = grantedHealthConnectPermissions()
                         grantedPermissions = granted
@@ -818,12 +903,6 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        LaunchedEffect(nav.destination, debugEnabled) {
-            if (!debugEnabled && nav.destination == AppDestination.SettingsSection(SettingsDestination.Debug)) {
-                nav.goBack()
-            }
-        }
-
         BackHandler(enabled = nav.destination != AppDestination.Dashboard) {
             nav.goBack()
         }
@@ -850,58 +929,44 @@ class MainActivity : ComponentActivity() {
                 when (val destination = nav.destination) {
                     AppDestination.Settings -> {
                         SettingsScreen(
-                            userProfile = userProfile,
                             periodicEnabled = periodicEnabled,
                             debugEnabled = debugEnabled,
                             status = status,
-                            onOpenProfile = { nav.openSettingsSection(SettingsDestination.Profile) },
                             onOpenPreferences = { nav.openSettingsSection(SettingsDestination.Preferences) },
-                            onOpenPermissions = { nav.openSettingsSection(SettingsDestination.Permissions) },
                             onOpenMedicine = { nav.openSettingsSection(SettingsDestination.Medicine) },
-                            onOpenSync = { nav.openSettingsSection(SettingsDestination.Sync) },
-                            onOpenUpload = { nav.openSettingsSection(SettingsDestination.Upload) },
-                            onOpenDataSettings = { nav.openSettingsSection(SettingsDestination.DataSettings) },
-                            onOpenAppearance = { nav.openSettingsSection(SettingsDestination.Appearance) },
-                            onToggleDebug = {
-                                val nextDebugEnabled = !debugEnabled
-                                val update = UploadDebugModePolicy.setDebugMode(
-                                    currentSettings = uploadSettings,
-                                    currentStatus = uploadStatus,
-                                    enabled = nextDebugEnabled
-                                )
-                                debugEnabled = update.debugEnabled
-                                uploadSettings = update.settings
-                                uploadStatus = update.status
-                                AppPreferences.setDebugModeEnabled(this@MainActivity, update.debugEnabled)
-                                AppPreferences.setUploadSettings(this@MainActivity, update.settings)
-                                AppPreferences.setUploadStatus(this@MainActivity, update.status)
-                                status = update.message
-                            },
-                            onOpenDebug = { nav.openSettingsSection(SettingsDestination.Debug) },
+                            onOpenDataFlow = { nav.openSettingsSection(SettingsDestination.DataFlow) },
+                            onOpenAdvanced = { nav.openSettingsSection(SettingsDestination.Advanced) },
                             modifier = Modifier.padding(pad)
                         )
                     }
                     is AppDestination.SettingsSection -> {
                         when (destination.section) {
-                            SettingsDestination.Profile -> SettingsProfileScreen(
+                            SettingsDestination.Preferences -> SettingsPreferencesScreen(
                                 userProfile = userProfile,
+                                userPreferences = userPreferences,
+                                themeMode = themeMode,
+                                themePalette = themePalette,
                                 onUserProfileSave = { profile ->
                                     userProfile = profile
                                     AppPreferences.setUserProfile(this@MainActivity, profile)
                                     status = "Profile saved"
                                 },
-                                modifier = Modifier.padding(pad)
-                            )
-                            SettingsDestination.Preferences -> SettingsPreferencesScreen(
-                                userPreferences = userPreferences,
                                 onUserPreferencesSave = { preferences ->
                                     userPreferences = preferences
                                     AppPreferences.setUserPreferences(this@MainActivity, preferences)
                                     status = "Preferences saved"
                                 },
+                                onThemeModeChange = { mode ->
+                                    themeMode = mode
+                                    AppPreferences.setThemeMode(this@MainActivity, mode)
+                                },
+                                onThemePaletteChange = { palette ->
+                                    themePalette = palette
+                                    AppPreferences.setThemePalette(this@MainActivity, palette)
+                                },
                                 modifier = Modifier.padding(pad)
                             )
-                            SettingsDestination.Permissions -> SettingsPermissionsScreen(
+                            SettingsDestination.DataFlow -> SettingsDataFlowScreen(
                                 declaredReadHr = declared,
                                 platformGranted = platformGranted,
                                 hcGranted = hcGranted,
@@ -911,6 +976,21 @@ class MainActivity : ComponentActivity() {
                                 ),
                                 dataPermissionSummary = dataPermissionSummaryText(grantedPermissions),
                                 backgroundReadAvailable = backgroundReadAvailable,
+                                periodicEnabled = periodicEnabled,
+                                backgroundReadGranted = backgroundReadGranted,
+                                lastPeriodicSync = lastPeriodicSync,
+                                lastPeriodicStatus = lastPeriodicStatus,
+                                lastPeriodicSummary = lastPeriodicSummary,
+                                settingsStatus = status,
+                                syncBusy = actionInProgress?.blocksSyncSettings == true,
+                                syncProgress = syncProgress,
+                                uploadSettings = uploadSettings,
+                                uploadStatus = uploadStatus,
+                                uploadPendingCounts = uploadPendingCounts,
+                                debugEnabled = debugEnabled,
+                                uploadBusy = actionInProgress?.blocksUpload == true,
+                                uploadProgress = uploadProgress,
+                                exportBusy = actionInProgress?.isExport == true,
                                 onRequestPlatform = { requestHrPermission.launch(HR_PERMISSION) },
                                 onRequestDataPermissions = { requestHealthConnectPermissions(hcPermissions) },
                                 onRequestBackgroundRead = {
@@ -918,26 +998,6 @@ class MainActivity : ComponentActivity() {
                                 },
                                 openAppSettings = { startActivity(it) },
                                 packageName = packageName,
-                                modifier = Modifier.padding(pad)
-                            )
-                            SettingsDestination.Medicine -> SettingsMedicineScreen(
-                                snapshot = medicineSnapshot,
-                                status = medicineStatus,
-                                onAddMedicine = ::addMedicine,
-                                onArchiveMedicine = ::archiveMedicine,
-                                onSaveReminder = ::saveMedicineReminder,
-                                modifier = Modifier.padding(pad)
-                            )
-                            SettingsDestination.Sync -> SettingsSyncScreen(
-                                periodicEnabled = periodicEnabled,
-                                backgroundReadAvailable = backgroundReadAvailable,
-                                backgroundReadGranted = backgroundReadGranted,
-                                lastPeriodicSync = lastPeriodicSync,
-                                lastPeriodicStatus = lastPeriodicStatus,
-                                lastPeriodicSummary = lastPeriodicSummary,
-                                status = status,
-                                busy = actionInProgress?.blocksSyncSettings == true,
-                                syncProgress = syncProgress,
                                 onTogglePeriodic = ::togglePeriodicSync,
                                 onFullResync = ::runFullResync,
                                 onCancelFullResync = {
@@ -945,25 +1005,10 @@ class MainActivity : ComponentActivity() {
                                     fullSyncJob?.cancel()
                                 },
                                 onRunBackgroundNow = ::runBackgroundSyncNow,
-                                modifier = Modifier.padding(pad)
-                            )
-                            SettingsDestination.Upload -> SettingsUploadScreen(
-                                settings = uploadSettings,
-                                uploadStatus = uploadStatus,
-                                pendingCounts = uploadPendingCounts,
-                                debugEnabled = debugEnabled,
-                                status = status,
-                                busy = actionInProgress?.blocksUpload == true,
-                                progress = uploadProgress,
-                                onSaveSettings = ::saveUploadSettings,
-                                onTestConnection = ::testUploadConnection,
+                                onSaveUploadSettings = ::saveUploadSettings,
+                                onTestUploadConnection = ::testUploadConnection,
                                 onUploadNow = ::uploadNow,
                                 onScanPairingQr = ::scanUploadQr,
-                                modifier = Modifier.padding(pad)
-                            )
-                            SettingsDestination.DataSettings -> SettingsDataScreen(
-                                status = status,
-                                busy = actionInProgress?.isExport == true,
                                 onExportHrCsv = {
                                     actionInProgress = AppAction.EXPORT_HR
                                     status = "Choose heart-rate CSV destination..."
@@ -982,25 +1027,40 @@ class MainActivity : ComponentActivity() {
                                 onRequestClear = { showClearConfirm = true },
                                 modifier = Modifier.padding(pad)
                             )
-                            SettingsDestination.Appearance -> SettingsAppearanceScreen(
-                                themeMode = themeMode,
-                                themePalette = themePalette,
-                                onThemeModeChange = { mode ->
-                                    themeMode = mode
-                                    AppPreferences.setThemeMode(this@MainActivity, mode)
-                                },
-                                onThemePaletteChange = { palette ->
-                                    themePalette = palette
-                                    AppPreferences.setThemePalette(this@MainActivity, palette)
-                                },
+                            SettingsDestination.Medicine -> SettingsMedicineScreen(
+                                snapshot = medicineSnapshot,
+                                status = medicineStatus,
+                                overlayReminderEnabled = medicineOverlayReminderEnabled,
+                                overlayPermissionGranted = medicineOverlayPermissionGranted,
+                                onAddMedicine = ::addMedicine,
+                                onArchiveMedicine = ::archiveMedicine,
+                                onSaveReminder = ::saveMedicineReminder,
+                                onOverlayReminderChange = ::setMedicineOverlayReminder,
+                                onRequestOverlayPermission = ::requestMedicineOverlayPermission,
                                 modifier = Modifier.padding(pad)
                             )
-                            SettingsDestination.Debug -> DebugScreen(
+                            SettingsDestination.Advanced -> SettingsAdvancedScreen(
                                 modifier = Modifier.padding(pad),
+                                debugEnabled = debugEnabled,
                                 platformGranted = platformGranted,
                                 hrHcGranted = hrHcGranted,
                                 status = status,
                                 diagnostics = diagnostics,
+                                onToggleDebug = {
+                                    val nextDebugEnabled = !debugEnabled
+                                    val update = UploadDebugModePolicy.setDebugMode(
+                                        currentSettings = uploadSettings,
+                                        currentStatus = uploadStatus,
+                                        enabled = nextDebugEnabled
+                                    )
+                                    debugEnabled = update.debugEnabled
+                                    uploadSettings = update.settings
+                                    uploadStatus = update.status
+                                    AppPreferences.setDebugModeEnabled(this@MainActivity, update.debugEnabled)
+                                    AppPreferences.setUploadSettings(this@MainActivity, update.settings)
+                                    AppPreferences.setUploadStatus(this@MainActivity, update.status)
+                                    status = update.message
+                                },
                                 onSyncHours = { hours ->
                                     scope.launch {
                                         status = "Syncing heart rate for last ${hours}h..."
@@ -1050,10 +1110,12 @@ class MainActivity : ComponentActivity() {
                         MedicineScreen(
                             snapshot = medicineSnapshot,
                             zoneId = displayPreferences.zoneId,
+                            weekStart = displayPreferences.weekStart,
                             defaultSlot = medicineDefaultSlot,
                             notificationPermissionGranted = notificationPermissionGranted,
                             status = medicineStatus,
                             onLogDose = ::logMedicineDose,
+                            onDeleteDoseLogs = ::deleteMedicineDoseLogs,
                             onRequestNotificationPermission = ::requestMedicineNotifications,
                             modifier = Modifier.padding(pad)
                         )

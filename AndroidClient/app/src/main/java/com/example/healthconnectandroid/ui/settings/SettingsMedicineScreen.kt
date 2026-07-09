@@ -20,6 +20,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -27,6 +28,8 @@ import com.example.healthconnectandroid.medicine.MedicineItem
 import com.example.healthconnectandroid.medicine.MedicineReminderTime
 import com.example.healthconnectandroid.medicine.MedicineSlot
 import com.example.healthconnectandroid.medicine.MedicineSnapshot
+import com.example.healthconnectandroid.medicine.displayLabel
+import com.example.healthconnectandroid.medicine.displayText
 import com.example.healthconnectandroid.ui.AppActionRow
 import com.example.healthconnectandroid.ui.AppSection
 import com.example.healthconnectandroid.ui.EmptyState
@@ -36,17 +39,26 @@ import com.example.healthconnectandroid.ui.StatusBadge
 import com.example.healthconnectandroid.ui.StatusMessageCard
 import com.example.healthconnectandroid.ui.StatusTone
 import com.example.healthconnectandroid.ui.animation.rowFadeIn
+import com.example.healthconnectandroid.ui.i18n.LocalAppLanguage
 import com.example.healthconnectandroid.ui.i18n.uiText
+import com.example.healthconnectandroid.ui.medicine.medicineUiText
+import com.example.healthconnectandroid.ui.medicine.translateMedicineUiText
+import com.example.healthconnectandroid.ui.statusToneForMessage
 
 @Composable
 fun SettingsMedicineScreen(
     snapshot: MedicineSnapshot,
     status: String,
+    overlayReminderEnabled: Boolean,
+    overlayPermissionGranted: Boolean,
     onAddMedicine: (String, Set<MedicineSlot>) -> Unit,
     onArchiveMedicine: (Long) -> Unit,
-    onSaveReminder: (MedicineSlot, String, Boolean) -> Unit,
+    onSaveReminder: (MedicineSlot, String, Boolean, Boolean) -> Unit,
+    onOverlayReminderChange: (Boolean) -> Unit,
+    onRequestOverlayPermission: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val language = LocalAppLanguage.current
     var name by remember { mutableStateOf("") }
     var selectedSlots by remember { mutableStateOf(setOf(MedicineSlot.MORNING)) }
 
@@ -57,18 +69,18 @@ fun SettingsMedicineScreen(
             .padding(18.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        Text(uiText("Medicine"), modifier = Modifier.rowFadeIn(0), style = MaterialTheme.typography.headlineSmall)
+        Text(medicineUiText("Medicine"), modifier = Modifier.rowFadeIn(0), style = MaterialTheme.typography.headlineSmall)
 
         AppSection(
-            title = "Add Medicine",
-            subtitle = "Choose when this medicine is usually taken",
+            title = medicineUiText("Add Medicine"),
+            subtitle = medicineUiText("Choose when this medicine is usually taken"),
             modifier = Modifier.rowFadeIn(1)
         ) {
             OutlinedTextField(
                 value = name,
                 onValueChange = { name = it },
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text(uiText("Medicine name")) },
+                label = { Text(medicineUiText("Medicine name")) },
                 singleLine = true
             )
             MedicineSlot.entries.forEach { slot ->
@@ -85,7 +97,7 @@ fun SettingsMedicineScreen(
                 )
             }
             PrimaryActionButton(
-                label = "Add medicine",
+                label = medicineUiText("Add medicine"),
                 onClick = {
                     onAddMedicine(name, selectedSlots)
                     name = ""
@@ -95,10 +107,16 @@ fun SettingsMedicineScreen(
         }
 
         AppSection(
-            title = "Reminder Times",
-            subtitle = "The notification asks whether you already took it",
+            title = medicineUiText("Reminder Times"),
+            subtitle = medicineUiText("The notification asks whether you already took it"),
             modifier = Modifier.rowFadeIn(2)
         ) {
+            OverlayReminderSection(
+                enabled = overlayReminderEnabled,
+                permissionGranted = overlayPermissionGranted,
+                onEnabledChange = onOverlayReminderChange,
+                onRequestPermission = onRequestOverlayPermission
+            )
             MedicineSlot.scheduledSlots.forEach { slot ->
                 ReminderTimeRow(
                     slot = slot,
@@ -109,12 +127,12 @@ fun SettingsMedicineScreen(
         }
 
         AppSection(
-            title = "Current Medicines",
-            subtitle = "Stored locally",
+            title = medicineUiText("Current Medicines"),
+            subtitle = medicineUiText("Stored locally"),
             modifier = Modifier.rowFadeIn(3)
         ) {
             if (snapshot.medicines.isEmpty()) {
-                EmptyState("No medicine yet", "Add a medicine above.")
+                EmptyState(medicineUiText("No medicine yet"), medicineUiText("Add a medicine above."))
             } else {
                 snapshot.medicines.forEach { medicine ->
                     MedicineSettingsRow(
@@ -123,7 +141,7 @@ fun SettingsMedicineScreen(
                     )
                 }
             }
-            StatusMessageCard(status)
+            StatusMessageCard(translateMedicineUiText(status, language), tone = statusToneForMessage(status))
         }
     }
 }
@@ -134,6 +152,7 @@ private fun SlotCheckRow(
     checked: Boolean,
     onToggle: () -> Unit
 ) {
+    val language = LocalAppLanguage.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -142,10 +161,10 @@ private fun SlotCheckRow(
     ) {
         Checkbox(checked = checked, onCheckedChange = { onToggle() })
         Column(Modifier.weight(1f)) {
-            Text(uiText(slot.label), style = MaterialTheme.typography.bodyMedium)
+            Text(slot.displayLabel(language), style = MaterialTheme.typography.bodyMedium)
             if (!slot.supportsReminder) {
                 Text(
-                    uiText("Manual log only"),
+                    medicineUiText("Manual log only"),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -155,26 +174,88 @@ private fun SlotCheckRow(
 }
 
 @Composable
+private fun OverlayReminderSection(
+    enabled: Boolean,
+    permissionGranted: Boolean,
+    onEnabledChange: (Boolean) -> Unit,
+    onRequestPermission: () -> Unit
+) {
+    val statusText = when {
+        !enabled -> "Overlay popup off"
+        permissionGranted -> "Overlay popup enabled"
+        else -> "Overlay permission is needed for direct popups."
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(role = Role.Switch) { onEnabledChange(!enabled) },
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(medicineUiText("Strong popup"), style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    medicineUiText(statusText),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Switch(checked = enabled, onCheckedChange = onEnabledChange)
+        }
+        if (enabled && !permissionGranted) {
+            StatusMessageCard(
+                message = medicineUiText("Overlay permission is needed for direct popups."),
+                tone = StatusTone.Warning
+            )
+            SecondaryActionButton(
+                label = medicineUiText("Allow overlay popup"),
+                onClick = onRequestPermission
+            )
+        }
+    }
+}
+
+@Composable
 private fun ReminderTimeRow(
     slot: MedicineSlot,
     reminder: MedicineReminderTime?,
-    onSaveReminder: (MedicineSlot, String, Boolean) -> Unit
+    onSaveReminder: (MedicineSlot, String, Boolean, Boolean) -> Unit
 ) {
+    val language = LocalAppLanguage.current
     val fallback = reminder ?: MedicineReminderTime(slot, hour = 8, minute = 0, enabled = true)
     var timeText by remember(slot, fallback.label) { mutableStateOf(fallback.label) }
     var enabled by remember(slot, fallback.enabled) { mutableStateOf(fallback.enabled) }
+    var alarmEnabled by remember(slot, fallback.alarmEnabled) { mutableStateOf(fallback.alarmEnabled) }
 
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Column(Modifier.weight(1f)) {
-                Text(uiText(slot.label), style = MaterialTheme.typography.titleSmall)
+                Text(slot.displayLabel(language), style = MaterialTheme.typography.titleSmall)
                 Text(
-                    uiText(if (enabled) "Reminder enabled" else "Reminder off"),
+                    medicineUiText(if (enabled) "Reminder enabled" else "Reminder off"),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
             Switch(checked = enabled, onCheckedChange = { enabled = it })
+        }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(role = Role.Switch) { alarmEnabled = !alarmEnabled },
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(medicineUiText("Alarm mode"), style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    medicineUiText("Uses a system alarm for this slot"),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Switch(checked = alarmEnabled, onCheckedChange = { alarmEnabled = it })
         }
         AppActionRow {
             OutlinedTextField(
@@ -185,9 +266,9 @@ private fun ReminderTimeRow(
                 singleLine = true
             )
             SecondaryActionButton(
-                label = "Save",
+                label = uiText("Save"),
                 modifier = Modifier.weight(1f),
-                onClick = { onSaveReminder(slot, timeText, enabled) }
+                onClick = { onSaveReminder(slot, timeText, enabled, alarmEnabled) }
             )
         }
     }
@@ -198,48 +279,33 @@ private fun MedicineSettingsRow(
     medicine: MedicineItem,
     onArchiveMedicine: (Long) -> Unit
 ) {
+    val language = LocalAppLanguage.current
+    val display = medicine.displayText(language)
+
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Column(Modifier.weight(1f)) {
             Text(
-                text = uiText(medicine.name),
+                text = display.name,
                 style = MaterialTheme.typography.titleSmall,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
             Text(
-                text = uiText(medicine.slots.joinToString { it.label }.ifBlank { "No schedule" }),
+                text = uiText(medicine.slots.joinToString { it.displayLabel(language) }.ifBlank { "No schedule" }),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis
             )
-            medicine.doseText?.takeIf { it.isNotBlank() }?.let {
-                Text(
-                    text = uiText(it),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-            medicine.summary?.takeIf { it.isNotBlank() }?.let {
-                Text(
-                    text = uiText(it),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
         }
         if (medicine.active) {
             SecondaryActionButton(
-                label = "Archive",
+                label = medicineUiText("Archive"),
                 modifier = Modifier.weight(1f),
                 onClick = { onArchiveMedicine(medicine.localId) }
             )
         } else {
-            StatusBadge("Archived", StatusTone.Neutral)
+            StatusBadge(medicineUiText("Archived"), StatusTone.Neutral)
         }
     }
 }

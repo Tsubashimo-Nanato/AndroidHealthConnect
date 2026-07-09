@@ -28,6 +28,7 @@ class MedicineRepository(
     ): MedicineSnapshot {
         val today = now.atZone(zoneId).toLocalDate()
         val yesterday = today.minusDays(1)
+        val calendarStart = today.minusDays(41)
         val reminders = reminderTimes()
         val schedules = dao.activeSchedules()
         val schedulesByMedicine = schedules.groupBy { it.medicineLocalId }
@@ -37,26 +38,16 @@ class MedicineRepository(
         val activeBySlot = schedules
             .groupBy { MedicineSlot.fromId(it.slot) ?: MedicineSlot.AS_NEEDED }
             .mapValues { entry ->
-                entry.value.map { row ->
-                    MedicineItem(
-                        localId = row.medicineLocalId,
-                        name = row.medicineName,
-                        notes = null,
-                        doseText = row.medicineDoseText,
-                        summary = row.medicineSummary,
-                        details = row.medicineDetails,
-                        active = true,
-                        slots = listOf(entry.key)
-                    )
-                }
+                entry.value.map { row -> row.toMedicineItem(entry.key) }
             }
-        val logs = dao.logsBetween(yesterday.toString(), today.toString()).mapNotNull { it.toDoseLog() }
+        val logs = dao.logsBetween(calendarStart.toString(), today.toString()).mapNotNull { it.toDoseLog() }
         return MedicineSnapshot(
             medicines = medicines,
             schedules = activeBySlot,
             reminderTimes = reminders,
             todayLogs = logs.filter { it.localDate == today },
-            yesterdayLogs = logs.filter { it.localDate == yesterday }
+            yesterdayLogs = logs.filter { it.localDate == yesterday },
+            recentDaySummaries = logs.toDaySummaries()
         )
     }
 
@@ -68,7 +59,8 @@ class MedicineRepository(
                     slot = slot,
                     hour = entity.hour,
                     minute = entity.minute,
-                    enabled = entity.enabled
+                    enabled = entity.enabled,
+                    alarmEnabled = entity.alarmEnabled
                 )
             }
             .toMap()
@@ -78,8 +70,8 @@ class MedicineRepository(
     suspend fun activeScheduleCount(slot: MedicineSlot): Int =
         dao.activeSchedulesForSlot(slot.id).size
 
-    suspend fun activeScheduledMedicineNames(slot: MedicineSlot): List<String> =
-        dao.activeSchedulesForSlot(slot.id).map { it.medicineName }
+    suspend fun activeScheduledMedicines(slot: MedicineSlot): List<MedicineItem> =
+        dao.activeSchedulesForSlot(slot.id).map { row -> row.toMedicineItem(slot) }
 
     suspend fun addMedicine(
         rawName: String,
@@ -183,6 +175,7 @@ class MedicineRepository(
         slot: MedicineSlot,
         rawTime: String,
         enabled: Boolean,
+        alarmEnabled: Boolean,
         now: Instant = Instant.now()
     ): MedicineMutationResult {
         if (!slot.supportsReminder) {
@@ -196,6 +189,7 @@ class MedicineRepository(
                 hour = parsed.first,
                 minute = parsed.second,
                 enabled = enabled,
+                alarmEnabled = alarmEnabled,
                 updatedEpochMillis = now.toEpochMilli()
             )
         )
@@ -257,9 +251,10 @@ class MedicineRepository(
             return MedicineMutationResult(success = false, message = "Select at least one medicine")
         }
         val inserted = dao.insertDoseLogs(logs).size
+        val timeText = now.atZone(zoneId).toLocalTime().format(LogTimeFormatter)
         return MedicineMutationResult(
             success = true,
-            message = "Logged $inserted ${if (inserted == 1) "dose" else "doses"}",
+            message = "Logged ${slot.label} ${status.label.lowercase()} at $timeText ($inserted ${if (inserted == 1) "medicine" else "medicines"})",
             changedRows = inserted
         )
     }
@@ -268,6 +263,7 @@ class MedicineRepository(
         slot: MedicineSlot,
         status: MedicineDoseStatus,
         zoneId: ZoneId,
+        medicineLocalIds: Set<Long>? = null,
         now: Instant = Instant.now()
     ): MedicineMutationResult {
         val date = now.atZone(zoneId).toLocalDate()
@@ -276,8 +272,11 @@ class MedicineRepository(
             .filter { it.slot == slot.id && it.source == MedicineLogSource.REMINDER.id }
             .mapNotNull { it.medicineLocalId }
             .toSet()
-        val scheduled = dao.activeSchedulesForSlot(slot.id)
+        val scheduledForSlot = dao.activeSchedulesForSlot(slot.id)
+        val selectedIds = medicineLocalIds?.filter { it > 0L }?.toSet()
+        val scheduled = scheduledForSlot
             .filterNot { it.medicineLocalId in alreadyLogged }
+            .filter { selectedIds == null || it.medicineLocalId in selectedIds }
         if (scheduled.isEmpty()) {
             return MedicineMutationResult(success = true, message = "No pending ${slot.label.lowercase()} doses")
         }
@@ -301,6 +300,19 @@ class MedicineRepository(
         )
     }
 
+    suspend fun deleteDoseLogs(logIds: Set<Long>): MedicineMutationResult {
+        val ids = logIds.filter { it > 0L }.distinct()
+        if (ids.isEmpty()) {
+            return MedicineMutationResult(success = false, message = "No medicine log selected")
+        }
+        val removed = dao.deleteDoseLogs(ids)
+        return MedicineMutationResult(
+            success = true,
+            message = "Deleted $removed medicine log ${if (removed == 1) "row" else "rows"}",
+            changedRows = removed
+        )
+    }
+
     private fun MedicineItemEntity.toMedicineItem(scheduleRows: List<MedicineScheduleRow>): MedicineItem =
         MedicineItem(
             localId = localId,
@@ -311,6 +323,18 @@ class MedicineRepository(
             details = details,
             active = active,
             slots = scheduleRows.mapNotNull { MedicineSlot.fromId(it.slot) }.distinct()
+        )
+
+    private fun MedicineScheduleRow.toMedicineItem(slot: MedicineSlot): MedicineItem =
+        MedicineItem(
+            localId = medicineLocalId,
+            name = medicineName,
+            notes = null,
+            doseText = medicineDoseText,
+            summary = medicineSummary,
+            details = medicineDetails,
+            active = true,
+            slots = listOf(slot)
         )
 
     private suspend fun insertSeedMedicine(seed: MedicineSeed, nowMillis: Long) {
@@ -390,6 +414,18 @@ class MedicineRepository(
     private fun MedicineSeed.matchingNames(): Set<String> =
         (aliases + name).map { it.normalizedMedicineName() }.toSet()
 
+    private fun List<MedicineDoseLog>.toDaySummaries(): List<MedicineDayLogSummary> =
+        groupBy { it.localDate }
+            .map { (date, logs) ->
+                MedicineDayLogSummary(
+                    date = date,
+                    takenCount = logs.count { it.status == MedicineDoseStatus.TAKEN },
+                    missedCount = logs.count { it.status == MedicineDoseStatus.MISSED },
+                    skippedCount = logs.count { it.status == MedicineDoseStatus.SKIPPED }
+                )
+            }
+            .sortedByDescending { it.date }
+
     private fun MedicineScheduleRow.toDoseLog(
         slot: MedicineSlot,
         date: LocalDate,
@@ -425,5 +461,10 @@ class MedicineRepository(
             source = MedicineLogSource.fromId(source),
             note = note
         )
+    }
+
+    private companion object {
+        val LogTimeFormatter: java.time.format.DateTimeFormatter =
+            java.time.format.DateTimeFormatter.ofPattern("HH:mm")
     }
 }

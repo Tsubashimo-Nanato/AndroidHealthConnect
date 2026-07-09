@@ -109,12 +109,14 @@ object AppPreferences {
     private const val KEY_UPLOAD_LOCAL_URL = "upload_local_url"
     private const val KEY_UPLOAD_API_KEY = "upload_api_key"
     private const val KEY_UPLOAD_DEVICE_ID = "upload_device_id"
+    private const val KEY_UPLOAD_AUTO_ENABLED = "upload_auto_enabled"
     private const val KEY_UPLOAD_LAST_TIME = "upload_last_time"
     private const val KEY_UPLOAD_LAST_RESULT = "upload_last_result"
     private const val KEY_UPLOAD_LAST_SEVERITY = "upload_last_severity"
     private const val KEY_UPLOAD_PENDING_COUNT = "upload_pending_count"
     private const val KEY_UPLOAD_STATUS_SERVER_MODE = "upload_status_server_mode"
     private const val KEY_UPLOAD_CONNECTION_RESULT = "upload_connection_result"
+    private const val KEY_MEDICINE_OVERLAY_REMINDER_ENABLED = "medicine_overlay_reminder_enabled"
 
     fun themeMode(context: Context): AppThemeMode {
         val raw = prefs(context).getString(KEY_THEME_MODE, AppThemeMode.SYSTEM.name)
@@ -147,6 +149,13 @@ object AppPreferences {
 
     fun setDebugModeEnabled(context: Context, enabled: Boolean) {
         prefs(context).edit().putBoolean(KEY_DEBUG_MODE_ENABLED, enabled).apply()
+    }
+
+    fun medicineOverlayReminderEnabled(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_MEDICINE_OVERLAY_REMINDER_ENABLED, false)
+
+    fun setMedicineOverlayReminderEnabled(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(KEY_MEDICINE_OVERLAY_REMINDER_ENABLED, enabled).apply()
     }
 
     fun userAge(context: Context): Int? {
@@ -241,7 +250,8 @@ object AppPreferences {
             productionBaseUrl = productionUrl,
             localBaseUrl = localUrl,
             apiKey = apiKey,
-            deviceId = uploadDeviceId(context)
+            deviceId = uploadDeviceId(context),
+            autoUploadEnabled = prefs.getBoolean(KEY_UPLOAD_AUTO_ENABLED, false)
         )
     }
 
@@ -252,6 +262,7 @@ object AppPreferences {
             putString(KEY_UPLOAD_LOCAL_URL, settings.localBaseUrl.trim())
             putString(KEY_UPLOAD_API_KEY, settings.apiKey.trim())
             putString(KEY_UPLOAD_DEVICE_ID, settings.deviceId)
+            putBoolean(KEY_UPLOAD_AUTO_ENABLED, settings.autoUploadEnabled)
         }.apply()
     }
 

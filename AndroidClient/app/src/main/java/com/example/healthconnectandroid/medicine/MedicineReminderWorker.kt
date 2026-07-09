@@ -19,10 +19,10 @@ class MedicineReminderWorker(
             ?.takeIf { it.supportsReminder }
             ?: return Result.failure()
         val repository = MedicineRepository(AppDb.get(applicationContext))
-        val names = repository.activeScheduledMedicineNames(slot)
-        if (names.isNotEmpty()) {
-            MedicineReminderNotifier.showReminder(applicationContext, slot, names)
-            Log.i(TAG, "Medicine reminder shown slot=${slot.id} count=${names.size}")
+        val medicines = repository.activeScheduledMedicines(slot)
+        if (medicines.isNotEmpty()) {
+            MedicineReminderNotifier.showReminder(applicationContext, slot, medicines)
+            Log.i(TAG, "Medicine reminder shown slot=${slot.id} count=${medicines.size}")
         }
         MedicineReminderScheduler.scheduleSlot(
             context = applicationContext,

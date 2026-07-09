@@ -39,17 +39,38 @@ fun SettingsDataScreen(
             .padding(18.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        AppSection(title = "Data Settings", subtitle = "Exports and local data", modifier = Modifier.rowFadeIn(0)) {
-            PrimaryActionButton(if (busy) "Preparing..." else "Export CSV", enabled = !busy, onClick = onExportAllCsv)
-            SecondaryActionButton("Export ZIP", enabled = !busy, onClick = onExportZip)
-            SecondaryActionButton("Export HR CSV", enabled = !busy, onClick = onExportHrCsv)
-            SecondaryActionButton("Remove Local Data", enabled = !busy, onClick = onRequestClear)
-            Text(
-                uiText("Remove Local Data clears this app's cached records, summaries, and sync history. Health Connect data is not deleted."),
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            StatusMessageCard(status)
-        }
+        DataManagementSection(
+            status = status,
+            busy = busy,
+            onExportHrCsv = onExportHrCsv,
+            onExportAllCsv = onExportAllCsv,
+            onExportZip = onExportZip,
+            onRequestClear = onRequestClear,
+            modifier = Modifier.rowFadeIn(0)
+        )
+    }
+}
+
+@Composable
+fun DataManagementSection(
+    status: String,
+    busy: Boolean,
+    onExportHrCsv: () -> Unit,
+    onExportAllCsv: () -> Unit,
+    onExportZip: () -> Unit,
+    onRequestClear: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    AppSection(title = "Data Settings", subtitle = "Exports and local data", modifier = modifier) {
+        PrimaryActionButton(if (busy) "Preparing..." else "Export CSV", enabled = !busy, onClick = onExportAllCsv)
+        SecondaryActionButton("Export ZIP", enabled = !busy, onClick = onExportZip)
+        SecondaryActionButton("Export HR CSV", enabled = !busy, onClick = onExportHrCsv)
+        SecondaryActionButton("Remove Local Data", enabled = !busy, onClick = onRequestClear)
+        Text(
+            uiText("Remove Local Data clears this app's cached records, summaries, and sync history. Health Connect data is not deleted."),
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        StatusMessageCard(status)
     }
 }
 
@@ -68,44 +89,61 @@ fun SettingsAppearanceScreen(
             .padding(18.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        AppSection(title = "Appearance", subtitle = "Saved locally", modifier = Modifier.rowFadeIn(0)) {
-            Text(uiText("Mode"), style = MaterialTheme.typography.titleSmall)
-            SegmentedSwitch(
-                options = AppThemeMode.values().toList(),
-                selected = themeMode,
-                label = { it.label },
-                onSelected = onThemeModeChange
-            )
+        AppearanceSettingsSection(
+            themeMode = themeMode,
+            themePalette = themePalette,
+            onThemeModeChange = onThemeModeChange,
+            onThemePaletteChange = onThemePaletteChange,
+            modifier = Modifier.rowFadeIn(0)
+        )
+    }
+}
 
-            Text(uiText("Palette"), style = MaterialTheme.typography.titleSmall)
-            AppThemePalette.values().toList().chunked(2).forEach { rowOptions ->
-                AppActionRow {
-                    rowOptions.forEach { palette ->
-                        val selected = palette == themePalette
-                        if (selected) {
-                            PrimaryActionButton(
-                                modifier = Modifier.weight(1f),
-                                label = palette.label,
-                                onClick = { onThemePaletteChange(palette) }
-                            )
-                        } else {
-                            SecondaryActionButton(
-                                modifier = Modifier.weight(1f),
-                                label = palette.label,
-                                onClick = { onThemePaletteChange(palette) }
-                            )
-                        }
-                    }
-                    if (rowOptions.size == 1) {
-                        Text("", modifier = Modifier.weight(1f))
+@Composable
+fun AppearanceSettingsSection(
+    themeMode: AppThemeMode,
+    themePalette: AppThemePalette,
+    onThemeModeChange: (AppThemeMode) -> Unit,
+    onThemePaletteChange: (AppThemePalette) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    AppSection(title = "Appearance", subtitle = "Saved locally", modifier = modifier) {
+        Text(uiText("Mode"), style = MaterialTheme.typography.titleSmall)
+        SegmentedSwitch(
+            options = AppThemeMode.values().toList(),
+            selected = themeMode,
+            label = { it.label },
+            onSelected = onThemeModeChange
+        )
+
+        Text(uiText("Palette"), style = MaterialTheme.typography.titleSmall)
+        AppThemePalette.values().toList().chunked(2).forEach { rowOptions ->
+            AppActionRow {
+                rowOptions.forEach { palette ->
+                    val selected = palette == themePalette
+                    if (selected) {
+                        PrimaryActionButton(
+                            modifier = Modifier.weight(1f),
+                            label = palette.label,
+                            onClick = { onThemePaletteChange(palette) }
+                        )
+                    } else {
+                        SecondaryActionButton(
+                            modifier = Modifier.weight(1f),
+                            label = palette.label,
+                            onClick = { onThemePaletteChange(palette) }
+                        )
                     }
                 }
+                if (rowOptions.size == 1) {
+                    Text("", modifier = Modifier.weight(1f))
+                }
             }
-            Text(
-                uiText(themePalette.description),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
         }
+        Text(
+            uiText(themePalette.description),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }

@@ -28,7 +28,8 @@ data class UploadSettings(
     val productionBaseUrl: String = UploadEndpointPolicy.PRODUCTION_BASE_URL,
     val localBaseUrl: String = UploadEndpointPolicy.DEFAULT_LOCAL_BASE_URL,
     val apiKey: String = "",
-    val deviceId: String
+    val deviceId: String,
+    val autoUploadEnabled: Boolean = false
 )
 
 data class UploadPendingCounts(
@@ -37,6 +38,13 @@ data class UploadPendingCounts(
     val aggregates: Int = 0
 ) {
     val total: Int get() = records + values + aggregates
+
+    operator fun plus(other: UploadPendingCounts): UploadPendingCounts =
+        UploadPendingCounts(
+            records = records + other.records,
+            values = values + other.values,
+            aggregates = aggregates + other.aggregates
+        )
 
     fun minusUploaded(
         recordsUploaded: Int,

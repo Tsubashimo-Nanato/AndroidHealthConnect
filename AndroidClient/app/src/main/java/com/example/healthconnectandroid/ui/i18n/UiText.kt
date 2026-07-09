@@ -94,6 +94,15 @@ private fun translateDynamicChinese(text: String): String {
             text.replaceFirst("Testing ", "正在测试 ")
         text.startsWith("Uploading ") ->
             text.replaceFirst("Uploading ", "正在上传 ")
+        text == "Upload settings saved. Auto upload queued" ->
+            "上传设置已保存。自动上传已排队"
+        text.startsWith("Upload settings saved. Auto upload not queued: ") ->
+            text.replaceFirst("Upload settings saved. Auto upload not queued: ", "上传设置已保存。自动上传未排队：")
+        text.startsWith("Auto upload not queued: ") ->
+            text.replaceFirst("Auto upload not queued: ", "自动上传未排队：")
+        text.startsWith("Server reachable") ->
+            text.replace("Server reachable", "服务器可达")
+                .replace("API key is checked when uploading data.", "API key 会在上传数据时验证。")
         text.contains(" complete: types ") ->
             replaceCommonTokens(text)
                 .replace("Smart sync complete", "智能同步完成")
@@ -162,6 +171,7 @@ private val commonChineseTokens = linkedMapOf(
 
 private val exactChinese = mapOf(
     "Dashboard" to "仪表盘",
+    "Medicine" to "用药",
     "Local Data" to "本地数据",
     "Data" to "数据",
     "Settings" to "设置",
@@ -173,6 +183,18 @@ private val exactChinese = mapOf(
     "Data Settings" to "数据设置",
     "Appearance" to "外观",
     "Debug" to "调试",
+    "Debug Mode" to "调试模式",
+    "Data Flow" to "数据流程",
+    "Advanced" to "高级",
+    "Profile, language, theme" to "个人资料、语言、主题",
+    "Access, sync, upload" to "权限、同步、上传",
+    "Access, upload, exports" to "权限、上传、导出",
+    "Schedule and dose checks" to "用药计划和确认",
+    "Debug tools visible" to "调试工具已显示",
+    "Debug tools hidden" to "调试工具已隐藏",
+    "Debug tools and local upload are visible" to "调试工具和本地上传已显示",
+    "Advanced diagnostics" to "高级诊断",
+    "Turn on only when testing local server upload or debug diagnostics." to "仅在测试本地服务器上传或诊断工具时开启。",
     "Units, week, timezone" to "单位、周起始日、时区",
     "Health Connect access" to "Health Connect 访问权限",
     "Periodic on" to "周期同步开启",
@@ -323,9 +345,10 @@ private val exactChinese = mapOf(
     "Show API key" to "显示 API 密钥",
     "Hide API key" to "隐藏 API 密钥",
     "Scan Pairing QR" to "扫描配对 QR",
-    "Scan the website Pairing QR code. It contains the upload URL and current API key." to "扫描网站上的配对 QR。它包含上传 URL 和当前 API 密钥。",
     "Emulator: use 10.0.2.2. Physical phone: start the website in LAN mode and use the PC LAN IP. Do not use localhost, 127.0.0.1, or PC-LAN-IP." to "模拟器使用 10.0.2.2。实体手机需要先用 LAN 模式启动网站，再使用电脑的局域网 IP。不要使用 localhost、127.0.0.1 或 PC-LAN-IP。",
-    "The website Pairing QR uses the production HTTPS endpoint. For local HTTP upload, use a Debug APK and enter the LAN debug URL manually." to "网站配对 QR 使用生产 HTTPS 端点。本地 HTTP 上传请使用 Debug APK，并手动输入 LAN 调试 URL。",
+    "The website Pairing QR carries the server mode, API base URL, and current API key. Local HTTP pairing still requires a Debug APK." to "网站配对 QR 会包含服务器模式、API 基础 URL 和当前 API 密钥。本地 HTTP 配对仍需要 Debug APK。",
+    "Auto upload" to "自动上传",
+    "Queue upload after periodic sync and when these settings are saved." to "周期同步后以及保存这些设置时排队上传。",
     "Upload Status" to "上传状态",
     "Pending local rows" to "待上传本地行",
     "All" to "全部",

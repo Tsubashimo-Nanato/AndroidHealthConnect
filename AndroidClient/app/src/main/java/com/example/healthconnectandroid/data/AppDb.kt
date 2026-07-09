@@ -21,7 +21,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         MedicineReminderSettingEntity::class,
         MedicineDoseLogEntity::class
     ],
-    version = 12,
+    version = 13,
     exportSchema = false
 )
 abstract class AppDb : RoomDatabase() {
@@ -421,6 +421,7 @@ abstract class AppDb : RoomDatabase() {
                         `hour` INTEGER NOT NULL,
                         `minute` INTEGER NOT NULL,
                         `enabled` INTEGER NOT NULL,
+                        `alarmEnabled` INTEGER NOT NULL DEFAULT 0,
                         `updatedEpochMillis` INTEGER NOT NULL,
                         PRIMARY KEY(`slot`)
                     )
@@ -462,6 +463,15 @@ abstract class AppDb : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_12_13 = object : Migration(12, 13) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE `medicine_reminder_settings` " +
+                        "ADD COLUMN `alarmEnabled` INTEGER NOT NULL DEFAULT 0"
+                )
+            }
+        }
+
         fun get(context: Context): AppDb =
             INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(
@@ -479,7 +489,8 @@ abstract class AppDb : RoomDatabase() {
                         MIGRATION_8_9,
                         MIGRATION_9_10,
                         MIGRATION_10_11,
-                        MIGRATION_11_12
+                        MIGRATION_11_12,
+                        MIGRATION_12_13
                     )
                     .build()
                     .also { INSTANCE = it }

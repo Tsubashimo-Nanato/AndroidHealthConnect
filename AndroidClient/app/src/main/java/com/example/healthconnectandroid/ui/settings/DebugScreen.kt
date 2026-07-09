@@ -42,7 +42,6 @@ fun DebugScreen(
     onQuery: (Instant) -> Unit,
     onRequestClear: () -> Unit
 ) {
-    var showSmokeDiagnostics by rememberSaveable { mutableStateOf(false) }
     Column(
         modifier
             .fillMaxSize()
@@ -50,77 +49,101 @@ fun DebugScreen(
             .padding(18.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        AppSection(
-            title = "Smoke-Test Diagnostics",
-            subtitle = "Counts and ranges only",
-            modifier = Modifier.rowFadeIn(0)
-        ) {
-            SecondaryActionButton(
-                label = if (showSmokeDiagnostics) "Hide Diagnostics" else "Show Diagnostics",
-                onClick = { showSmokeDiagnostics = !showSmokeDiagnostics }
-            )
-            if (showSmokeDiagnostics) {
-                DiagnosticMatrixBlock(diagnostics.matrix)
-                DiagnosticSyncBlock(diagnostics.sync)
-                DiagnosticDetailBlock(diagnostics.detail)
-            }
-        }
-
-        AppSection(
-            title = "Heart-Rate Compatibility Tools",
-            subtitle = "Kept for older heart-rate debug paths",
-            modifier = Modifier.rowFadeIn(1)
-        ) {
-            Text(
-                uiText("Requires platform and Health Connect heart-rate access."),
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            AppActionRow {
-                OutlinedButton(
-                    modifier = Modifier.weight(1f),
-                    enabled = platformGranted && hrHcGranted,
-                    onClick = { onSyncHours(6) }
-                ) { Text(uiText("Sync 6h")) }
-                OutlinedButton(
-                    modifier = Modifier.weight(1f),
-                    enabled = platformGranted && hrHcGranted,
-                    onClick = { onSyncHours(24) }
-                ) { Text(uiText("Sync 24h")) }
-            }
-        }
-
-        QueryCard(onQuery = onQuery)
-
-        AppSection(
-            title = "Sleep Scoring",
-            subtitle = "Placeholder visual guide",
-            modifier = Modifier.rowFadeIn(3)
-        ) {
-            Text(
-                uiText(
-                    "Sleep tags and quality colors currently use simple duration, nap, and extreme stage-churn rules only. " +
-                        "They are not medical advice or a validated sleep score."
-                ),
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-
-        AppSection(
-            title = "Cache Management",
-            subtitle = "Developer-only local database action",
-            modifier = Modifier.rowFadeIn(4)
-        ) {
-            Text(
-                uiText("Removing local data clears app rows and sync history. Health Connect data is not deleted."),
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            OutlinedButton(onClick = onRequestClear, modifier = Modifier.fillMaxWidth()) {
-                Text(uiText("Remove Local Data"))
-            }
-        }
-
-        StatusMessageCard(status)
+        DebugToolsSection(
+            platformGranted = platformGranted,
+            hrHcGranted = hrHcGranted,
+            status = status,
+            diagnostics = diagnostics,
+            onSyncHours = onSyncHours,
+            onQuery = onQuery,
+            onRequestClear = onRequestClear
+        )
     }
+}
+
+@Composable
+fun DebugToolsSection(
+    platformGranted: Boolean,
+    hrHcGranted: Boolean,
+    status: String,
+    diagnostics: DeviceSmokeDiagnostics,
+    onSyncHours: (Long) -> Unit,
+    onQuery: (Instant) -> Unit,
+    onRequestClear: () -> Unit,
+    firstRowIndex: Int = 0
+) {
+    var showSmokeDiagnostics by rememberSaveable { mutableStateOf(false) }
+
+    AppSection(
+        title = "Smoke-Test Diagnostics",
+        subtitle = "Counts and ranges only",
+        modifier = Modifier.rowFadeIn(firstRowIndex)
+    ) {
+        SecondaryActionButton(
+            label = if (showSmokeDiagnostics) "Hide Diagnostics" else "Show Diagnostics",
+            onClick = { showSmokeDiagnostics = !showSmokeDiagnostics }
+        )
+        if (showSmokeDiagnostics) {
+            DiagnosticMatrixBlock(diagnostics.matrix)
+            DiagnosticSyncBlock(diagnostics.sync)
+            DiagnosticDetailBlock(diagnostics.detail)
+        }
+    }
+
+    AppSection(
+        title = "Heart-Rate Compatibility Tools",
+        subtitle = "Kept for older heart-rate debug paths",
+        modifier = Modifier.rowFadeIn(firstRowIndex + 1)
+    ) {
+        Text(
+            uiText("Requires platform and Health Connect heart-rate access."),
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        AppActionRow {
+            OutlinedButton(
+                modifier = Modifier.weight(1f),
+                enabled = platformGranted && hrHcGranted,
+                onClick = { onSyncHours(6) }
+            ) { Text(uiText("Sync 6h")) }
+            OutlinedButton(
+                modifier = Modifier.weight(1f),
+                enabled = platformGranted && hrHcGranted,
+                onClick = { onSyncHours(24) }
+            ) { Text(uiText("Sync 24h")) }
+        }
+    }
+
+    QueryCard(onQuery = onQuery)
+
+    AppSection(
+        title = "Sleep Scoring",
+        subtitle = "Placeholder visual guide",
+        modifier = Modifier.rowFadeIn(firstRowIndex + 3)
+    ) {
+        Text(
+            uiText(
+                "Sleep tags and quality colors currently use simple duration, nap, and extreme stage-churn rules only. " +
+                    "They are not medical advice or a validated sleep score."
+            ),
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+
+    AppSection(
+        title = "Cache Management",
+        subtitle = "Developer-only local database action",
+        modifier = Modifier.rowFadeIn(firstRowIndex + 4)
+    ) {
+        Text(
+            uiText("Removing local data clears app rows and sync history. Health Connect data is not deleted."),
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        OutlinedButton(onClick = onRequestClear, modifier = Modifier.fillMaxWidth()) {
+            Text(uiText("Remove Local Data"))
+        }
+    }
+
+    StatusMessageCard(status)
 }
 
 @Composable

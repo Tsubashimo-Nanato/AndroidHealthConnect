@@ -168,6 +168,85 @@ interface HealthUploadDao {
     )
     suspend fun pendingAggregates(serverKey: String, startEpochMillis: Long?, limit: Int): List<HealthAggregateEntity>
 
+    @Query(
+        """
+        SELECT COUNT(*)
+        FROM medicine_items item
+        WHERE NOT EXISTS (
+            SELECT 1 FROM health_upload_ack ack
+            WHERE ack.serverKey = :serverKey
+              AND ack.itemKind = :itemKind
+              AND ack.localId = item.localId
+              AND ack.uploadedAtEpochMillis >= item.updatedEpochMillis
+        )
+        """
+    )
+    suspend fun pendingMedicineItemCount(serverKey: String, itemKind: String): Int
+
+    @Query(
+        """
+        SELECT COUNT(*)
+        FROM medicine_dose_logs log
+        WHERE NOT EXISTS (
+            SELECT 1 FROM health_upload_ack ack
+            WHERE ack.serverKey = :serverKey
+              AND ack.itemKind = :itemKind
+              AND ack.localId = log.localId
+        )
+          AND (:startEpochMillis IS NULL OR log.recordedEpochMillis >= :startEpochMillis)
+        """
+    )
+    suspend fun pendingMedicineDoseLogCount(serverKey: String, itemKind: String, startEpochMillis: Long?): Int
+
+    @Query(
+        """
+        SELECT item.*
+        FROM medicine_items item
+        WHERE NOT EXISTS (
+            SELECT 1 FROM health_upload_ack ack
+            WHERE ack.serverKey = :serverKey
+              AND ack.itemKind = :itemKind
+              AND ack.localId = item.localId
+              AND ack.uploadedAtEpochMillis >= item.updatedEpochMillis
+        )
+        ORDER BY item.updatedEpochMillis ASC, item.localId ASC
+        LIMIT :limit
+        """
+    )
+    suspend fun pendingMedicineItems(serverKey: String, itemKind: String, limit: Int): List<MedicineItemEntity>
+
+    @Query(
+        """
+        SELECT *
+        FROM medicine_schedules
+        WHERE medicineLocalId IN (:medicineLocalIds)
+        ORDER BY medicineLocalId ASC, slot ASC
+        """
+    )
+    suspend fun schedulesForMedicineUpload(medicineLocalIds: List<Long>): List<MedicineScheduleEntity>
+
+    @Query(
+        """
+        SELECT log.*
+        FROM medicine_dose_logs log
+        WHERE NOT EXISTS (
+            SELECT 1 FROM health_upload_ack ack
+            WHERE ack.serverKey = :serverKey
+              AND ack.itemKind = :itemKind
+              AND ack.localId = log.localId
+        )
+          AND (:startEpochMillis IS NULL OR log.recordedEpochMillis >= :startEpochMillis)
+        ORDER BY log.recordedEpochMillis ASC, log.localId ASC
+        LIMIT :limit
+        """
+    )
+    suspend fun pendingMedicineDoseLogs(
+        serverKey: String,
+        itemKind: String,
+        startEpochMillis: Long?,
+        limit: Int
+    ): List<MedicineDoseLogEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAcks(acks: List<HealthUploadAckEntity>)
 

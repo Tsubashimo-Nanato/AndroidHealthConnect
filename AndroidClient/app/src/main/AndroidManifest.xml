@@ -3,6 +3,8 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
 
     <!-- Android 14+ exposes several Health Connect reads as platform permissions. -->
     <uses-permission android:name="android.permission.health.READ_HEART_RATE" />
@@ -46,8 +48,17 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".medicine.MedicineReminderActivity"
+            android:excludeFromRecents="true"
+            android:exported="false" />
+
         <receiver
             android:name=".medicine.MedicineReminderActionReceiver"
+            android:exported="false" />
+
+        <receiver
+            android:name=".medicine.MedicineReminderAlarmReceiver"
             android:exported="false" />
 
     </application>

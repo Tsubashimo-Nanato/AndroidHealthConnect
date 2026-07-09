@@ -116,4 +116,7 @@ interface MedicineDao {
 
     @Query("DELETE FROM medicine_dose_logs WHERE localId = :localId")
     suspend fun deleteDoseLog(localId: Long)
+
+    @Query("DELETE FROM medicine_dose_logs WHERE localId IN (:localIds)")
+    suspend fun deleteDoseLogs(localIds: List<Long>): Int
 }

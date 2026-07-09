@@ -52,6 +52,7 @@ data class MedicineReminderSettingEntity(
     val hour: Int,
     val minute: Int,
     val enabled: Boolean,
+    val alarmEnabled: Boolean,
     val updatedEpochMillis: Long
 )
 

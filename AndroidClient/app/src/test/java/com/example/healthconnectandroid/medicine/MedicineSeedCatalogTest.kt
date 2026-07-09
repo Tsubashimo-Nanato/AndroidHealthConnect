@@ -1,6 +1,7 @@
 package com.example.healthconnectandroid.medicine
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -44,6 +45,13 @@ class MedicineSeedCatalogTest {
         assertTrue(asNeededSeeds.isNotEmpty())
         asNeededSeeds.forEach { seed ->
             assertEquals(setOf(MedicineSlot.AS_NEEDED), seed.slots)
+        }
+    }
+
+    @Test
+    fun testingSeedMedicinesDoNotUseMiddaySlot() {
+        MedicineSeedCatalog.testingMedicines.forEach { seed ->
+            assertFalse("${seed.name} should not be seeded for Midday", MedicineSlot.MIDDAY in seed.slots)
         }
     }
 }

@@ -41,7 +41,8 @@ data class MedicineReminderTime(
     val slot: MedicineSlot,
     val hour: Int,
     val minute: Int,
-    val enabled: Boolean
+    val enabled: Boolean,
+    val alarmEnabled: Boolean = false
 ) {
     val label: String
         get() = "%02d:%02d".format(hour, minute)
@@ -71,12 +72,23 @@ data class MedicineDoseLog(
     val note: String?
 )
 
+data class MedicineDayLogSummary(
+    val date: LocalDate,
+    val takenCount: Int,
+    val missedCount: Int,
+    val skippedCount: Int
+) {
+    val hasAnyLog: Boolean
+        get() = takenCount + missedCount + skippedCount > 0
+}
+
 data class MedicineSnapshot(
     val medicines: List<MedicineItem>,
     val schedules: Map<MedicineSlot, List<MedicineItem>>,
     val reminderTimes: Map<MedicineSlot, MedicineReminderTime>,
     val todayLogs: List<MedicineDoseLog>,
-    val yesterdayLogs: List<MedicineDoseLog>
+    val yesterdayLogs: List<MedicineDoseLog>,
+    val recentDaySummaries: List<MedicineDayLogSummary>
 )
 
 val EmptyMedicineSnapshot = MedicineSnapshot(
@@ -84,5 +96,6 @@ val EmptyMedicineSnapshot = MedicineSnapshot(
     schedules = emptyMap(),
     reminderTimes = MedicineSlotPolicy.defaultReminderTimes,
     todayLogs = emptyList(),
-    yesterdayLogs = emptyList()
+    yesterdayLogs = emptyList(),
+    recentDaySummaries = emptyList()
 )

@@ -8,9 +8,14 @@ import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
+import com.example.healthconnectandroid.AppPreferences
 import com.example.healthconnectandroid.data.AppDb
 import com.example.healthconnectandroid.hc.sync.HealthSyncService
 import com.example.healthconnectandroid.hc.sync.SyncRunStatus
+import com.example.healthconnectandroid.hc.upload.HealthUploadWorker
+import com.example.healthconnectandroid.hc.upload.UploadAutoQueueDecision
+import com.example.healthconnectandroid.hc.upload.UploadAutoQueuePolicy
+import com.example.healthconnectandroid.hc.upload.UploadResultSeverity
 import java.time.Instant
 import java.util.concurrent.TimeUnit
 
@@ -52,8 +57,32 @@ class PeriodicHealthSyncWorker(
             summary = summary
         )
         Log.i(TAG, "Periodic sync status=$status $summary")
+        queueAutoUploadIfEnabled()
 
         return if (errorCount > 0) Result.retry() else Result.success()
+    }
+
+    private fun queueAutoUploadIfEnabled() {
+        val settings = AppPreferences.uploadSettings(applicationContext)
+        when (val decision = UploadAutoQueuePolicy.decide(settings)) {
+            UploadAutoQueueDecision.Disabled -> Unit
+            is UploadAutoQueueDecision.Queue -> {
+                HealthUploadWorker.enqueue(applicationContext)
+                Log.i(TAG, "Auto upload queued mode=${decision.endpoint.mode}")
+            }
+            is UploadAutoQueueDecision.Invalid -> {
+                val message = "Auto upload not queued: ${decision.reason}"
+                AppPreferences.setUploadStatus(
+                    applicationContext,
+                    AppPreferences.uploadStatus(applicationContext).copy(
+                        connectionResult = message,
+                        severity = UploadResultSeverity.WARNING,
+                        serverMode = settings.serverMode
+                    )
+                )
+                Log.w(TAG, message)
+            }
+        }
     }
 
     companion object {

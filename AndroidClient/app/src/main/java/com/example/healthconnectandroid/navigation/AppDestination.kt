@@ -23,15 +23,10 @@ enum class AppTab(val label: String) {
 }
 
 enum class SettingsDestination(val title: String) {
-    Profile("Profile"),
     Preferences("Preferences"),
-    Permissions("Permissions"),
+    DataFlow("Data Flow"),
     Medicine("Medicine"),
-    Sync("Sync"),
-    Upload("Upload"),
-    DataSettings("Data Settings"),
-    Appearance("Appearance"),
-    Debug("Debug")
+    Advanced("Advanced")
 }
 
 @Stable

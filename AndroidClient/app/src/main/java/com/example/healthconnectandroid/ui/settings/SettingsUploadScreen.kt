@@ -18,6 +18,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -65,20 +66,63 @@ fun SettingsUploadScreen(
     onScanPairingQr: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    Column(
+        modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(18.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        UploadSettingsSections(
+            settings = settings,
+            uploadStatus = uploadStatus,
+            pendingCounts = pendingCounts,
+            debugEnabled = debugEnabled,
+            status = status,
+            busy = busy,
+            progress = progress,
+            onSaveSettings = onSaveSettings,
+            onTestConnection = onTestConnection,
+            onUploadNow = onUploadNow,
+            onScanPairingQr = onScanPairingQr,
+            destinationModifier = Modifier.rowFadeIn(0),
+            statusModifier = Modifier.rowFadeIn(1)
+        )
+    }
+}
+
+@Composable
+fun UploadSettingsSections(
+    settings: UploadSettings,
+    uploadStatus: UploadStatus,
+    pendingCounts: UploadPendingCounts,
+    debugEnabled: Boolean,
+    status: String,
+    busy: Boolean,
+    progress: UploadProgress?,
+    onSaveSettings: (UploadSettings) -> Unit,
+    onTestConnection: (UploadSettings) -> Unit,
+    onUploadNow: (UploadSettings, UploadTimeRange) -> Unit,
+    onScanPairingQr: () -> Unit,
+    destinationModifier: Modifier = Modifier,
+    statusModifier: Modifier = Modifier
+) {
     var serverMode by rememberSaveable(settings, debugEnabled) {
         mutableStateOf(if (debugEnabled) settings.serverMode else UploadServerMode.PRODUCTION)
     }
     var productionUrl by rememberSaveable(settings) { mutableStateOf(settings.productionBaseUrl) }
     var localUrl by rememberSaveable(settings) { mutableStateOf(settings.localBaseUrl) }
     var apiKey by rememberSaveable(settings) { mutableStateOf(settings.apiKey) }
+    var autoUploadEnabled by rememberSaveable(settings) { mutableStateOf(settings.autoUploadEnabled) }
     var apiKeyVisible by rememberSaveable { mutableStateOf(false) }
-    val editedSettings = remember(serverMode, productionUrl, localUrl, apiKey, settings.deviceId) {
+    val editedSettings = remember(serverMode, productionUrl, localUrl, apiKey, settings.deviceId, autoUploadEnabled) {
         UploadSettings(
             serverMode = serverMode,
             productionBaseUrl = productionUrl,
             localBaseUrl = localUrl,
             apiKey = apiKey.trim(),
-            deviceId = settings.deviceId
+            deviceId = settings.deviceId,
+            autoUploadEnabled = autoUploadEnabled
         )
     }
     val validation = remember(editedSettings) { UploadEndpointPolicy.validate(editedSettings) }
@@ -89,14 +133,7 @@ fun SettingsUploadScreen(
     val canRun = validation is UploadEndpointValidation.Valid && !busy
     var uploadMenuExpanded by remember { mutableStateOf(false) }
 
-    Column(
-        modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(18.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        AppSection(title = "Upload", subtitle = "Server destination", modifier = Modifier.rowFadeIn(0)) {
+    AppSection(title = "Upload", subtitle = "Server destination", modifier = destinationModifier) {
             if (debugEnabled) {
                 SegmentedSwitch(
                     options = UploadServerMode.values().toList(),
@@ -155,6 +192,21 @@ fun SettingsUploadScreen(
                 StatusBadge(serverMode.label, StatusTone.Info)
                 StatusBadge(validationMessage, if (validation is UploadEndpointValidation.Valid) StatusTone.Success else StatusTone.Warning)
             }
+            AppActionRow {
+                Column(Modifier.weight(1f)) {
+                    Text(uiText("Auto upload"), style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        uiText("Queue upload after periodic sync and when these settings are saved."),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = autoUploadEnabled,
+                    enabled = !busy,
+                    onCheckedChange = { autoUploadEnabled = it }
+                )
+            }
             Text(
                 uiText("Device ${settings.deviceId.take(8)}"),
                 style = MaterialTheme.typography.bodySmall,
@@ -168,7 +220,7 @@ fun SettingsUploadScreen(
                 )
             }
             Text(
-                uiText("The website Pairing QR uses the production HTTPS endpoint. For local HTTP upload, use a Debug APK and enter the LAN debug URL manually."),
+                uiText("The website Pairing QR carries the server mode, API base URL, and current API key. Local HTTP pairing still requires a Debug APK."),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -176,7 +228,7 @@ fun SettingsUploadScreen(
             StatusMessageCard(status)
         }
 
-        AppSection(title = "Upload Status", subtitle = "Pending local rows", modifier = Modifier.rowFadeIn(1)) {
+    AppSection(title = "Upload Status", subtitle = "Pending local rows", modifier = statusModifier) {
             AppActionRow {
                 StatusBadge("${pendingCounts.records} records", StatusTone.Neutral)
                 StatusBadge("${pendingCounts.values} values", StatusTone.Neutral)
@@ -246,7 +298,6 @@ fun SettingsUploadScreen(
                     }
                 }
             }
-        }
     }
 }
 

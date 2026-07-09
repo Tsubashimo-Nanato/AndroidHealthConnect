@@ -16,7 +16,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
-import com.example.healthconnectandroid.UserProfile
 import com.example.healthconnectandroid.hc.sync.SyncMode
 import com.example.healthconnectandroid.hc.sync.SyncProgress
 import com.example.healthconnectandroid.ui.AppActionRow
@@ -33,20 +32,13 @@ import java.time.Instant
 
 @Composable
 fun SettingsScreen(
-    userProfile: UserProfile,
     periodicEnabled: Boolean,
     debugEnabled: Boolean,
     status: String,
-    onOpenProfile: () -> Unit,
     onOpenPreferences: () -> Unit,
-    onOpenPermissions: () -> Unit,
     onOpenMedicine: () -> Unit,
-    onOpenSync: () -> Unit,
-    onOpenUpload: () -> Unit,
-    onOpenDataSettings: () -> Unit,
-    onOpenAppearance: () -> Unit,
-    onToggleDebug: () -> Unit,
-    onOpenDebug: () -> Unit,
+    onOpenDataFlow: () -> Unit,
+    onOpenAdvanced: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -57,36 +49,31 @@ fun SettingsScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Text(uiText("Settings"), modifier = Modifier.rowFadeIn(0), style = MaterialTheme.typography.headlineSmall)
-        SettingsNavCard("Profile", profileBrief(userProfile), onOpenProfile, Modifier.rowFadeIn(1))
-        SettingsNavCard("Preferences", "Units, week, timezone", onOpenPreferences, Modifier.rowFadeIn(2))
-        SettingsNavCard("Permissions", "Health Connect access", onOpenPermissions, Modifier.rowFadeIn(3))
-        SettingsNavCard("Medicine", "Schedule and dose checks", onOpenMedicine, Modifier.rowFadeIn(4))
-        SettingsNavCard("Sync", if (periodicEnabled) "Periodic on" else "Periodic off", onOpenSync, Modifier.rowFadeIn(5))
-        SettingsNavCard("Upload", "Server upload", onOpenUpload, Modifier.rowFadeIn(6))
-        SettingsNavCard("Data Settings", "Exports and local data", onOpenDataSettings, Modifier.rowFadeIn(7))
-        SettingsNavCard("Appearance", "Mode and palette", onOpenAppearance, Modifier.rowFadeIn(8))
-        AppSection(
-            title = "Debug Mode",
-            subtitle = if (debugEnabled) "Debug tools and local upload are visible" else "Debug tools hidden",
-            modifier = Modifier.rowFadeIn(9)
-        ) {
-            AppActionRow {
-                StatusBadge(if (debugEnabled) "On" else "Off", if (debugEnabled) StatusTone.Warning else StatusTone.Neutral)
-                SecondaryActionButton(
-                    if (debugEnabled) "Turn Off" else "Turn On",
-                    onClick = onToggleDebug
-                )
-            }
-            Text(
-                uiText("Turn on only when testing local server upload or debug diagnostics."),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-        if (debugEnabled) {
-            SettingsNavCard("Debug", "Compatibility tools", onOpenDebug, Modifier.rowFadeIn(10))
-        }
-        StatusMessageCard(status, modifier = Modifier.rowFadeIn(if (debugEnabled) 11 else 10))
+        SettingsNavCard(
+            title = "Preferences",
+            subtitle = "Profile, language, theme",
+            onClick = onOpenPreferences,
+            modifier = Modifier.rowFadeIn(1)
+        )
+        SettingsNavCard(
+            title = "Data Flow",
+            subtitle = if (periodicEnabled) "Access, sync, upload" else "Access, upload, exports",
+            onClick = onOpenDataFlow,
+            modifier = Modifier.rowFadeIn(2)
+        )
+        SettingsNavCard(
+            title = "Medicine",
+            subtitle = "Schedule and dose checks",
+            onClick = onOpenMedicine,
+            modifier = Modifier.rowFadeIn(3)
+        )
+        SettingsNavCard(
+            title = "Advanced",
+            subtitle = if (debugEnabled) "Debug tools visible" else "Debug tools hidden",
+            onClick = onOpenAdvanced,
+            modifier = Modifier.rowFadeIn(4)
+        )
+        StatusMessageCard(status, modifier = Modifier.rowFadeIn(5))
     }
 }
 
@@ -121,31 +108,62 @@ fun SettingsPermissionsScreen(
             .padding(18.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        AppSection(title = "Permissions", subtitle = "Local read access", modifier = Modifier.rowFadeIn(0)) {
-            StatusBadge(if (hcGranted) "Ready" else "Needs access", if (hcGranted) StatusTone.Success else StatusTone.Warning)
-            Text(uiText(dataPermissionSummary), color = MaterialTheme.colorScheme.onSurfaceVariant)
-            PrimaryActionButton(if (hcGranted) "Review Access" else "Grant Access", onClick = onRequestDataPermissions)
-            StatusBadge(
-                if (platformGranted) "Platform HR ready" else "Platform HR missing",
-                if (platformGranted) StatusTone.Success else StatusTone.Warning
-            )
-            SecondaryActionButton(
-                label = if (platformGranted) "Platform HR Ready" else "Request Platform HR",
-                enabled = declaredReadHr && !platformGranted,
-                onClick = onRequestPlatform
-            )
-            StatusBadge(backgroundReadStatus, if ("granted" in backgroundReadStatus) StatusTone.Success else StatusTone.Warning)
-            SecondaryActionButton("Grant Background", enabled = backgroundReadAvailable, onClick = onRequestBackgroundRead)
-            SecondaryActionButton(
-                label = "App Settings",
-                onClick = {
-                    val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                        data = Uri.fromParts("package", packageName, null)
-                    }
-                    openAppSettings(intent)
+        PermissionsSettingsSection(
+            declaredReadHr = declaredReadHr,
+            platformGranted = platformGranted,
+            hcGranted = hcGranted,
+            backgroundReadStatus = backgroundReadStatus,
+            dataPermissionSummary = dataPermissionSummary,
+            backgroundReadAvailable = backgroundReadAvailable,
+            onRequestPlatform = onRequestPlatform,
+            onRequestDataPermissions = onRequestDataPermissions,
+            onRequestBackgroundRead = onRequestBackgroundRead,
+            openAppSettings = openAppSettings,
+            packageName = packageName,
+            modifier = Modifier.rowFadeIn(0)
+        )
+    }
+}
+
+@Composable
+fun PermissionsSettingsSection(
+    declaredReadHr: Boolean,
+    platformGranted: Boolean,
+    hcGranted: Boolean,
+    backgroundReadStatus: String,
+    dataPermissionSummary: String,
+    backgroundReadAvailable: Boolean,
+    onRequestPlatform: () -> Unit,
+    onRequestDataPermissions: () -> Unit,
+    onRequestBackgroundRead: () -> Unit,
+    openAppSettings: (Intent) -> Unit,
+    packageName: String,
+    modifier: Modifier = Modifier
+) {
+    AppSection(title = "Permissions", subtitle = "Local read access", modifier = modifier) {
+        StatusBadge(if (hcGranted) "Ready" else "Needs access", if (hcGranted) StatusTone.Success else StatusTone.Warning)
+        Text(uiText(dataPermissionSummary), color = MaterialTheme.colorScheme.onSurfaceVariant)
+        PrimaryActionButton(if (hcGranted) "Review Access" else "Grant Access", onClick = onRequestDataPermissions)
+        StatusBadge(
+            if (platformGranted) "Platform HR ready" else "Platform HR missing",
+            if (platformGranted) StatusTone.Success else StatusTone.Warning
+        )
+        SecondaryActionButton(
+            label = if (platformGranted) "Platform HR Ready" else "Request Platform HR",
+            enabled = declaredReadHr && !platformGranted,
+            onClick = onRequestPlatform
+        )
+        StatusBadge(backgroundReadStatus, if ("granted" in backgroundReadStatus) StatusTone.Success else StatusTone.Warning)
+        SecondaryActionButton("Grant Background", enabled = backgroundReadAvailable, onClick = onRequestBackgroundRead)
+        SecondaryActionButton(
+            label = "App Settings",
+            onClick = {
+                val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                    data = Uri.fromParts("package", packageName, null)
                 }
-            )
-        }
+                openAppSettings(intent)
+            }
+        )
     }
 }
 
@@ -173,40 +191,72 @@ fun SettingsSyncScreen(
             .padding(18.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        AppSection(title = "Sync", subtitle = "Periodic, smart, and full", modifier = Modifier.rowFadeIn(0)) {
-            AppActionRow {
-                StatusBadge(if (periodicEnabled) "Scheduled" else "Off", if (periodicEnabled) StatusTone.Success else StatusTone.Neutral)
-                StatusBadge(if (backgroundReadGranted) "Background ready" else "Manual only", if (backgroundReadGranted) StatusTone.Success else StatusTone.Warning)
-            }
-            Text(
-                uiText(periodicSyncStatusText(periodicEnabled, lastPeriodicSync, lastPeriodicStatus, lastPeriodicSummary)),
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            PrimaryActionButton(
-                if (busy) "Working..." else if (periodicEnabled) "Disable Periodic" else "Enable Periodic",
-                enabled = !busy,
-                onClick = onTogglePeriodic
-            )
-            SecondaryActionButton("Run Now", enabled = backgroundReadAvailable && !busy, onClick = onRunBackgroundNow)
-            SecondaryActionButton("Full Resync", enabled = !busy, onClick = onFullResync)
-            if (syncProgress != null) {
-                SyncProgressCard(syncProgress)
-            }
-            if (syncProgress?.mode == SyncMode.FULL_HISTORY && syncProgress.isCancellable) {
-                SecondaryActionButton("Cancel Full Resync", onClick = onCancelFullResync)
-            }
-            Text(
-                uiText("Full resync reads from the full historical floor to now and can be slow. Periodic sync uses WorkManager smart sync; Android may delay it, so it is not real-time."),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            StatusMessageCard(status)
-        }
+        SyncSettingsSection(
+            periodicEnabled = periodicEnabled,
+            backgroundReadAvailable = backgroundReadAvailable,
+            backgroundReadGranted = backgroundReadGranted,
+            lastPeriodicSync = lastPeriodicSync,
+            lastPeriodicStatus = lastPeriodicStatus,
+            lastPeriodicSummary = lastPeriodicSummary,
+            status = status,
+            busy = busy,
+            syncProgress = syncProgress,
+            onTogglePeriodic = onTogglePeriodic,
+            onFullResync = onFullResync,
+            onCancelFullResync = onCancelFullResync,
+            onRunBackgroundNow = onRunBackgroundNow,
+            modifier = Modifier.rowFadeIn(0)
+        )
     }
 }
 
-private fun profileBrief(profile: UserProfile): String =
-    profile.age?.let { "Age $it from DOB" } ?: "DOB not set"
+@Composable
+fun SyncSettingsSection(
+    periodicEnabled: Boolean,
+    backgroundReadAvailable: Boolean,
+    backgroundReadGranted: Boolean,
+    lastPeriodicSync: Instant?,
+    lastPeriodicStatus: String?,
+    lastPeriodicSummary: String?,
+    status: String,
+    busy: Boolean,
+    syncProgress: SyncProgress?,
+    onTogglePeriodic: () -> Unit,
+    onFullResync: () -> Unit,
+    onCancelFullResync: () -> Unit,
+    onRunBackgroundNow: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    AppSection(title = "Sync", subtitle = "Periodic, smart, and full", modifier = modifier) {
+        AppActionRow {
+            StatusBadge(if (periodicEnabled) "Scheduled" else "Off", if (periodicEnabled) StatusTone.Success else StatusTone.Neutral)
+            StatusBadge(if (backgroundReadGranted) "Background ready" else "Manual only", if (backgroundReadGranted) StatusTone.Success else StatusTone.Warning)
+        }
+        Text(
+            uiText(periodicSyncStatusText(periodicEnabled, lastPeriodicSync, lastPeriodicStatus, lastPeriodicSummary)),
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        PrimaryActionButton(
+            if (busy) "Working..." else if (periodicEnabled) "Disable Periodic" else "Enable Periodic",
+            enabled = !busy,
+            onClick = onTogglePeriodic
+        )
+        SecondaryActionButton("Run Now", enabled = backgroundReadAvailable && !busy, onClick = onRunBackgroundNow)
+        SecondaryActionButton("Full Resync", enabled = !busy, onClick = onFullResync)
+        if (syncProgress != null) {
+            SyncProgressCard(syncProgress)
+        }
+        if (syncProgress?.mode == SyncMode.FULL_HISTORY && syncProgress.isCancellable) {
+            SecondaryActionButton("Cancel Full Resync", onClick = onCancelFullResync)
+        }
+        Text(
+            uiText("Full resync reads from the full historical floor to now and can be slow. Periodic sync uses WorkManager smart sync; Android may delay it, so it is not real-time."),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        StatusMessageCard(status)
+    }
+}
 
 private fun periodicSyncStatusText(
     enabled: Boolean,

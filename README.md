@@ -2,7 +2,7 @@
 
 Monorepo for an Android Health Connect client and a small .NET API server.
 
-Current version: `0.1.0`
+Current version: `0.1.5`
 
 ## Repository Layout
 

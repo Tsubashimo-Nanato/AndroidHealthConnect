@@ -503,7 +503,7 @@ fun statusToneForMessage(message: String): StatusTone {
         "failed" in lower || "error" in lower -> StatusTone.Error
         "missing" in lower || "grant" in lower || "skipped" in lower -> StatusTone.Warning
         "cleared" in lower -> StatusTone.Destructive
-        "exported" in lower || "synced" in lower || "success" in lower -> StatusTone.Success
+        "exported" in lower || "logged" in lower || "synced" in lower || "success" in lower -> StatusTone.Success
         "syncing" in lower || "querying" in lower -> StatusTone.Info
         else -> StatusTone.Neutral
     }

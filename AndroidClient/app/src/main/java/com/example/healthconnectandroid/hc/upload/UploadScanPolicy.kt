@@ -27,21 +27,23 @@ object UploadScanPolicy {
             return UploadScanApplyResult.Invalid("QR code was empty")
         }
 
-        val pairing = parsePairing(trimmed)
-            ?: return UploadScanApplyResult.Invalid("QR code did not contain upload pairing data")
-        return applyPairing(current, pairing)
+        return when (val pairing = parsePairing(trimmed)) {
+            is PairingParseResult.Valid -> applyPairing(current, pairing.value)
+            is PairingParseResult.Invalid -> UploadScanApplyResult.Invalid(pairing.message)
+        }
     }
 
     private fun applyPairing(
         current: UploadSettings,
         pairing: UploadPairing
     ): UploadScanApplyResult {
-        val baseUrl = baseUrlFromEndpoint(pairing.uploadUrl)
-            ?: return UploadScanApplyResult.Invalid("QR code did not contain an upload URL")
+        val baseUrl = baseUrlFromPairingUrl(pairing.serverUrl)
+            ?: return UploadScanApplyResult.Invalid("QR code did not contain a server URL")
         val apiKey = cleanApiKey(pairing.apiKey)
             ?: return UploadScanApplyResult.Invalid("QR code did not contain an API key")
+        val serverMode = pairing.serverMode ?: serverModeForBaseUrl(baseUrl)
 
-        val next = when (serverModeForBaseUrl(baseUrl)) {
+        val next = when (serverMode) {
             UploadServerMode.PRODUCTION -> current.copy(
                 serverMode = UploadServerMode.PRODUCTION,
                 productionBaseUrl = baseUrl,
@@ -68,20 +70,40 @@ object UploadScanPolicy {
     private fun cleanApiKey(value: String): String? =
         value.trim().takeIf { PlainApiKeyPattern.matches(it) }
 
-    private fun baseUrlFromEndpoint(rawUrl: String): String? {
+    private fun baseUrlFromPairingUrl(rawUrl: String): String? {
         val normalized = UploadEndpointPolicy.normalizeBaseUrl(rawUrl) ?: return null
         return normalized.takeIf { it.toHttpUrlOrNull() != null }
     }
 
-    private fun parsePairing(rawText: String): UploadPairing? {
-        val uri = runCatching { URI(rawText) }.getOrNull() ?: return null
-        if (!uri.scheme.equals(PAIRING_SCHEME, ignoreCase = true)) return null
-        if (!uri.host.orEmpty().equals(PAIRING_HOST, ignoreCase = true)) return null
-        // The server-owned QR format keeps URL and key together so partial pairing cannot leave stale settings.
-        val params = queryParams(uri.rawQuery ?: return null) ?: return null
-        val uploadUrl = params["u"]?.takeIf { it.isNotBlank() } ?: return null
-        val apiKey = params["k"]?.takeIf { it.isNotBlank() } ?: return null
-        return UploadPairing(uploadUrl = uploadUrl, apiKey = apiKey)
+    private fun parsePairing(rawText: String): PairingParseResult {
+        val uri = runCatching { URI(rawText) }.getOrNull()
+            ?: return PairingParseResult.Invalid("QR code did not contain upload pairing data")
+        if (!uri.scheme.equals(PAIRING_SCHEME, ignoreCase = true)) {
+            return PairingParseResult.Invalid("QR code did not contain upload pairing data")
+        }
+        if (!uri.host.orEmpty().equals(PAIRING_HOST, ignoreCase = true)) {
+            return PairingParseResult.Invalid("QR code did not contain upload pairing data")
+        }
+        val params = queryParams(uri.rawQuery ?: "")
+            ?: return PairingParseResult.Invalid("QR code contained invalid pairing text")
+        val serverUrl = params["u"]?.takeIf { it.isNotBlank() }
+            ?: return PairingParseResult.Invalid("QR code did not contain a server URL")
+        val apiKey = params["k"]?.takeIf { it.isNotBlank() }
+            ?: return PairingParseResult.Invalid("QR code did not contain an API key")
+        val serverMode = if (params.containsKey("m")) {
+            // Current admin QR owns the target mode; older QR values fall back to URL inference.
+            pairingMode(params["m"])
+                ?: return PairingParseResult.Invalid("QR code pairing mode is not supported")
+        } else {
+            null
+        }
+        return PairingParseResult.Valid(
+            UploadPairing(
+                serverUrl = serverUrl,
+                apiKey = apiKey,
+                serverMode = serverMode
+            )
+        )
     }
 
     private fun queryParams(rawQuery: String): Map<String, String>? {
@@ -109,8 +131,21 @@ object UploadScanPolicy {
         }
     }
 
+    private fun pairingMode(rawMode: String?): UploadServerMode? =
+        when (rawMode?.trim()?.lowercase()) {
+            "production" -> UploadServerMode.PRODUCTION
+            "local", "local_debug", "local-debug" -> UploadServerMode.LOCAL_DEBUG
+            else -> null
+        }
+
+    private sealed interface PairingParseResult {
+        data class Valid(val value: UploadPairing) : PairingParseResult
+        data class Invalid(val message: String) : PairingParseResult
+    }
+
     private data class UploadPairing(
-        val uploadUrl: String,
-        val apiKey: String
+        val serverUrl: String,
+        val apiKey: String,
+        val serverMode: UploadServerMode?
     )
 }

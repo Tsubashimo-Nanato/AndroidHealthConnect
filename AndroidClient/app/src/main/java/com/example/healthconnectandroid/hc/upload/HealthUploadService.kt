@@ -2,7 +2,10 @@ package com.example.healthconnectandroid.hc.upload
 
 import androidx.room.withTransaction
 import com.example.healthconnectandroid.data.AppDb
+import com.example.healthconnectandroid.data.HealthAggregateEntity
+import com.example.healthconnectandroid.data.HealthRecordEntity
 import com.example.healthconnectandroid.data.HealthUploadAckEntity
+import com.example.healthconnectandroid.data.HealthValueEntity
 import java.io.IOException
 import java.time.Instant
 import java.util.UUID
@@ -52,7 +55,7 @@ class HealthUploadService(
             .get()
             .build()
 
-        // Status checks reachability and the configured key; ingest remains the payload-shape check.
+        // NanatoStudio keeps /status public; real key validation happens on ingest.
         runCatching { client.newCall(request).execute() }
             .fold(
                 onSuccess = { response ->
@@ -61,7 +64,7 @@ class HealthUploadService(
                             UploadConnectionResult(
                                 success = true,
                                 retryable = false,
-                                message = "Connection OK (${response.code}). Upload payloads are checked when sending data.",
+                                message = "Server reachable (${response.code}). API key is checked when uploading data.",
                                 serverMode = settings.serverMode
                             )
                         } else {
@@ -165,7 +168,7 @@ class HealthUploadService(
 
             when (val postResult = postBatch(endpoint, settings.apiKey, batch)) {
                 is PostBatchResult.Success -> {
-                    markUploaded(endpoint.serverKey, batch)
+                    markUploaded(endpoint.serverKey, rows.ackItems, batch.batchId)
                     uploadedRecords += rows.records.size
                     uploadedValues += rows.values.size
                     uploadedAggregates += rows.aggregates.size
@@ -229,7 +232,7 @@ class HealthUploadService(
         serverKey: String,
         startEpochMillis: Long?
     ): UploadPendingCounts {
-        return if (startEpochMillis == null) {
+        val healthCounts = if (startEpochMillis == null) {
             UploadPendingCounts(
                 records = uploadDao.pendingAllRecordCount(serverKey),
                 values = uploadDao.pendingAllValueCount(serverKey),
@@ -242,16 +245,86 @@ class HealthUploadService(
                 aggregates = uploadDao.pendingRecentAggregateCount(serverKey, startEpochMillis)
             )
         }
+
+        val medicineCounts = MedicineUploadRows.counts(
+            itemCount = uploadDao.pendingMedicineItemCount(
+                serverKey = serverKey,
+                itemKind = MedicineUploadRows.ITEM_MEDICINE_ITEM
+            ),
+            doseLogCount = uploadDao.pendingMedicineDoseLogCount(
+                serverKey = serverKey,
+                itemKind = MedicineUploadRows.ITEM_MEDICINE_DOSE_LOG,
+                startEpochMillis = startEpochMillis
+            )
+        )
+
+        return healthCounts + medicineCounts
     }
 
     private suspend fun loadPendingBatch(
         serverKey: String,
         startEpochMillis: Long?
     ): PendingUploadRows {
-        return PendingUploadRows(
-            records = uploadDao.pendingRecords(serverKey, startEpochMillis, RECORD_LIMIT),
-            values = uploadDao.pendingValues(serverKey, startEpochMillis, VALUE_LIMIT),
-            aggregates = uploadDao.pendingAggregates(serverKey, startEpochMillis, AGGREGATE_LIMIT)
+        val records = uploadDao.pendingRecords(serverKey, startEpochMillis, RECORD_LIMIT)
+        val values = uploadDao.pendingValues(serverKey, startEpochMillis, VALUE_LIMIT)
+        val aggregates = uploadDao.pendingAggregates(serverKey, startEpochMillis, AGGREGATE_LIMIT)
+        val healthRows = PendingUploadRows(
+            records = records,
+            values = values,
+            aggregates = aggregates,
+            ackItems = healthAcks(records, values, aggregates)
+        )
+
+        return healthRows + loadPendingMedicineRows(serverKey, startEpochMillis, healthRows)
+    }
+
+    private suspend fun loadPendingMedicineRows(
+        serverKey: String,
+        startEpochMillis: Long?,
+        healthRows: PendingUploadRows
+    ): PendingUploadRows {
+        var recordSlots = (RECORD_LIMIT - healthRows.records.size).coerceAtLeast(0)
+        var valueSlots = (VALUE_LIMIT - healthRows.values.size).coerceAtLeast(0)
+        if (recordSlots == 0 || valueSlots == 0) return PendingUploadRows()
+
+        val itemLimit = minOf(recordSlots, valueSlots / MedicineUploadRows.MEDICINE_ITEM_VALUE_COUNT)
+        val items = if (itemLimit > 0) {
+            uploadDao.pendingMedicineItems(
+                serverKey = serverKey,
+                itemKind = MedicineUploadRows.ITEM_MEDICINE_ITEM,
+                limit = itemLimit
+            )
+        } else {
+            emptyList()
+        }
+
+        recordSlots -= items.size
+        valueSlots -= items.size * MedicineUploadRows.MEDICINE_ITEM_VALUE_COUNT
+
+        val doseLogLimit = minOf(recordSlots, valueSlots / MedicineUploadRows.MEDICINE_DOSE_LOG_VALUE_COUNT)
+        val doseLogs = if (doseLogLimit > 0) {
+            uploadDao.pendingMedicineDoseLogs(
+                serverKey = serverKey,
+                itemKind = MedicineUploadRows.ITEM_MEDICINE_DOSE_LOG,
+                startEpochMillis = startEpochMillis,
+                limit = doseLogLimit
+            )
+        } else {
+            emptyList()
+        }
+
+        if (items.isEmpty() && doseLogs.isEmpty()) return PendingUploadRows()
+
+        val schedules = if (items.isEmpty()) {
+            emptyList()
+        } else {
+            uploadDao.schedulesForMedicineUpload(items.map { it.localId })
+        }
+
+        return MedicineUploadRows.fromRows(
+            items = items,
+            schedules = schedules,
+            doseLogs = doseLogs
         )
     }
 
@@ -296,13 +369,24 @@ class HealthUploadService(
         }
     }
 
-    private suspend fun markUploaded(serverKey: String, batch: UploadBatch) {
-        val now = Instant.now().toEpochMilli()
-        val acks = buildList {
-            batch.records.forEach { add(ack(serverKey, ITEM_RECORD, it.localId, batch.batchId, now)) }
-            batch.values.forEach { add(ack(serverKey, ITEM_VALUE, it.localId, batch.batchId, now)) }
-            batch.aggregates.forEach { add(ack(serverKey, ITEM_AGGREGATE, it.localId, batch.batchId, now)) }
+    private fun healthAcks(
+        records: List<HealthRecordEntity>,
+        values: List<HealthValueEntity>,
+        aggregates: List<HealthAggregateEntity>
+    ): List<PendingUploadAck> =
+        buildList {
+            records.forEach { add(PendingUploadAck(ITEM_RECORD, it.localId)) }
+            values.forEach { add(PendingUploadAck(ITEM_VALUE, it.localId)) }
+            aggregates.forEach { add(PendingUploadAck(ITEM_AGGREGATE, it.localId)) }
         }
+
+    private suspend fun markUploaded(
+        serverKey: String,
+        ackItems: List<PendingUploadAck>,
+        batchId: String
+    ) {
+        val now = Instant.now().toEpochMilli()
+        val acks = ackItems.map { ack(serverKey, it.itemKind, it.localId, batchId, now) }
         if (acks.isEmpty()) return
         db.withTransaction {
             uploadDao.insertAcks(acks)

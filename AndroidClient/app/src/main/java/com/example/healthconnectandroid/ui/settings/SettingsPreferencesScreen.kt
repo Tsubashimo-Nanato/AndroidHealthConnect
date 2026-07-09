@@ -17,9 +17,12 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.example.healthconnectandroid.AppThemeMode
+import com.example.healthconnectandroid.AppThemePalette
 import com.example.healthconnectandroid.AppLanguagePreference
 import com.example.healthconnectandroid.TimeZonePreferenceMode
 import com.example.healthconnectandroid.UnitSystemPreference
+import com.example.healthconnectandroid.UserProfile
 import com.example.healthconnectandroid.UserPreferences
 import com.example.healthconnectandroid.WeekStartPreference
 import com.example.healthconnectandroid.ui.AppActionRow
@@ -32,6 +35,45 @@ import java.time.ZoneId
 
 @Composable
 fun SettingsPreferencesScreen(
+    userProfile: UserProfile,
+    userPreferences: UserPreferences,
+    themeMode: AppThemeMode,
+    themePalette: AppThemePalette,
+    onUserProfileSave: (UserProfile) -> Unit,
+    onUserPreferencesSave: (UserPreferences) -> Unit,
+    onThemeModeChange: (AppThemeMode) -> Unit,
+    onThemePaletteChange: (AppThemePalette) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(18.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        PreferenceDisplaySection(
+            userPreferences = userPreferences,
+            onUserPreferencesSave = onUserPreferencesSave,
+            modifier = Modifier.rowFadeIn(0)
+        )
+        AppearanceSettingsSection(
+            themeMode = themeMode,
+            themePalette = themePalette,
+            onThemeModeChange = onThemeModeChange,
+            onThemePaletteChange = onThemePaletteChange,
+            modifier = Modifier.rowFadeIn(1)
+        )
+        ProfileSettingsSection(
+            userProfile = userProfile,
+            onUserProfileSave = onUserProfileSave,
+            modifier = Modifier.rowFadeIn(2)
+        )
+    }
+}
+
+@Composable
+fun PreferenceDisplaySection(
     userPreferences: UserPreferences,
     onUserPreferencesSave: (UserPreferences) -> Unit,
     modifier: Modifier = Modifier
@@ -48,14 +90,7 @@ fun SettingsPreferencesScreen(
     }.isSuccess
     val canSave = timeZoneMode == TimeZonePreferenceMode.SYSTEM || customTimeZoneValid
 
-    Column(
-        modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(18.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        AppSection(title = "Preferences", subtitle = "Display only", modifier = Modifier.rowFadeIn(0)) {
+    AppSection(title = "Preferences", subtitle = "Display only", modifier = modifier) {
             Text(uiText("Language"), style = MaterialTheme.typography.titleSmall)
             AppActionRow {
                 AppLanguagePreference.values().forEach { option ->
@@ -171,6 +206,5 @@ fun SettingsPreferencesScreen(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-        }
     }
 }

@@ -7,9 +7,10 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 internal data class PendingUploadRows(
-    val records: List<HealthRecordEntity>,
-    val values: List<HealthValueEntity>,
-    val aggregates: List<HealthAggregateEntity>
+    val records: List<HealthRecordEntity> = emptyList(),
+    val values: List<HealthValueEntity> = emptyList(),
+    val aggregates: List<HealthAggregateEntity> = emptyList(),
+    val ackItems: List<PendingUploadAck> = emptyList()
 ) {
     val isEmpty: Boolean get() = records.isEmpty() && values.isEmpty() && aggregates.isEmpty()
     val primaryKind: String
@@ -19,7 +20,20 @@ internal data class PendingUploadRows(
             aggregates.isNotEmpty() -> "aggregates"
             else -> "none"
         }
+
+    operator fun plus(other: PendingUploadRows): PendingUploadRows =
+        PendingUploadRows(
+            records = records + other.records,
+            values = values + other.values,
+            aggregates = aggregates + other.aggregates,
+            ackItems = ackItems + other.ackItems
+        )
 }
+
+internal data class PendingUploadAck(
+    val itemKind: String,
+    val localId: Long
+)
 
 internal data class UploadBatch(
     val schemaVersion: Int,
