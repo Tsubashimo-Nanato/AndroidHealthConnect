@@ -5,6 +5,7 @@ import com.example.healthconnectandroid.data.AppDb
 import com.example.healthconnectandroid.data.HealthCsvRow
 import com.example.healthconnectandroid.data.HealthDailyAggregateRow
 import com.example.healthconnectandroid.data.HealthDailyNumericSummaryRow
+import com.example.healthconnectandroid.data.HealthSleepArchiveEntity
 import com.example.healthconnectandroid.hc.HealthDataTypeDescriptor
 import com.example.healthconnectandroid.hc.HealthDataTypeKeys
 import com.example.healthconnectandroid.hc.HealthDataTypeRegistry
@@ -38,6 +39,7 @@ class HealthDetailQueryService(
     private val healthDao = db.healthRecordDao()
     private val syncDao = db.healthSyncRunDao()
     private val aggregateDao = db.healthAggregateDao()
+    private val retentionDao = db.healthRetentionDao()
 
     suspend fun inspectorDetail(
         key: String,
@@ -75,14 +77,35 @@ class HealthDetailQueryService(
     ): InspectorDetailData = withContext(Dispatchers.Default) {
         val descriptor = HealthDataTypeRegistry.require(key)
         val syncSummary = syncDao.latestSummaryForType(key)
-        val totalLocalRecordsForType = healthDao.countRecordsForType(key)
+        val archivedRecordCount = if (key == HealthDataTypeKeys.SLEEP_SESSION) {
+            retentionDao.archivedSleepRecordCount()
+        } else {
+            retentionDao.archivedRecordCount(key)
+        }
+        val totalLocalRecordsForType = healthDao.countRecordsForType(key) + archivedRecordCount
         val dailyNumericSummaries = if (key == HealthDataTypeKeys.HEART_RATE) {
-            heartRateDailySummariesForZone(start, end, zoneId)
+            mergeDailyNumericSummaries(
+                heartRateDailySummariesForZone(start, end, zoneId),
+                retentionDao.dailyNumericSummaries(
+                    recordType = key,
+                    startDate = start.atZone(zoneId).toLocalDate().toString(),
+                    endDate = end.minusMillis(1).atZone(zoneId).toLocalDate().toString()
+                )
+            )
         } else {
             emptyList()
         }
         val recordListTotalCount = if (key == HealthDataTypeKeys.HEART_RATE) {
             dailyNumericSummaries.sumOf { it.sampleCount }
+        } else if (key == HealthDataTypeKeys.SLEEP_SESSION) {
+            healthDao.countInspectorRowsForTypeRange(
+                recordType = key,
+                startEpochMillis = start.toEpochMilli(),
+                endEpochMillis = end.toEpochMilli()
+            ) + retentionDao.archivedSleepRowCountForRange(
+                startEpochMillis = start.toEpochMilli(),
+                endEpochMillis = end.toEpochMilli()
+            )
         } else {
             healthDao.countInspectorRowsForTypeRange(
                 recordType = key,
@@ -92,12 +115,21 @@ class HealthDetailQueryService(
         }
         val displayRowLimit = inspectorDisplayRowLimit(key)
         val displayRows = if (key == HealthDataTypeKeys.SLEEP_SESSION) {
-            healthDao.inspectorDisplayRowsForTypeRange(
+            val rawRows = healthDao.inspectorDisplayRowsForTypeRange(
                 recordType = key,
                 startEpochMillis = start.toEpochMilli(),
                 endEpochMillis = end.toEpochMilli(),
                 limit = displayRowLimit + 1
-            ).distinctBy { "${it.localRecordId}:${it.valueKey}" }
+            )
+            val archivedRows = retentionDao.sleepRowsForRange(
+                startEpochMillis = start.toEpochMilli(),
+                endEpochMillis = end.toEpochMilli(),
+                limit = displayRowLimit + 1
+            ).map { it.toCsvRow() }
+            (rawRows + archivedRows)
+                .distinctBy { "${it.localRecordId}:${it.valueKey}" }
+                .sortedByDescending { it.recordStartEpochMillis }
+                .take(displayRowLimit + 1)
         } else {
             emptyList()
         }
@@ -348,8 +380,76 @@ class HealthDetailQueryService(
             startDate = startDate.toString(),
             endDate = endDate.toString()
         )
-        return localRows to if (localRows.isNotEmpty()) "Local raw records" else null
+        val archivedRows = retentionDao.dailyTotals(
+            recordType = descriptor.key,
+            startDate = startDate.toString(),
+            endDate = endDate.toString()
+        )
+        val combined = mergeDailyTotals(localRows, archivedRows)
+        return combined to if (combined.isNotEmpty()) "Local records and archive" else null
     }
+
+    private fun mergeDailyNumericSummaries(
+        local: List<HealthDailyNumericSummaryRow>,
+        archived: List<HealthDailyNumericSummaryRow>
+    ): List<HealthDailyNumericSummaryRow> =
+        (local + archived)
+            .groupBy { it.localDate }
+            .toSortedMap()
+            .map { (date, rows) ->
+                val count = rows.sumOf { it.sampleCount }
+                val weightedTotal = rows.sumOf { row -> (row.averageValue ?: 0.0) * row.sampleCount }
+                HealthDailyNumericSummaryRow(
+                    localDate = date,
+                    sampleCount = count,
+                    averageValue = weightedTotal.takeIf { count > 0 }?.div(count),
+                    minValue = rows.mapNotNull { it.minValue }.minOrNull(),
+                    maxValue = rows.mapNotNull { it.maxValue }.maxOrNull(),
+                    unit = rows.mapNotNull { it.unit }.firstOrNull()
+                )
+            }
+
+    private fun mergeDailyTotals(
+        local: List<HealthDailyAggregateRow>,
+        archived: List<HealthDailyAggregateRow>
+    ): List<HealthDailyAggregateRow> =
+        (local + archived)
+            .groupBy { it.localDate }
+            .toSortedMap()
+            .map { (date, rows) ->
+                HealthDailyAggregateRow(
+                    localDate = date,
+                    total = rows.sumOf { it.total },
+                    unit = rows.mapNotNull { it.unit }.firstOrNull()
+                )
+            }
+
+    private fun HealthSleepArchiveEntity.toCsvRow() = HealthCsvRow(
+        localRecordId = sourceRecordLocalId,
+        localValueId = sourceValueLocalId,
+        valueKey = valueKey,
+        recordType = HealthDataTypeKeys.SLEEP_SESSION,
+        recordKind = "archived_sleep_session",
+        healthConnectUid = null,
+        dedupeKey = "archive:$sourceRecordLocalId",
+        sourcePackage = sourcePackage,
+        recordStartEpochMillis = recordStartEpochMillis,
+        recordEndEpochMillis = recordEndEpochMillis,
+        valueStartEpochMillis = valueStartEpochMillis,
+        valueEndEpochMillis = valueEndEpochMillis,
+        localDate = localDate,
+        zoneOffsetSeconds = null,
+        metric = metric,
+        numericValue = numericValue,
+        secondaryNumericValue = secondaryNumericValue,
+        unit = unit,
+        categoryOrStage = category,
+        label = label,
+        textValue = textValue,
+        jsonValue = jsonValue,
+        metadataJson = null,
+        rawJson = null
+    )
 
     private fun weeklyTotalsFromDaily(
         dailyTotals: List<HealthDailyAggregateRow>,

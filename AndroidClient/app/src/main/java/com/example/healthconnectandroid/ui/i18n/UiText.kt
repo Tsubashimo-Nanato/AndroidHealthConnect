@@ -32,6 +32,10 @@ private fun translateDynamicChinese(text: String): String {
             text.replaceFirst("Loaded: ", "已加载：")
         text.startsWith("Selected sync: ") ->
             text.replaceFirst("Selected sync: ", "所选同步：")
+        text.startsWith("Selected: ") ->
+            text.replaceFirst("Selected: ", "已选择：")
+        text.endsWith(" stages") ->
+            "${text.removeSuffix(" stages")} 个阶段"
         text.startsWith("Chart view: ") ->
             text.replaceFirst("Chart view: ", "图表视图：")
         text.startsWith("Rows: ") ->
@@ -378,7 +382,6 @@ private val exactChinese = mapOf(
     "Export HR CSV" to "导出心率 CSV",
     "Sync 6h" to "同步 6 小时",
     "Sync 24h" to "同步 24 小时",
-    "Remove Local Data" to "移除本地数据",
     "Matrix Gesture" to "矩阵手势",
     "Detail Query" to "详情查询",
     "No event" to "无事件",
@@ -399,10 +402,6 @@ private val exactChinese = mapOf(
     "Get HR" to "获取心率",
     "Requires platform and Health Connect heart-rate access." to "需要平台和 Health Connect 心率访问权限。",
     "Sleep tags and quality colors currently use simple duration, nap, and extreme stage-churn rules only. They are not medical advice or a validated sleep score." to "睡眠标签和质量颜色目前只使用简单的时长、小睡和极端阶段变动规则。它们不是医疗建议，也不是经过验证的睡眠评分。",
-    "Removing local data clears app rows and sync history. Health Connect data is not deleted." to "移除本地数据会清除应用行和同步历史。Health Connect 数据不会被删除。",
-    "Remove Local Data clears this app's cached records, summaries, and sync history. Health Connect data is not deleted." to "移除本地数据会清除此应用缓存的记录、汇总和同步历史。Health Connect 数据不会被删除。",
-    "Remove local data?" to "移除本地数据？",
-    "This removes cached records, aggregates, older heart-rate rows, and sync history from this app. Health Connect data itself is not deleted." to "这会从应用中移除缓存记录、聚合、较早的心率行和同步历史。Health Connect 数据本身不会被删除。",
     "Remove" to "移除",
     "Week" to "周",
     "Month" to "月",
@@ -445,16 +444,24 @@ private val exactChinese = mapOf(
     "Raw fields" to "原始字段",
     "Show Records" to "显示记录",
     "Hide Records" to "隐藏记录",
+    "Show sync controls" to "显示同步控制",
+    "Hide sync controls" to "隐藏同步控制",
     "Load More" to "加载更多",
     "Record list failed" to "记录列表加载失败",
     "Record load failed" to "记录加载失败",
     "Weekly summaries" to "每周汇总",
     "Estimated Resting Heart Rate (RHR)" to "估算静息心率 (RHR)",
     "Median of the lowest 10% of valid data" to "有效数据中最低 10% 的中位数",
-    "Average sleep" to "平均睡眠",
-    "Sessions" to "睡眠次数",
-    "Typical quality" to "典型质量",
-    "Last session" to "最近睡眠",
+    "Average per sleep" to "平均每次睡眠",
+    "Sleep duration" to "睡眠时长",
+    "Scroll to explore 7 days" to "左右滑动查看 7 天",
+    "Scroll through dates" to "左右滑动查看日期",
+    "Hours" to "小时",
+    "Local sleep sessions" to "本地睡眠记录",
+    "Last sleep" to "最近睡眠",
+    "Summary" to "摘要",
+    "Sleep Sessions" to "睡眠记录",
+    "1 stage" to "1 个阶段",
     "Most recent" to "最近",
     "Good" to "良好",
     "Fair" to "尚可",
@@ -469,5 +476,24 @@ private val exactChinese = mapOf(
     "Selected Sync" to "所选同步",
     "Smart Sync" to "智能同步",
     "Periodic Sync" to "周期同步",
-    "Heart-Rate Compatibility Debug" to "心率兼容调试"
+    "Heart-Rate Compatibility Debug" to "心率兼容调试",
+    "Release local data" to "释放本地数据",
+    "Choose a retention range before deleting this app's health data. Health Connect source data and medicine history are not deleted." to "删除此应用的健康数据前请选择保留范围。不会删除 Health Connect 源数据和用药记录。",
+    "Choose how much health data this app should keep. Health Connect source data and medicine history are not deleted." to "选择此应用保留的健康数据范围。不会删除 Health Connect 源数据和用药记录。",
+    "Keep nothing" to "不保留",
+    "Keep one week" to "保留一周",
+    "Keep one month" to "保留一个月",
+    "Keep three months" to "保留三个月",
+    "Keep six months" to "保留六个月",
+    "Keep one year" to "保留一年",
+    "Hold 3 seconds to remove" to "长按 3 秒删除",
+    "Keep holding..." to "请继续按住...",
+    "Continue in background" to "转到后台继续",
+    "Preparing local data" to "正在准备本地数据",
+    "Removing health records" to "正在删除健康记录",
+    "Removing older heart-rate data" to "正在删除旧心率数据",
+    "Cleaning related data" to "正在清理关联数据",
+    "Finalizing local storage" to "正在整理本地存储",
+    "Local data removal complete" to "本地数据删除完成",
+    "Deletion continues after this window is closed." to "关闭此窗口后，删除仍会继续。"
 )

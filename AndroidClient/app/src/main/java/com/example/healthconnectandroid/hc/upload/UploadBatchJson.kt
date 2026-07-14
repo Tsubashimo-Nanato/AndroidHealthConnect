@@ -35,6 +35,20 @@ internal data class PendingUploadAck(
     val localId: Long
 )
 
+internal data class UploadReadCursor(
+    val recordLocalId: Long = 0,
+    val valueLocalId: Long = 0,
+    val aggregateLocalId: Long = 0
+) {
+    fun advance(rows: PendingUploadRows): UploadReadCursor =
+        copy(
+            recordLocalId = rows.records.maxOfOrNull { it.localId }?.coerceAtLeast(recordLocalId) ?: recordLocalId,
+            valueLocalId = rows.values.maxOfOrNull { it.localId }?.coerceAtLeast(valueLocalId) ?: valueLocalId,
+            aggregateLocalId = rows.aggregates.maxOfOrNull { it.localId }?.coerceAtLeast(aggregateLocalId)
+                ?: aggregateLocalId
+        )
+}
+
 internal data class UploadBatch(
     val schemaVersion: Int,
     val deviceId: String,
@@ -70,9 +84,16 @@ internal fun UploadBatch.toJson(): JSONObject =
         .put("deviceId", deviceId)
         .put("batchId", batchId)
         .put("createdAtEpochMillis", createdAtEpochMillis)
-        .put("records", JSONArray(records.map { it.toUploadJson() }))
-        .put("values", JSONArray(values.map { it.toUploadJson() }))
-        .put("aggregates", JSONArray(aggregates.map { it.toUploadJson() }))
+        .put("records", records.toJsonArray { it.toUploadJson() })
+        .put("values", values.toJsonArray { it.toUploadJson() })
+        .put("aggregates", aggregates.toJsonArray { it.toUploadJson() })
+
+private inline fun <T> Iterable<T>.toJsonArray(transform: (T) -> JSONObject): JSONArray =
+    JSONArray().apply {
+        for (item in this@toJsonArray) {
+            put(transform(item))
+        }
+    }
 
 private fun HealthRecordEntity.toUploadJson(): JSONObject =
     JSONObject()

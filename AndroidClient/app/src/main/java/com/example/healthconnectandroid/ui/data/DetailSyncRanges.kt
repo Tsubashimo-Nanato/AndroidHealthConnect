@@ -2,7 +2,6 @@ package com.example.healthconnectandroid.ui.data
 
 import com.example.healthconnectandroid.hc.InspectorTimeRange
 import com.example.healthconnectandroid.ui.sleep.sleepWindowEndInstant
-import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -15,7 +14,6 @@ object DetailSyncRanges {
         isSleep: Boolean,
         range: InspectorTimeRange,
         sleepWindowEndDate: LocalDate,
-        weekStart: DayOfWeek,
         zoneId: ZoneId,
         now: Instant = Instant.now()
     ): Instant =
@@ -24,7 +22,6 @@ object DetailSyncRanges {
             sleepWindowEndInstant(
                 range = range,
                 anchorDate = sleepWindowEndDate,
-                weekStart = weekStart,
                 zoneId = zoneId,
                 now = now
             )
@@ -36,7 +33,6 @@ object DetailSyncRanges {
         isSleep: Boolean,
         range: InspectorTimeRange,
         sleepWindowEndDate: LocalDate,
-        weekStart: DayOfWeek,
         zoneId: ZoneId,
         now: Instant = Instant.now()
     ): Pair<Instant, Instant> {
@@ -44,7 +40,6 @@ object DetailSyncRanges {
             isSleep = isSleep,
             range = range,
             sleepWindowEndDate = sleepWindowEndDate,
-            weekStart = weekStart,
             zoneId = zoneId,
             now = now
         )

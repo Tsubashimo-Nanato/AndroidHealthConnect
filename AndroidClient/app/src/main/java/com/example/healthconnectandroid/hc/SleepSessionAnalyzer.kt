@@ -34,7 +34,7 @@ data class SleepSessionTag(
 
 enum class SleepQualityBand(val label: String, val tone: SleepTagTone) {
     GOOD("Good", SleepTagTone.SUCCESS),
-    FAIR("Fair", SleepTagTone.SUCCESS),
+    FAIR("Fair", SleepTagTone.INFO),
     NAP("Nap", SleepTagTone.NAP),
     FRAGMENTED("Fragmented", SleepTagTone.WARNING),
     SHORT("Short", SleepTagTone.ERROR),
@@ -48,8 +48,7 @@ data class SleepSessionAnalysis(
     val stageCount: Int,
     val duration: Duration?,
     val tags: List<SleepSessionTag>,
-    val qualityBand: SleepQualityBand,
-    val explanation: String
+    val qualityBand: SleepQualityBand
 )
 
 data class SleepSessionInput(
@@ -58,28 +57,16 @@ data class SleepSessionInput(
     val stageCount: Int
 )
 
-data class SleepSummaryMetrics(
-    val sessionCount: Int,
-    val averageDuration: Duration?,
-    val napCount: Int,
-    val typicalQuality: SleepQualityBand,
-    val lastSessionDuration: Duration?
-)
-
 data class SleepDaySummary(
     val localDate: LocalDate,
     val sessionCount: Int,
     val totalDuration: Duration,
-    val napCount: Int,
     val stageCount: Int,
     val qualityBand: SleepQualityBand
 )
 
 data class SleepRangeSummary(
-    val sessionCount: Int,
-    val averageDuration: Duration?,
-    val napCount: Int,
-    val typicalQuality: SleepQualityBand,
+    val averageSessionDuration: Duration?,
     val lastSessionDuration: Duration?
 )
 
@@ -99,10 +86,12 @@ data class SleepQualityMatrixModel(
 )
 
 object SleepSessionAnalyzer {
-    private const val NAP_MAX_HOURS = 4L
-    private const val SHORT_MAIN_SLEEP_MAX_HOURS = 6L
+    private const val NAP_MIN_MINUTES = 10L
+    private const val NAP_MAX_MINUTES = 60L
+    private const val NAP_START_HOUR = 10
+    private const val NAP_END_HOUR = 18
+    private const val SHORT_SLEEP_MAX_HOURS = 6L
     private const val GOOD_SLEEP_MIN_HOURS = 7L
-    private const val VERY_SHORT_NAP_MINUTES = 90L
     private const val FRAGMENTED_STAGE_COUNT_THRESHOLD = 120
 
     fun analyze(
@@ -120,22 +109,18 @@ object SleepSessionAnalyzer {
         }
         val dateTag = SleepSessionTag(dayLabel(localDate, now), SleepTagTone.DATE, SleepTagRole.DATE)
 
-        val isNap = duration != null && duration < Duration.ofHours(NAP_MAX_HOURS)
-        val isVeryShortNap = duration != null && duration < Duration.ofMinutes(VERY_SHORT_NAP_MINUTES)
-        val isShortMain = duration != null &&
-            duration >= Duration.ofHours(NAP_MAX_HOURS) &&
-            duration < Duration.ofHours(SHORT_MAIN_SLEEP_MAX_HOURS)
-        val isShort = isVeryShortNap || isShortMain
+        val isNap = isDaytimeNap(start, duration, zoneId)
+        val isShort = duration != null && !isNap && duration < Duration.ofHours(SHORT_SLEEP_MAX_HOURS)
         val isFragmented = duration != null &&
-            duration >= Duration.ofHours(SHORT_MAIN_SLEEP_MAX_HOURS) &&
+            duration >= Duration.ofHours(SHORT_SLEEP_MAX_HOURS) &&
             stageCount >= FRAGMENTED_STAGE_COUNT_THRESHOLD
 
         val quality = when {
             duration == null -> SleepQualityBand.UNKNOWN
-            isShort -> SleepQualityBand.SHORT
             isNap -> SleepQualityBand.NAP
+            isShort -> SleepQualityBand.SHORT
             isFragmented -> SleepQualityBand.FRAGMENTED
-            duration >= Duration.ofHours(GOOD_SLEEP_MIN_HOURS) && stageCount > 0 -> SleepQualityBand.GOOD
+            duration >= Duration.ofHours(GOOD_SLEEP_MIN_HOURS) -> SleepQualityBand.GOOD
             else -> SleepQualityBand.FAIR
         }
         val qualityTag = SleepSessionTag(quality.label, quality.tone, SleepTagRole.QUALITY)
@@ -152,37 +137,7 @@ object SleepSessionAnalyzer {
             stageCount = stageCount,
             duration = duration,
             tags = tags,
-            qualityBand = quality,
-            explanation = "Placeholder visual guide using duration and stage availability only."
-        )
-    }
-
-    fun summarize(analyses: List<SleepSessionAnalysis>): SleepSummaryMetrics {
-        if (analyses.isEmpty()) {
-            return SleepSummaryMetrics(
-                sessionCount = 0,
-                averageDuration = null,
-                napCount = 0,
-                typicalQuality = SleepQualityBand.UNKNOWN,
-                lastSessionDuration = null
-            )
-        }
-        val durations = analyses.mapNotNull { it.duration }
-        val averageDuration = durations
-            .takeIf { it.isNotEmpty() }
-            ?.let { values -> Duration.ofMinutes(values.sumOf { it.toMinutes() } / values.size) }
-        val quality = analyses
-            .groupingBy { it.qualityBand }
-            .eachCount()
-            .maxWithOrNull(compareBy<Map.Entry<SleepQualityBand, Int>> { it.value }.thenBy { -qualityRank(it.key) })
-            ?.key
-            ?: SleepQualityBand.UNKNOWN
-        return SleepSummaryMetrics(
-            sessionCount = analyses.size,
-            averageDuration = averageDuration,
-            napCount = analyses.count { analysis -> analysis.flags.any { it.label == "Nap" } },
-            typicalQuality = quality,
-            lastSessionDuration = analyses.firstOrNull()?.duration
+            qualityBand = quality
         )
     }
 
@@ -198,27 +153,19 @@ object SleepSessionAnalyzer {
         }
         if (rangedSessions.isEmpty()) {
             return SleepRangeSummary(
-                sessionCount = 0,
-                averageDuration = null,
-                napCount = 0,
-                typicalQuality = SleepQualityBand.UNKNOWN,
+                averageSessionDuration = null,
                 lastSessionDuration = null
             )
         }
-        val daySummaries = dailySummaries(rangedSessions, startDate, endDate, zoneId)
-            .filter { it.sessionCount > 0 }
-        val averageDuration = daySummaries
+        val validSessions = rangedSessions.mapNotNull { input ->
+            durationOf(input)?.let { duration -> input to duration }
+        }
+        val averageDuration = validSessions
             .takeIf { it.isNotEmpty() }
-            ?.let { days -> Duration.ofMinutes(days.sumOf { it.totalDuration.toMinutes() } / days.size) }
-        val lastSessionDuration = rangedSessions
-            .filter { it.start != null && it.end != null && it.end.isAfter(it.start) }
-            .maxByOrNull { it.start!! }
-            ?.let { Duration.between(it.start, it.end) }
+            ?.let { values -> Duration.ofMinutes(values.sumOf { it.second.toMinutes() } / values.size) }
+        val lastSessionDuration = validSessions.maxByOrNull { it.first.start!! }?.second
         return SleepRangeSummary(
-            sessionCount = rangedSessions.size,
-            averageDuration = averageDuration,
-            napCount = rangedSessions.count { input -> durationOf(input)?.let(::isNapDuration) == true },
-            typicalQuality = rangeQuality(daySummaries),
+            averageSessionDuration = averageDuration,
             lastSessionDuration = lastSessionDuration
         )
     }
@@ -257,13 +204,19 @@ object SleepSessionAnalyzer {
     ): SleepQualityMatrixModel {
         val monthAnchor = if (endDate.isBefore(startDate)) endDate else startDate
         val monthStart = monthAnchor.withDayOfMonth(1)
-        val monthEnd = monthStart.withDayOfMonth(monthStart.lengthOfMonth())
+        val naturalMonthEnd = monthStart.withDayOfMonth(monthStart.lengthOfMonth())
+        val monthEnd = naturalMonthEnd.coerceAtMost(endDate)
         val firstCell = monthStart.with(TemporalAdjusters.previousOrSame(weekStart))
-        val lastCell = monthEnd.with(TemporalAdjusters.nextOrSame(weekStart.minusOneDay()))
+        val lastCell = if (monthEnd == naturalMonthEnd) {
+            monthEnd.with(TemporalAdjusters.nextOrSame(weekStart.minusOneDay()))
+        } else {
+            monthEnd
+        }
         val days = generateSequence(firstCell) { previous ->
             previous.plusDays(1).takeIf { !it.isAfter(lastCell) }
         }.toList()
-        val summaries = dailySummaries(sessions, monthStart, monthEnd, zoneId)
+        // Padding dates carry real sleep data so month-to-month scrolling never shows placeholder colors.
+        val summaries = dailySummaries(sessions, firstCell, lastCell, zoneId)
             .associateBy { it.localDate }
         return SleepQualityMatrixModel(
             title = monthStart.format(DateTimeFormatter.ofPattern("MMMM yyyy", Locale.US)),
@@ -272,10 +225,10 @@ object SleepSessionAnalyzer {
                 val summary = summaries[date]
                 SleepQualityMatrixBox(
                     id = date.toString(),
-                    label = date.dayOfMonth.toString(),
+                    label = date.format(DateTimeFormatter.ofPattern("M/d EEE", Locale.US)),
                     startDate = date,
                     endDate = date,
-                    qualityBand = summary?.qualityBand?.takeIf { summary.sessionCount > 0 && date.month == monthStart.month },
+                    qualityBand = summary?.qualityBand?.takeIf { summary.sessionCount > 0 },
                     sessionCount = summary?.sessionCount ?: 0
                 )
             }
@@ -296,15 +249,13 @@ object SleepSessionAnalyzer {
             val daySessions = sessionsByDate[date].orEmpty()
             val durations = daySessions.mapNotNull(::durationOf)
             val totalDuration = Duration.ofMinutes(durations.sumOf { it.toMinutes() })
-            val napCount = durations.count(::isNapDuration)
             val stageCount = daySessions.sumOf { it.stageCount }
             SleepDaySummary(
                 localDate = date,
                 sessionCount = daySessions.size,
                 totalDuration = totalDuration,
-                napCount = napCount,
                 stageCount = stageCount,
-                qualityBand = dailyQuality(totalDuration, daySessions.size, stageCount, napCount)
+                qualityBand = dailyQuality(totalDuration, daySessions.size, stageCount)
             )
         }
     }
@@ -315,8 +266,17 @@ object SleepSessionAnalyzer {
         return if (end.isAfter(start)) Duration.between(start, end) else null
     }
 
-    private fun isNapDuration(duration: Duration): Boolean =
-        duration < Duration.ofHours(NAP_MAX_HOURS)
+    private fun isDaytimeNap(
+        start: Instant?,
+        duration: Duration?,
+        zoneId: ZoneId
+    ): Boolean {
+        // Nap is a short daytime session marker; daily sleep quality is calculated separately.
+        if (start == null || duration == null) return false
+        val minutes = duration.toMinutes()
+        if (minutes < NAP_MIN_MINUTES || minutes >= NAP_MAX_MINUTES) return false
+        return start.atZone(zoneId).hour in NAP_START_HOUR until NAP_END_HOUR
+    }
 
     private fun DayOfWeek.minusOneDay(): DayOfWeek =
         if (this == DayOfWeek.MONDAY) DayOfWeek.SUNDAY else DayOfWeek.of(value - 1)
@@ -324,55 +284,18 @@ object SleepSessionAnalyzer {
     private fun dailyQuality(
         totalDuration: Duration,
         sessionCount: Int,
-        stageCount: Int,
-        napCount: Int
+        stageCount: Int
     ): SleepQualityBand {
         if (sessionCount == 0) return SleepQualityBand.UNKNOWN
         val hours = totalDuration.toMinutes() / 60.0
-        val allSessionsAreNaps = napCount == sessionCount
+        val fragmented = sessionCount >= 3 || stageCount >= FRAGMENTED_STAGE_COUNT_THRESHOLD
         return when {
-            allSessionsAreNaps && hours < NAP_MAX_HOURS -> SleepQualityBand.NAP
-            hours >= GOOD_SLEEP_MIN_HOURS && sessionCount <= 2 -> SleepQualityBand.GOOD
-            hours >= 5.0 -> if (sessionCount >= 3 || stageCount >= FRAGMENTED_STAGE_COUNT_THRESHOLD) {
-                SleepQualityBand.FRAGMENTED
-            } else {
-                SleepQualityBand.FAIR
-            }
-            hours >= 3.0 -> SleepQualityBand.SHORT
-            else -> SleepQualityBand.SHORT
+            hours < SHORT_SLEEP_MAX_HOURS -> SleepQualityBand.SHORT
+            fragmented -> SleepQualityBand.FRAGMENTED
+            hours >= GOOD_SLEEP_MIN_HOURS -> SleepQualityBand.GOOD
+            else -> SleepQualityBand.FAIR
         }
     }
-
-    private fun rangeQuality(daySummaries: List<SleepDaySummary>): SleepQualityBand {
-        val activeDays = daySummaries.filter { it.sessionCount > 0 }
-        if (activeDays.isEmpty()) return SleepQualityBand.UNKNOWN
-        if (activeDays.all { it.qualityBand == SleepQualityBand.NAP }) return SleepQualityBand.NAP
-        val averageMinutes = activeDays.sumOf { it.totalDuration.toMinutes() } / activeDays.size
-        val averageDuration = Duration.ofMinutes(averageMinutes)
-        val fragmentedDays = activeDays.count { it.qualityBand == SleepQualityBand.FRAGMENTED }
-        val napDays = activeDays.count { it.qualityBand == SleepQualityBand.NAP }
-        val base = dailyQuality(
-            totalDuration = averageDuration,
-            sessionCount = 1,
-            stageCount = 0,
-            napCount = if (napDays > activeDays.size / 2) 1 else 0
-        )
-        return when {
-            base == SleepQualityBand.SHORT -> SleepQualityBand.SHORT
-            fragmentedDays > activeDays.size / 2 -> SleepQualityBand.FRAGMENTED
-            else -> base
-        }
-    }
-
-    private fun qualityRank(band: SleepQualityBand): Int =
-        when (band) {
-            SleepQualityBand.GOOD -> 0
-            SleepQualityBand.FAIR -> 1
-            SleepQualityBand.NAP -> 2
-            SleepQualityBand.FRAGMENTED -> 3
-            SleepQualityBand.SHORT -> 4
-            SleepQualityBand.UNKNOWN -> 5
-        }
 
     private fun canonicalTags(
         dateTag: SleepSessionTag,

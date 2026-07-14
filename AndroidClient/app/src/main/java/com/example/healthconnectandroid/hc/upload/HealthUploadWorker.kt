@@ -12,6 +12,7 @@ import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import com.example.healthconnectandroid.AppPreferences
 import com.example.healthconnectandroid.data.AppDb
+import com.example.healthconnectandroid.hc.retention.HealthRetentionWorker
 import java.util.concurrent.TimeUnit
 
 class HealthUploadWorker(
@@ -37,6 +38,10 @@ class HealthUploadWorker(
             )
         }
         AppPreferences.setUploadStatus(applicationContext, result.toStatus())
+        if (result.success && settings.serverMode == UploadServerMode.PRODUCTION) {
+            val endpoint = (UploadEndpointPolicy.validate(settings) as? UploadEndpointValidation.Valid)?.endpoint
+            endpoint?.let { HealthRetentionWorker.enqueue(applicationContext, it.serverKey) }
+        }
         return when {
             result.success -> Result.success()
             result.retryable -> Result.retry()

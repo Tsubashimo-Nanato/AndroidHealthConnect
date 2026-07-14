@@ -1,14 +1,30 @@
 package com.example.healthconnectandroid.hc
 
+import java.time.Duration
 import java.time.Instant
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.ZoneId
+import java.time.ZoneOffset
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SleepSessionAnalyzerTest {
+    @Test
+    fun partialCurrentMonthStopsAtProvidedEndDateWithoutFuturePadding() {
+        val model = SleepSessionAnalyzer.monthlyMatrix(
+            sessions = emptyList(),
+            startDate = LocalDate.of(2026, 7, 1),
+            endDate = LocalDate.of(2026, 7, 12),
+            zoneId = ZoneOffset.UTC
+        )
+
+        assertEquals(LocalDate.of(2026, 6, 28), model.boxes.first().startDate)
+        assertEquals(LocalDate.of(2026, 7, 12), model.boxes.last().startDate)
+        assertEquals("7/12 Sun", model.boxes.last().label)
+    }
+
     private val zoneId: ZoneId = ZoneId.of("UTC")
     private val today: LocalDate = LocalDate.of(2026, 5, 10)
 
@@ -34,26 +50,25 @@ class SleepSessionAnalyzerTest {
     }
 
     @Test
-    fun marksShortSessionsUnderFourHoursAsNapFlag() {
+    fun oneHourSleepIsShortAndNotANap() {
         val analysis = SleepSessionAnalyzer.analyze(
-            start = Instant.parse("2026-05-10T13:00:00Z"),
-            end = Instant.parse("2026-05-10T14:00:00Z"),
-            stageCount = 1,
+            start = Instant.parse("2026-05-10T09:33:00Z"),
+            end = Instant.parse("2026-05-10T10:44:00Z"),
+            stageCount = 3,
             now = today,
             zoneId = zoneId
         )
 
         assertEquals(SleepQualityBand.SHORT, analysis.qualityBand)
-        assertTrue(analysis.tags.any { it.label == "Nap" })
-        assertEquals(1, analysis.tags.count { it.label == "Nap" })
+        assertTrue(analysis.tags.none { it.label == "Nap" })
         assertEquals(1, analysis.tags.count { it.label == "Short" })
     }
 
     @Test
-    fun normalNapUsesNapBandNotFairQuality() {
+    fun shortAfternoonNapUsesNapSessionBand() {
         val analysis = SleepSessionAnalyzer.analyze(
             start = Instant.parse("2026-05-10T13:00:00Z"),
-            end = Instant.parse("2026-05-10T15:30:00Z"),
+            end = Instant.parse("2026-05-10T13:30:00Z"),
             stageCount = 1,
             now = today,
             zoneId = zoneId
@@ -148,8 +163,8 @@ class SleepSessionAnalyzerTest {
     }
 
     @Test
-    fun threeHourNapDailyTotalUsesNapQuality() {
-        val summary = SleepSessionAnalyzer.summarizeRange(
+    fun threeHourDailyTotalUsesShortQuality() {
+        val summary = SleepSessionAnalyzer.dailySummaries(
             sessions = listOf(
                 SleepSessionInput(
                     start = Instant.parse("2026-05-10T01:00:00Z"),
@@ -160,14 +175,14 @@ class SleepSessionAnalyzerTest {
             startDate = today,
             endDate = today,
             zoneId = zoneId
-        )
+        ).single()
 
-        assertEquals(SleepQualityBand.NAP, summary.typicalQuality)
+        assertEquals(SleepQualityBand.SHORT, summary.qualityBand)
     }
 
     @Test
     fun sevenHourDailyTotalIsGood() {
-        val summary = SleepSessionAnalyzer.summarizeRange(
+        val summary = SleepSessionAnalyzer.dailySummaries(
             sessions = listOf(
                 SleepSessionInput(
                     start = Instant.parse("2026-05-10T00:00:00Z"),
@@ -178,14 +193,32 @@ class SleepSessionAnalyzerTest {
             startDate = today,
             endDate = today,
             zoneId = zoneId
-        )
+        ).single()
 
-        assertEquals(SleepQualityBand.GOOD, summary.typicalQuality)
+        assertEquals(SleepQualityBand.GOOD, summary.qualityBand)
+    }
+
+    @Test
+    fun extremeStageChurnDoesNotProduceAGreenDay() {
+        val summary = SleepSessionAnalyzer.dailySummaries(
+            sessions = listOf(
+                SleepSessionInput(
+                    start = Instant.parse("2026-05-10T00:00:00Z"),
+                    end = Instant.parse("2026-05-10T07:30:00Z"),
+                    stageCount = 125
+                )
+            ),
+            startDate = today,
+            endDate = today,
+            zoneId = zoneId
+        ).single()
+
+        assertEquals(SleepQualityBand.FRAGMENTED, summary.qualityBand)
     }
 
     @Test
     fun multipleShortSessionsAggregateByDay() {
-        val summary = SleepSessionAnalyzer.summarizeRange(
+        val summary = SleepSessionAnalyzer.dailySummaries(
             sessions = listOf(
                 SleepSessionInput(
                     start = Instant.parse("2026-05-10T01:00:00Z"),
@@ -201,10 +234,33 @@ class SleepSessionAnalyzerTest {
             startDate = today,
             endDate = today,
             zoneId = zoneId
+        ).single()
+
+        assertEquals(SleepQualityBand.SHORT, summary.qualityBand)
+    }
+
+    @Test
+    fun averagesSessionsInsteadOfDailyTotalsAndKeepsLatestDuration() {
+        val summary = SleepSessionAnalyzer.summarizeRange(
+            sessions = listOf(
+                SleepSessionInput(
+                    start = Instant.parse("2026-05-10T01:00:00Z"),
+                    end = Instant.parse("2026-05-10T03:00:00Z"),
+                    stageCount = 1
+                ),
+                SleepSessionInput(
+                    start = Instant.parse("2026-05-10T14:00:00Z"),
+                    end = Instant.parse("2026-05-10T18:00:00Z"),
+                    stageCount = 1
+                )
+            ),
+            startDate = today,
+            endDate = today,
+            zoneId = zoneId
         )
 
-        assertEquals(SleepQualityBand.SHORT, summary.typicalQuality)
-        assertEquals(2, summary.napCount)
+        assertEquals(Duration.ofHours(3), summary.averageSessionDuration)
+        assertEquals(Duration.ofHours(4), summary.lastSessionDuration)
     }
 
     @Test
@@ -238,5 +294,26 @@ class SleepSessionAnalyzerTest {
 
         assertEquals(LocalDate.of(2026, 4, 27), model.boxes.first().startDate)
         assertEquals(LocalDate.of(2026, 5, 31), model.boxes.last().startDate)
+    }
+
+    @Test
+    fun monthlyMatrixKeepsSleepQualityForPreviousMonthPaddingDays() {
+        val model = SleepSessionAnalyzer.monthlyMatrix(
+            sessions = listOf(
+                SleepSessionInput(
+                    start = Instant.parse("2026-04-30T14:00:00Z"),
+                    end = Instant.parse("2026-04-30T21:00:00Z"),
+                    stageCount = 4
+                )
+            ),
+            startDate = LocalDate.of(2026, 5, 1),
+            endDate = LocalDate.of(2026, 5, 31),
+            zoneId = zoneId,
+            weekStart = DayOfWeek.SUNDAY
+        )
+
+        val paddingDay = model.boxes.single { it.startDate == LocalDate.of(2026, 4, 30) }
+        assertEquals(SleepQualityBand.GOOD, paddingDay.qualityBand)
+        assertEquals(1, paddingDay.sessionCount)
     }
 }

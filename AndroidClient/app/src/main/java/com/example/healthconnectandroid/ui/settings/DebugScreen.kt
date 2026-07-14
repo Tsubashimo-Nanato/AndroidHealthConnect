@@ -135,11 +135,11 @@ fun DebugToolsSection(
         modifier = Modifier.rowFadeIn(firstRowIndex + 4)
     ) {
         Text(
-            uiText("Removing local data clears app rows and sync history. Health Connect data is not deleted."),
+            uiText("Choose a retention range before deleting this app's health data. Health Connect source data and medicine history are not deleted."),
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         OutlinedButton(onClick = onRequestClear, modifier = Modifier.fillMaxWidth()) {
-            Text(uiText("Remove Local Data"))
+            Text(uiText("Release local data"))
         }
     }
 

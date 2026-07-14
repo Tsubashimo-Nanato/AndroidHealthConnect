@@ -238,11 +238,11 @@ private val sleepStageDisplayOrder = listOf(
     "Unknown"
 )
 
-private fun sleepStageLabel(stage: ReadableHealthRecord): String =
+internal fun sleepStageLabel(stage: ReadableHealthRecord): String =
     stage.detailFields.firstOrNull { it.label == "Sleep stage" }?.value
         ?: stage.primaryText.substringBefore(" - ").ifBlank { "Unknown" }
 
-private fun sleepStageColor(label: String): Color {
+internal fun sleepStageColor(label: String): Color {
     val normalized = label.lowercase()
     return when {
         "out of bed" in normalized -> Color(0xFFB86A3A)

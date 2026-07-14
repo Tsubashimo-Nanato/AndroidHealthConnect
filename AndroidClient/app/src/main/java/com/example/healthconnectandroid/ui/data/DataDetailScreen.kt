@@ -128,6 +128,7 @@ fun HealthDataDetailScreen(
     var heartRateVisibleRange by remember(dataTypeKey, range) { mutableStateOf<ChartVisibleRange?>(null) }
     val detailScrollState = rememberScrollState()
     var pendingSleepScrollRestore by remember(dataTypeKey) { mutableStateOf<Int?>(null) }
+    var sleepControlsExpanded by remember(dataTypeKey) { mutableStateOf(false) }
     val permissionStatus = descriptor.permissionStatus(grantedPermissions)
     val permissionGranted = permissionStatus == HealthDataPermissionStatus.GRANTED
     val isSleep = descriptor.key == HealthDataTypeKeys.SLEEP_SESSION
@@ -138,7 +139,6 @@ fun HealthDataDetailScreen(
             isSleep = isSleep,
             range = range,
             sleepWindowEndDate = sleepWindowEndDate,
-            weekStart = weekStart,
             zoneId = zoneId
         )
 
@@ -147,7 +147,6 @@ fun HealthDataDetailScreen(
             isSleep = isSleep,
             range = range,
             sleepWindowEndDate = sleepWindowEndDate,
-            weekStart = weekStart,
             zoneId = zoneId
         )
 
@@ -192,7 +191,7 @@ fun HealthDataDetailScreen(
     }
 
     val sleepQueryWindow = remember(isSleep, range, sleepDataWindowCenterDate, weekStart, zoneId) {
-        if (isSleep) sleepDataQueryWindow(range, sleepDataWindowCenterDate, weekStart, zoneId) else null
+        if (isSleep) sleepDataQueryWindow(range, sleepDataWindowCenterDate, zoneId) else null
     }
     val sleepLoadKey = sleepQueryWindow?.key ?: "standard"
     val heartRateChartQueryRange = remember(isHeartRate, selectedHeartRateDates, zoneId) {
@@ -288,51 +287,26 @@ fun HealthDataDetailScreen(
             .verticalScroll(detailScrollState),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        AppSection(
-            modifier = Modifier.rowFadeIn(0),
-            title = descriptor.displayName,
-            subtitle = if (isHeartRate) {
-                detail?.let { lastSyncedDataText(it.lastSynced, zoneId) } ?: "Last synced data: loading"
-            } else {
-                "Last synced data: ${range.label}"
-            }
-        ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                StatusBadge(
-                    implementationStatusText(descriptor.implementationStatus),
-                    implementationTone(descriptor.implementationStatus)
-                )
-                StatusBadge(permissionStatusText(permissionStatus), permissionTone(permissionStatus))
-                StatusBadge(visualizationLabel(descriptor.visualizationType), StatusTone.Info)
-            }
-            StatusMessageCard(status)
-            val syncEnabled = permissionGranted &&
-                descriptor.implementationStatus == HealthDataImplementationStatus.IMPLEMENTED &&
-                !syncInProgress
-            AppActionRow {
-                SecondaryActionButton(
-                    modifier = Modifier.weight(1f),
-                    label = "Quick Sync",
-                    enabled = syncEnabled,
-                    onClick = { launchSelectedSync("Quick syncing", quickSyncRange()) }
-                )
-                PrimaryActionButton(
-                    modifier = Modifier.weight(1f),
-                    label = if (syncInProgress) "Syncing..." else "Sync all",
-                    enabled = syncEnabled,
-                    onClick = { launchSelectedSync("Syncing", selectedSyncRange()) }
-                )
-            }
-            if (syncInProgress) {
-                SecondaryActionButton(
-                    label = "Cancel Sync",
-                    onClick = { selectedSyncJob?.cancel() }
-                )
-            }
-            SyncProgressCard(selectedSyncProgress)
-            SecondaryActionButton(
-                label = "Export All ${descriptor.displayName} CSV",
-                onClick = { onExportType(dataTypeKey) }
+        if (!isSleep) {
+            DetailSyncControlsSection(
+                modifier = Modifier.rowFadeIn(0),
+                descriptor = descriptor,
+                subtitle = if (isHeartRate) {
+                    detail?.let { lastSyncedDataText(it.lastSynced, zoneId) } ?: "Last synced data: loading"
+                } else {
+                    "Last synced data: ${range.label}"
+                },
+                status = status,
+                permissionStatus = permissionStatus,
+                permissionGranted = permissionGranted,
+                syncInProgress = syncInProgress,
+                syncProgress = selectedSyncProgress,
+                expanded = true,
+                onExpandedChange = null,
+                onQuickSync = { launchSelectedSync("Quick syncing", quickSyncRange()) },
+                onSyncAll = { launchSelectedSync("Syncing", selectedSyncRange()) },
+                onCancelSync = { selectedSyncJob?.cancel() },
+                onExport = { onExportType(dataTypeKey) }
             )
         }
 
@@ -344,8 +318,8 @@ fun HealthDataDetailScreen(
                 SleepInsightSummary(
                     detail = loaded,
                     sessionModels = sleepModels,
-                    startDate = sleepVisibleStartDate(range, sleepWindowEndDate, weekStart),
-                    endDate = sleepVisibleEndDate(range, sleepWindowEndDate, weekStart),
+                    startDate = sleepVisibleStartDate(range, sleepWindowEndDate),
+                    endDate = sleepVisibleEndDate(range, sleepWindowEndDate),
                     zoneId = zoneId
                 )
             } else if (!isHeartRate) {
@@ -378,7 +352,7 @@ fun HealthDataDetailScreen(
                         zoneId = zoneId
                     )
                 }
-                val matrixKey = sleepMatrixKey(range, sleepWindowEndDate, weekStart)
+                val matrixKey = sleepMatrixKey(range, sleepWindowEndDate)
                 val matrixModel = matrixCache[matrixKey]
                     ?: sleepMatrixForAnchor(range, sleepInputs, sleepWindowEndDate, weekStart, zoneId)
                 val matrixSessionCount = remember(matrixModel) {
@@ -412,8 +386,9 @@ fun HealthDataDetailScreen(
                             sleepDataWindowCenterDate = LocalDate.now(zoneId)
                         }
                     },
-                    windowLabel = sleepWindowLabel(range, sleepWindowEndDate, weekStart),
+                    windowLabel = sleepWindowLabel(range, sleepWindowEndDate),
                     model = matrixModel,
+                    sessionModels = sleepModels,
                     selectedBoxIds = selectedSleepBoxIds,
                     onSelectedBoxIdsChange = {
                         pendingSleepScrollRestore = detailScrollState.value
@@ -422,13 +397,14 @@ fun HealthDataDetailScreen(
                     onPanCells = { cells ->
                         if (cells != 0) {
                             pendingSleepScrollRestore = detailScrollState.value
-                            val shifted = sleepShiftWindowDate(range, sleepWindowEndDate, cells, weekStart, zoneId)
+                            val shifted = sleepShiftWindowDate(range, sleepWindowEndDate, cells, zoneId)
                             sleepWindowEndDate = shifted
                             if (!sleepAnchorInsideQueryWindow(range, shifted, sleepDataWindowCenterDate)) {
                                 sleepDataWindowCenterDate = shifted
                             }
                         }
                     },
+                    zoneId = zoneId,
                     onGestureDiagnostic = { action, deltaSnap, selectedCount ->
                         diagnostics.recordMatrixGesture(
                             matrixType = "Sleep",
@@ -624,6 +600,23 @@ fun HealthDataDetailScreen(
                 syncRange = selectedSyncRange(),
                 heartRateChartRange = heartRateVisibleRange
             )
+            if (isSleep) {
+                DetailSyncControlsSection(
+                    descriptor = descriptor,
+                    subtitle = "Last synced data: ${range.label}",
+                    status = status,
+                    permissionStatus = permissionStatus,
+                    permissionGranted = permissionGranted,
+                    syncInProgress = syncInProgress,
+                    syncProgress = selectedSyncProgress,
+                    expanded = sleepControlsExpanded,
+                    onExpandedChange = { sleepControlsExpanded = it },
+                    onQuickSync = { launchSelectedSync("Quick syncing", quickSyncRange()) },
+                    onSyncAll = { launchSelectedSync("Syncing", selectedSyncRange()) },
+                    onCancelSync = { selectedSyncJob?.cancel() },
+                    onExport = { onExportType(dataTypeKey) }
+                )
+            }
         } ?: if (detailLoading) {
             LoadingStateCard(
                 title = "Loading ${descriptor.displayName}",
@@ -635,6 +628,73 @@ fun HealthDataDetailScreen(
                 message = "No local rows were loaded for the selected range."
             )
         }
+    }
+}
+
+@Composable
+private fun DetailSyncControlsSection(
+    descriptor: HealthDataTypeDescriptor,
+    subtitle: String,
+    status: String,
+    permissionStatus: HealthDataPermissionStatus,
+    permissionGranted: Boolean,
+    syncInProgress: Boolean,
+    syncProgress: SyncProgress?,
+    expanded: Boolean,
+    onExpandedChange: ((Boolean) -> Unit)?,
+    onQuickSync: () -> Unit,
+    onSyncAll: () -> Unit,
+    onCancelSync: () -> Unit,
+    onExport: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    AppSection(
+        modifier = modifier,
+        title = descriptor.displayName,
+        subtitle = subtitle
+    ) {
+        onExpandedChange?.let { setExpanded ->
+            SecondaryActionButton(
+                label = if (expanded) "Hide sync controls" else "Show sync controls",
+                onClick = { setExpanded(!expanded) }
+            )
+        }
+        if (!expanded) return@AppSection
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            StatusBadge(
+                implementationStatusText(descriptor.implementationStatus),
+                implementationTone(descriptor.implementationStatus)
+            )
+            StatusBadge(permissionStatusText(permissionStatus), permissionTone(permissionStatus))
+            StatusBadge(visualizationLabel(descriptor.visualizationType), StatusTone.Info)
+        }
+        StatusMessageCard(status)
+        val syncEnabled = permissionGranted &&
+            descriptor.implementationStatus == HealthDataImplementationStatus.IMPLEMENTED &&
+            !syncInProgress
+        AppActionRow {
+            SecondaryActionButton(
+                modifier = Modifier.weight(1f),
+                label = "Quick Sync",
+                enabled = syncEnabled,
+                onClick = onQuickSync
+            )
+            PrimaryActionButton(
+                modifier = Modifier.weight(1f),
+                label = if (syncInProgress) "Syncing..." else "Sync all",
+                enabled = syncEnabled,
+                onClick = onSyncAll
+            )
+        }
+        if (syncInProgress) {
+            SecondaryActionButton(label = "Cancel Sync", onClick = onCancelSync)
+        }
+        SyncProgressCard(syncProgress)
+        SecondaryActionButton(
+            label = "Export All ${descriptor.displayName} CSV",
+            onClick = onExport
+        )
     }
 }
 

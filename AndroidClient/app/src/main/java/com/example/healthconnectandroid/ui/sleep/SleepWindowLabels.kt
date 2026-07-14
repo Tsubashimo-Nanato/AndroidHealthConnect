@@ -9,7 +9,6 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
-import java.time.temporal.TemporalAdjusters
 import java.util.Locale
 
 data class SleepQueryWindow(
@@ -29,13 +28,15 @@ fun sleepMatrixForAnchor(
         InspectorTimeRange.MONTHLY -> SleepSessionAnalyzer.monthlyMatrix(
             sessions = sessions,
             startDate = anchorDate.withDayOfMonth(1),
-            endDate = anchorDate.withDayOfMonth(anchorDate.lengthOfMonth()),
+            endDate = anchorDate
+                .withDayOfMonth(anchorDate.lengthOfMonth())
+                .coerceAtMost(LocalDate.now(zoneId)),
             zoneId = zoneId,
             weekStart = weekStart
         )
         else -> SleepSessionAnalyzer.weeklyMatrix(
             sessions = sessions,
-            startDate = sleepVisibleStartDate(range, anchorDate, weekStart),
+            startDate = sleepVisibleStartDate(range, anchorDate),
             zoneId = zoneId
         )
     }
@@ -58,30 +59,23 @@ fun sleepMatrixCache(
 
 fun sleepVisibleStartDate(
     range: InspectorTimeRange,
-    anchorDate: LocalDate,
-    weekStart: DayOfWeek = DayOfWeek.SUNDAY
+    anchorDate: LocalDate
 ): LocalDate =
     if (range == InspectorTimeRange.MONTHLY) {
         anchorDate.withDayOfMonth(1)
-    } else {
-        anchorDate.with(TemporalAdjusters.previousOrSame(weekStart))
-    }
+    } else anchorDate.minusDays(6)
 
 fun sleepVisibleEndDate(
     range: InspectorTimeRange,
-    anchorDate: LocalDate,
-    weekStart: DayOfWeek = DayOfWeek.SUNDAY
+    anchorDate: LocalDate
 ): LocalDate =
     if (range == InspectorTimeRange.MONTHLY) {
         anchorDate.withDayOfMonth(anchorDate.lengthOfMonth())
-    } else {
-        sleepVisibleStartDate(range, anchorDate, weekStart).plusDays(6)
-    }
+    } else anchorDate
 
 fun sleepWindowEndInstant(
     range: InspectorTimeRange,
     anchorDate: LocalDate,
-    weekStart: DayOfWeek = DayOfWeek.SUNDAY,
     zoneId: ZoneId = ZoneId.systemDefault(),
     now: Instant = Instant.now()
 ): Instant {
@@ -94,17 +88,16 @@ fun sleepWindowEndInstant(
         } else {
             monthStart.plusMonths(1).atStartOfDay(zoneId).toInstant()
         }
-    } else if (sleepVisibleEndDate(range, anchorDate, weekStart) >= today) {
+    } else if (sleepVisibleEndDate(range, anchorDate) >= today) {
         now
     } else {
-        sleepVisibleEndDate(range, anchorDate, weekStart).plusDays(1).atStartOfDay(zoneId).toInstant()
+        sleepVisibleEndDate(range, anchorDate).plusDays(1).atStartOfDay(zoneId).toInstant()
     }
 }
 
 fun sleepDataQueryWindow(
     range: InspectorTimeRange,
     centerDate: LocalDate,
-    weekStart: DayOfWeek = DayOfWeek.SUNDAY,
     zoneId: ZoneId = ZoneId.systemDefault()
 ): SleepQueryWindow {
     val today = LocalDate.now(zoneId)
@@ -120,38 +113,35 @@ fun sleepDataQueryWindow(
         }
         SleepQueryWindow(start = start, end = end, key = "month:${centerMonth}")
     } else {
-        val centerStart = centerDate.with(TemporalAdjusters.previousOrSame(weekStart))
-        val startDate = centerStart.minusWeeks(3)
-        val endDate = centerStart.plusWeeks(3).plusDays(6).coerceAtMost(today)
+        val startDate = centerDate.minusWeeks(3).minusDays(6)
+        val endDate = centerDate.plusWeeks(3).coerceAtMost(today)
         val end = if (endDate == today) Instant.now() else endDate.plusDays(1).atStartOfDay(zoneId).toInstant()
         SleepQueryWindow(
             start = startDate.atStartOfDay(zoneId).toInstant(),
             end = end,
-            key = "week:${centerStart}"
+            key = "week:${centerDate}"
         )
     }
 }
 
 fun sleepMatrixKey(
     range: InspectorTimeRange,
-    anchorDate: LocalDate,
-    weekStart: DayOfWeek = DayOfWeek.SUNDAY
+    anchorDate: LocalDate
 ): String =
     if (range == InspectorTimeRange.MONTHLY) {
         "month:${anchorDate.withDayOfMonth(1)}"
     } else {
-        "week:${sleepVisibleStartDate(range, anchorDate, weekStart)}"
+        "week:${sleepVisibleStartDate(range, anchorDate)}"
     }
 
 fun sleepWindowLabel(
     range: InspectorTimeRange,
-    anchorDate: LocalDate,
-    weekStart: DayOfWeek = DayOfWeek.SUNDAY
+    anchorDate: LocalDate
 ): String =
     if (range == InspectorTimeRange.MONTHLY) {
         anchorDate.withDayOfMonth(1).format(DateTimeFormatter.ofPattern("MMMM yyyy", Locale.US))
     } else {
-        val start = sleepVisibleStartDate(range, anchorDate, weekStart)
+        val start = sleepVisibleStartDate(range, anchorDate)
         compactSleepWeekLabel(start, start.plusDays(6))
     }
 
@@ -169,7 +159,6 @@ fun sleepShiftWindowDate(
     range: InspectorTimeRange,
     anchorDate: LocalDate,
     cells: Int,
-    weekStart: DayOfWeek = DayOfWeek.SUNDAY,
     zoneId: ZoneId = ZoneId.systemDefault()
 ): LocalDate {
     val today = LocalDate.now(zoneId)
@@ -178,8 +167,7 @@ fun sleepShiftWindowDate(
         val targetMonth = anchorDate.withDayOfMonth(1).plusMonths(cells.coerceIn(-1, 1).toLong())
         if (targetMonth.isAfter(currentMonth)) today else targetMonth
     } else {
-        val currentWeekStart = anchorDate.with(TemporalAdjusters.previousOrSame(weekStart))
-        currentWeekStart.plusWeeks(cells.coerceIn(-1, 1).toLong()).coerceAtMost(today)
+        anchorDate.plusWeeks(cells.coerceIn(-1, 1).toLong()).coerceAtMost(today)
     }
 }
 

@@ -16,12 +16,16 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         HealthSyncCoverageEntity::class,
         HealthAggregateEntity::class,
         HealthUploadAckEntity::class,
+        HealthCatalogSnapshotEntity::class,
+        HealthDailyArchiveEntity::class,
+        HealthSleepArchiveEntity::class,
+        HealthRetentionStateEntity::class,
         MedicineItemEntity::class,
         MedicineScheduleEntity::class,
         MedicineReminderSettingEntity::class,
         MedicineDoseLogEntity::class
     ],
-    version = 13,
+    version = 15,
     exportSchema = false
 )
 abstract class AppDb : RoomDatabase() {
@@ -31,6 +35,8 @@ abstract class AppDb : RoomDatabase() {
     abstract fun healthSyncCoverageDao(): HealthSyncCoverageDao
     abstract fun healthAggregateDao(): HealthAggregateDao
     abstract fun healthUploadDao(): HealthUploadDao
+    abstract fun healthCatalogSnapshotDao(): HealthCatalogSnapshotDao
+    abstract fun healthRetentionDao(): HealthRetentionDao
     abstract fun medicineDao(): MedicineDao
 
     companion object {
@@ -472,6 +478,116 @@ abstract class AppDb : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_13_14 = object : Migration(13, 14) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // The first snapshot is built after opening so migration never scans a large health database.
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `health_catalog_snapshot` (
+                        `recordType` TEXT NOT NULL,
+                        `recordCount` INTEGER NOT NULL,
+                        `recentRecordCount` INTEGER NOT NULL,
+                        `lastSyncedEpochMillis` INTEGER,
+                        `lastSyncStatus` TEXT,
+                        `lastSyncError` TEXT,
+                        `latestRecordEpochMillis` INTEGER,
+                        `summaryText` TEXT NOT NULL,
+                        `latestMetric` TEXT,
+                        `latestPrimaryText` TEXT,
+                        `latestSecondaryText` TEXT,
+                        `latestValue` REAL,
+                        `latestSecondaryValue` REAL,
+                        `latestUnit` TEXT,
+                        `latestStartEpochMillis` INTEGER,
+                        `latestEndEpochMillis` INTEGER,
+                        `latestLocalDate` TEXT,
+                        `latestDurationText` TEXT,
+                        `todayLocalDate` TEXT,
+                        `todayTotal` REAL,
+                        `todayUnit` TEXT,
+                        `zoneId` TEXT NOT NULL,
+                        `generatedAtEpochMillis` INTEGER NOT NULL,
+                        `dirty` INTEGER NOT NULL,
+                        PRIMARY KEY(`recordType`)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_health_catalog_snapshot_dirty` " +
+                        "ON `health_catalog_snapshot` (`dirty`)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_health_catalog_snapshot_generatedAtEpochMillis` " +
+                        "ON `health_catalog_snapshot` (`generatedAtEpochMillis`)"
+                )
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `health_daily_archive` (
+                        `sourceRecordLocalId` INTEGER NOT NULL,
+                        `metric` TEXT NOT NULL,
+                        `recordType` TEXT NOT NULL,
+                        `localDate` TEXT NOT NULL,
+                        `sampleCount` INTEGER NOT NULL,
+                        `totalValue` REAL NOT NULL,
+                        `minValue` REAL NOT NULL,
+                        `maxValue` REAL NOT NULL,
+                        `unit` TEXT,
+                        `lastSampleEpochMillis` INTEGER,
+                        `archivedAtEpochMillis` INTEGER NOT NULL,
+                        PRIMARY KEY(`sourceRecordLocalId`, `metric`)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_health_daily_archive_recordType_localDate` ON `health_daily_archive` (`recordType`, `localDate`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_health_daily_archive_localDate` ON `health_daily_archive` (`localDate`)")
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `health_sleep_archive` (
+                        `sourceRecordLocalId` INTEGER NOT NULL,
+                        `sourceValueLocalId` INTEGER NOT NULL,
+                        `valueKey` TEXT NOT NULL,
+                        `recordStartEpochMillis` INTEGER NOT NULL,
+                        `recordEndEpochMillis` INTEGER,
+                        `valueStartEpochMillis` INTEGER,
+                        `valueEndEpochMillis` INTEGER,
+                        `localDate` TEXT NOT NULL,
+                        `metric` TEXT NOT NULL,
+                        `numericValue` REAL,
+                        `secondaryNumericValue` REAL,
+                        `unit` TEXT,
+                        `category` TEXT,
+                        `label` TEXT,
+                        `textValue` TEXT,
+                        `jsonValue` TEXT,
+                        `sourcePackage` TEXT,
+                        `archivedAtEpochMillis` INTEGER NOT NULL,
+                        PRIMARY KEY(`sourceRecordLocalId`, `sourceValueLocalId`)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_health_sleep_archive_localDate` ON `health_sleep_archive` (`localDate`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_health_sleep_archive_recordStartEpochMillis` ON `health_sleep_archive` (`recordStartEpochMillis`)")
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `health_retention_state` (
+                        `recordType` TEXT NOT NULL,
+                        `archivedBeforeEpochMillis` INTEGER NOT NULL,
+                        `updatedAtEpochMillis` INTEGER NOT NULL,
+                        PRIMARY KEY(`recordType`)
+                    )
+                    """.trimIndent()
+                )
+            }
+        }
+
+        private val MIGRATION_14_15 = object : Migration(14, 15) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Pending and retention reads use the acknowledgement primary key; these indexes only amplified writes.
+                db.execSQL("DROP INDEX IF EXISTS `index_health_upload_ack_serverKey_batchId`")
+                db.execSQL("DROP INDEX IF EXISTS `index_health_upload_ack_serverKey_uploadedAtEpochMillis`")
+            }
+        }
+
         fun get(context: Context): AppDb =
             INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(
@@ -490,7 +606,9 @@ abstract class AppDb : RoomDatabase() {
                         MIGRATION_9_10,
                         MIGRATION_10_11,
                         MIGRATION_11_12,
-                        MIGRATION_12_13
+                        MIGRATION_12_13,
+                        MIGRATION_13_14,
+                        MIGRATION_14_15
                     )
                     .build()
                     .also { INSTANCE = it }

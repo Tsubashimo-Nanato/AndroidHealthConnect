@@ -23,7 +23,6 @@ import com.example.healthconnectandroid.hc.ReadableHealthRecord
 import com.example.healthconnectandroid.hc.SleepQualityBand
 import com.example.healthconnectandroid.hc.SleepSessionAnalysis
 import com.example.healthconnectandroid.hc.SleepTagTone
-import com.example.healthconnectandroid.ui.StatusTone
 import com.example.healthconnectandroid.ui.format.MetricDisplayFormatter
 import com.example.healthconnectandroid.ui.i18n.uiText
 import java.time.ZoneId
@@ -106,24 +105,7 @@ private fun SleepTagRow(analysis: SleepSessionAnalysis, stageCount: Int) {
 
 @Composable
 fun sleepQualityContainerColor(band: SleepQualityBand): Color =
-    when (band) {
-        SleepQualityBand.GOOD -> Color(0xFF204E35).copy(alpha = 0.26f)
-        SleepQualityBand.FAIR -> Color(0xFF2F5C43).copy(alpha = 0.22f)
-        SleepQualityBand.NAP -> Color(0xFF173B38).copy(alpha = 0.24f)
-        SleepQualityBand.FRAGMENTED -> MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.22f)
-        SleepQualityBand.SHORT -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.24f)
-        SleepQualityBand.UNKNOWN -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.22f)
-    }
-
-fun sleepQualityStatusTone(band: SleepQualityBand): StatusTone =
-    when (band) {
-        SleepQualityBand.GOOD -> StatusTone.Success
-        SleepQualityBand.FAIR -> StatusTone.Success
-        SleepQualityBand.NAP -> StatusTone.Info
-        SleepQualityBand.FRAGMENTED -> StatusTone.Warning
-        SleepQualityBand.SHORT -> StatusTone.Error
-        SleepQualityBand.UNKNOWN -> StatusTone.Neutral
-    }
+    sleepQualityColors(band).cardContainer
 
 @Composable
 private fun SleepTagBadge(
@@ -139,9 +121,9 @@ private fun SleepTagBadge(
             Color(0xFF6F99C8)
         )
         SleepTagTone.NAP -> Triple(
-            Color(0xFF173B38).copy(alpha = 0.78f),
-            Color(0xFFCBECE7),
-            Color(0xFF69A8A0)
+            Color(0xFF30375F).copy(alpha = 0.82f),
+            Color(0xFFE2E5FA),
+            Color(0xFF7884BD)
         )
         SleepTagTone.SUCCESS -> Triple(
             Color(0xFF183327),

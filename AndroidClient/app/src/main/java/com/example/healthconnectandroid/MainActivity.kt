@@ -15,17 +15,15 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.result.contract.ActivityResultContracts.CreateDocument
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -45,11 +43,16 @@ import com.example.healthconnectandroid.hc.PeriodicSyncPreferences
 import com.example.healthconnectandroid.hc.buildHcPermissionIntent
 import com.example.healthconnectandroid.hc.export.HealthCsvExporter
 import com.example.healthconnectandroid.hc.export.HealthZipExporter
+import com.example.healthconnectandroid.hc.local.LocalDataRemovalPhase
+import com.example.healthconnectandroid.hc.local.LocalDataRemovalProgress
 import com.example.healthconnectandroid.hc.local.LocalDataService
 import com.example.healthconnectandroid.hc.query.HealthDashboardQueryService
+import com.example.healthconnectandroid.hc.query.CatalogRefreshPolicy
 import com.example.healthconnectandroid.hc.query.HealthDataCatalogQueryService
 import com.example.healthconnectandroid.hc.query.HealthDetailQueryService
 import com.example.healthconnectandroid.hc.query.HealthRecordDetailQueryService
+import com.example.healthconnectandroid.hc.retention.HealthRetentionWorker
+import com.example.healthconnectandroid.hc.retention.HealthDatabaseCompactionWorker
 import com.example.healthconnectandroid.hc.sync.HealthSyncService
 import com.example.healthconnectandroid.hc.sync.SyncMode
 import com.example.healthconnectandroid.hc.sync.SyncProgress
@@ -60,6 +63,9 @@ import com.example.healthconnectandroid.hc.upload.HealthUploadWorker
 import com.example.healthconnectandroid.hc.upload.UploadAutoQueueDecision
 import com.example.healthconnectandroid.hc.upload.UploadAutoQueuePolicy
 import com.example.healthconnectandroid.hc.upload.UploadDebugModePolicy
+import com.example.healthconnectandroid.hc.upload.UploadEndpointPolicy
+import com.example.healthconnectandroid.hc.upload.UploadEndpointValidation
+import com.example.healthconnectandroid.hc.upload.UploadServerMode
 import com.example.healthconnectandroid.hc.upload.UploadPendingCounts
 import com.example.healthconnectandroid.hc.upload.UploadProgress
 import com.example.healthconnectandroid.hc.upload.UploadResultSeverity
@@ -92,9 +98,11 @@ import com.example.healthconnectandroid.ui.settings.SettingsDataFlowScreen
 import com.example.healthconnectandroid.ui.settings.SettingsMedicineScreen
 import com.example.healthconnectandroid.ui.settings.SettingsPreferencesScreen
 import com.example.healthconnectandroid.ui.settings.SettingsScreen
+import com.example.healthconnectandroid.ui.settings.LocalDataRemovalDialog
 import com.example.healthconnectandroid.ui.format.toDisplayPreferences
 import com.example.healthconnectandroid.ui.i18n.LocalAppLanguage
 import com.example.healthconnectandroid.ui.i18n.uiText
+import com.example.healthconnectandroid.ui.i18n.translateUiText
 import com.example.healthconnectandroid.ui.theme.HealthConnectAndroidTheme
 import com.example.healthconnectandroid.ui.StatusTone
 import com.example.healthconnectandroid.ui.UploadRetryAction
@@ -106,8 +114,10 @@ import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 import java.time.Instant
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private val HR_PERMISSION = HealthDataTypeRegistry.heartRate.requiredReadPermission
     ?: error("Heart rate record must expose a Health Connect read permission")
@@ -290,7 +300,7 @@ class MainActivity : ComponentActivity() {
 
         val db = AppDb.get(this)
         val dashboardQueries = HealthDashboardQueryService(db)
-        val catalogQueries = HealthDataCatalogQueryService(db)
+        val catalogQueries = HealthDataCatalogQueryService(this, db)
         val detailQueries = HealthDetailQueryService(db)
         val recordQueries = HealthRecordDetailQueryService(db)
         val localDataService = LocalDataService(db)
@@ -357,12 +367,14 @@ class MainActivity : ComponentActivity() {
             mutableStateOf(PeriodicSyncPreferences.lastSummary(this@MainActivity))
         }
         var localHealthStatus by remember { mutableStateOf<LocalHealthStatus?>(null) }
+        var dataCatalogRevision by remember { mutableIntStateOf(0) }
         var status by remember { mutableStateOf("Ready") }
         var dashboardStatusTone by remember { mutableStateOf(StatusTone.Neutral) }
         var actionInProgress by remember { mutableStateOf<AppAction?>(null) }
         var syncProgress by remember { mutableStateOf<SyncProgress?>(null) }
         var fullSyncJob by remember { mutableStateOf<Job?>(null) }
-        var showClearConfirm by remember { mutableStateOf(false) }
+        var showLocalDataRemoval by remember { mutableStateOf(false) }
+        var localDataRemovalProgress by remember { mutableStateOf<LocalDataRemovalProgress?>(null) }
         var debugEnabled by remember { mutableStateOf(AppPreferences.debugModeEnabled(this@MainActivity)) }
         var themeMode by remember { mutableStateOf(AppPreferences.themeMode(this@MainActivity)) }
         var themePalette by remember { mutableStateOf(AppPreferences.themePalette(this@MainActivity)) }
@@ -423,6 +435,13 @@ class MainActivity : ComponentActivity() {
             scope.launch {
                 localHealthStatus = runCatching { dashboardQueries.localHealthStatus() }.getOrNull()
             }
+        }
+
+        fun invalidateDataCatalog(recordTypes: Set<String>? = null) {
+            scope.launch {
+                catalogQueries.invalidate(recordTypes, displayPreferences.zoneId)
+            }
+            dataCatalogRevision++
         }
 
         fun refreshUploadStatus() {
@@ -646,6 +665,7 @@ class MainActivity : ComponentActivity() {
                         diagnostics.recordSyncProgress(progress)
                     }
                 } catch (t: CancellationException) {
+                    invalidateDataCatalog()
                     status = "Full resync cancelled"
                     diagnostics.recordSyncCancelled(SyncMode.FULL_HISTORY)
                     syncProgress = syncProgress?.copy(
@@ -656,12 +676,14 @@ class MainActivity : ComponentActivity() {
                     fullSyncJob = null
                     return@launch
                 } catch (t: Throwable) {
+                    invalidateDataCatalog()
                     status = "Full resync failed: ${t.message}"
                     diagnostics.recordSyncFailure(SyncMode.FULL_HISTORY, null, null, null)
                     actionInProgress = null
                     fullSyncJob = null
                     return@launch
                 }
+                invalidateDataCatalog(CatalogRefreshPolicy.changedRecordTypes(results))
                 diagnostics.recordSyncResults(SyncMode.FULL_HISTORY, results)
                 status = syncAllStatusText(results, "Full resync")
                 localHealthStatus = runCatching { dashboardQueries.localHealthStatus() }.getOrNull()
@@ -684,11 +706,13 @@ class MainActivity : ComponentActivity() {
                         diagnostics.recordSyncProgress(progress)
                     }
                 }.getOrElse {
+                    invalidateDataCatalog()
                     status = "Background sync failed: ${it.message}"
                     diagnostics.recordSyncFailure(SyncMode.PERIODIC, null, null, null)
                     actionInProgress = null
                     return@launch
                 }
+                invalidateDataCatalog(CatalogRefreshPolicy.changedRecordTypes(results))
                 diagnostics.recordSyncResults(SyncMode.PERIODIC, results)
                 val summary = syncAllStatusText(results, "Background sync now")
                 PeriodicSyncPreferences.markFinished(
@@ -774,6 +798,11 @@ class MainActivity : ComponentActivity() {
                     uploadStatus = result.toStatus()
                     AppPreferences.setUploadStatus(this@MainActivity, uploadStatus)
                     uploadPendingCounts = result.pendingCounts
+                    if (result.success && settings.serverMode == UploadServerMode.PRODUCTION) {
+                        val endpoint = (UploadEndpointPolicy.validate(settings) as? UploadEndpointValidation.Valid)
+                            ?.endpoint
+                        endpoint?.let { HealthRetentionWorker.enqueue(this@MainActivity, it.serverKey) }
+                    }
                     val completion = uploadCompletionStatus(result, range)
                     if (completion.retryAction == UploadRetryAction.QUEUE_ALL) {
                         HealthUploadWorker.enqueue(this@MainActivity)
@@ -798,6 +827,15 @@ class MainActivity : ComponentActivity() {
         }
 
         fun runSmartSync() {
+            if (actionInProgress != null) {
+                status = if (actionInProgress == AppAction.CLEAR_LOCAL_DATA) {
+                    "Local data removal is still running"
+                } else {
+                    "Another action is still running"
+                }
+                dashboardStatusTone = StatusTone.Info
+                return
+            }
             scope.launch {
                 actionInProgress = AppAction.SMART_SYNC
                 syncProgress = null
@@ -809,12 +847,14 @@ class MainActivity : ComponentActivity() {
                         diagnostics.recordSyncProgress(progress)
                     }
                 }.getOrElse {
+                    invalidateDataCatalog()
                     status = "Smart sync failed: ${it.message}"
                     diagnostics.recordSyncFailure(SyncMode.SMART, null, null, null)
                     dashboardStatusTone = StatusTone.Error
                     actionInProgress = null
                     return@launch
                 }
+                invalidateDataCatalog(CatalogRefreshPolicy.changedRecordTypes(results))
                 diagnostics.recordSyncResults(SyncMode.SMART, results)
                 status = syncAllStatusText(results, "Smart sync")
                 dashboardStatusTone = syncResultsStatusTone(results)
@@ -825,6 +865,8 @@ class MainActivity : ComponentActivity() {
         }
 
         LaunchedEffect(Unit) {
+            runCatching { catalogQueries.warmCache() }
+                .onFailure { Log.w(TAG, "Catalog cache warmup failed", it) }
             val granted = grantedHealthConnectPermissions()
             grantedPermissions = granted
             hcGranted = granted.containsAll(hcPermissions)
@@ -858,7 +900,9 @@ class MainActivity : ComponentActivity() {
                     platformGranted = hasPlatformPerm()
                     debugEnabled = AppPreferences.debugModeEnabled(this@MainActivity)
                     periodicEnabled = PeriodicSyncPreferences.isEnabled(this@MainActivity)
-                    lastPeriodicSync = PeriodicSyncPreferences.lastFinishedAt(this@MainActivity)
+                    val refreshedPeriodicSync = PeriodicSyncPreferences.lastFinishedAt(this@MainActivity)
+                    val catalogChangedInBackground = refreshedPeriodicSync != lastPeriodicSync
+                    lastPeriodicSync = refreshedPeriodicSync
                     lastPeriodicStatus = PeriodicSyncPreferences.lastStatus(this@MainActivity)
                     lastPeriodicSummary = PeriodicSyncPreferences.lastSummary(this@MainActivity)
                     uploadStatus = AppPreferences.uploadStatus(this@MainActivity)
@@ -878,6 +922,9 @@ class MainActivity : ComponentActivity() {
                         medicineSnapshot = runCatching { medicineRepository.snapshot(displayPreferences.zoneId) }
                             .getOrDefault(EmptyMedicineSnapshot)
                         notificationPermissionGranted = hasNotificationPermission()
+                    }
+                    if (catalogChangedInBackground) {
+                        dataCatalogRevision++
                     }
                 }
             }
@@ -990,7 +1037,7 @@ class MainActivity : ComponentActivity() {
                                 debugEnabled = debugEnabled,
                                 uploadBusy = actionInProgress?.blocksUpload == true,
                                 uploadProgress = uploadProgress,
-                                exportBusy = actionInProgress?.isExport == true,
+                                exportBusy = actionInProgress?.blocksDataManagement == true,
                                 onRequestPlatform = { requestHrPermission.launch(HR_PERMISSION) },
                                 onRequestDataPermissions = { requestHealthConnectPermissions(hcPermissions) },
                                 onRequestBackgroundRead = {
@@ -1024,7 +1071,7 @@ class MainActivity : ComponentActivity() {
                                     status = "Choose ZIP destination..."
                                     createCsvZip.launch("health_connect_csv_${exportFileStamp()}.zip")
                                 },
-                                onRequestClear = { showClearConfirm = true },
+                                onRequestClear = { showLocalDataRemoval = true },
                                 modifier = Modifier.padding(pad)
                             )
                             SettingsDestination.Medicine -> SettingsMedicineScreen(
@@ -1075,6 +1122,7 @@ class MainActivity : ComponentActivity() {
                                                     "Heart-rate sync failed: ${it.message}"
                                                 }
                                             )
+                                        invalidateDataCatalog(setOf(com.example.healthconnectandroid.hc.HealthDataTypeKeys.HEART_RATE))
                                         refreshLocalStatus()
                                     }
                                 },
@@ -1091,7 +1139,7 @@ class MainActivity : ComponentActivity() {
                                             )
                                     }
                                 },
-                                onRequestClear = { showClearConfirm = true }
+                                onRequestClear = { showLocalDataRemoval = true }
                             )
                         }
                     }
@@ -1100,6 +1148,7 @@ class MainActivity : ComponentActivity() {
                             catalogQueries = catalogQueries,
                             grantedPermissions = grantedPermissions,
                             displayPreferences = displayPreferences,
+                            dataRevision = dataCatalogRevision,
                             onOpenDetail = {
                                 nav.openDataDetail(it)
                             },
@@ -1137,6 +1186,7 @@ class MainActivity : ComponentActivity() {
                             },
                             runSelectedTypeSync = syncService::runSelectedTypeSync,
                             onLocalDataChanged = {
+                                invalidateDataCatalog(setOf(destination.dataTypeKey))
                                 refreshLocalStatus()
                                 refreshUploadStatus()
                             },
@@ -1162,34 +1212,51 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            if (showClearConfirm) {
-                AlertDialog(
-                    onDismissRequest = { showClearConfirm = false },
-                    title = { Text(uiText("Remove local data?")) },
-                    text = {
-                        Text(
-                            uiText(
-                                "This removes cached records, aggregates, older heart-rate rows, and sync history " +
-                                    "from this app. Health Connect data itself is not deleted."
-                            )
-                        )
-                    },
-                    confirmButton = {
-                        Button(
-                            onClick = {
-                                showClearConfirm = false
-                                scope.launch {
-                                    val removed = localDataService.clearDb()
-                                    status = "Removed local data ($removed older heart-rate rows)"
-                                    localHealthStatus = runCatching { dashboardQueries.localHealthStatus() }.getOrNull()
-                                    uploadPendingCounts = runCatching { uploadService.pendingCounts(uploadSettings) }
-                                        .getOrDefault(UploadPendingCounts.Empty)
+            if (showLocalDataRemoval) {
+                LocalDataRemovalDialog(
+                    busy = actionInProgress == AppAction.CLEAR_LOCAL_DATA,
+                    progress = localDataRemovalProgress,
+                    onDismiss = { showLocalDataRemoval = false },
+                    onConfirm = { retention ->
+                        actionInProgress = AppAction.CLEAR_LOCAL_DATA
+                        localDataRemovalProgress = LocalDataRemovalProgress(LocalDataRemovalPhase.PREPARING)
+                        scope.launch {
+                            try {
+                                val result = localDataService.removeHealthData(
+                                    retention = retention,
+                                    zoneId = displayPreferences.zoneId,
+                                    onProgress = { progress ->
+                                        withContext(Dispatchers.Main.immediate) {
+                                            localDataRemovalProgress = progress
+                                        }
+                                    }
+                                )
+                                invalidateDataCatalog()
+                                localHealthStatus = runCatching { dashboardQueries.localHealthStatus() }.getOrNull()
+                                uploadPendingCounts = runCatching { uploadService.pendingCounts(uploadSettings) }
+                                    .getOrDefault(UploadPendingCounts.Empty)
+                                HealthDatabaseCompactionWorker.enqueue(this@MainActivity)
+                                val keptRange = translateUiText(retention.label, userPreferences.language)
+                                status = if (userPreferences.language == AppLanguagePreference.CHINESE_SIMPLIFIED) {
+                                    "本地数据已释放。保留范围：$keptRange。已删除 ${result.recordsRemoved} 条健康记录。"
+                                } else {
+                                    "Local data released. Kept range: $keptRange. " +
+                                        "Removed ${result.recordsRemoved} health records."
                                 }
+                                showLocalDataRemoval = false
+                            } catch (cancelled: CancellationException) {
+                                throw cancelled
+                            } catch (error: Exception) {
+                                status = if (userPreferences.language == AppLanguagePreference.CHINESE_SIMPLIFIED) {
+                                    "释放本地数据失败：${error.message ?: "未知错误"}"
+                                } else {
+                                    "Local data removal failed: ${error.message ?: "unknown error"}"
+                                }
+                            } finally {
+                                actionInProgress = null
+                                localDataRemovalProgress = null
                             }
-                        ) { Text(uiText("Remove")) }
-                    },
-                    dismissButton = {
-                        TextButton(onClick = { showClearConfirm = false }) { Text(uiText("Cancel")) }
+                        }
                     }
                 )
             }

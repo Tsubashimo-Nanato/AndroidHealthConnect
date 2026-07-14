@@ -37,7 +37,7 @@ class UploadAutoQueuePolicyTest {
 
     private fun settings(
         autoUploadEnabled: Boolean,
-        apiKey: String = "debug123456789"
+        apiKey: String = "test-api-key"
     ): UploadSettings =
         UploadSettings(
             serverMode = UploadServerMode.PRODUCTION,

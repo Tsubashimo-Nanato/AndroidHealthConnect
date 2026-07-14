@@ -27,4 +27,7 @@ interface HealthSyncCoverageDao {
 
     @Query("DELETE FROM health_sync_coverage")
     suspend fun clearAll()
+
+    @Query("DELETE FROM health_sync_coverage WHERE coveredEndEpochMillis < :cutoffEpochMillis")
+    suspend fun deleteBefore(cutoffEpochMillis: Long): Int
 }

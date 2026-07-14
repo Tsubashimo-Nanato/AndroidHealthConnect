@@ -14,6 +14,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
@@ -33,7 +34,8 @@ fun DailyBarChart(
     xAxisLabel: String,
     yAxisLabel: String,
     rows: List<HealthDailyAggregateRow>,
-    sourceText: String?
+    sourceText: String?,
+    barColorsByDate: Map<String, Color> = emptyMap()
 ) {
     if (rows.isEmpty()) {
         EmptyStateText("No data points available for this chart.")
@@ -45,6 +47,9 @@ fun DailyBarChart(
     val axisColor = MaterialTheme.colorScheme.outline
     val gridColor = axisColor.copy(alpha = 0.28f)
     val onSurfaceColor = MaterialTheme.colorScheme.onSurface
+    val localizedTitle = uiText(title)
+    val localizedXAxisLabel = uiText(xAxisLabel)
+    val localizedYAxisLabel = uiText(yAxisLabel)
     val sorted = remember(rows) { rows.sortedBy { it.localDate } }
     val defaultViewportFraction =
         (dailyVisibleBucketCount(sorted.size).toFloat() / sorted.size.coerceAtLeast(1)).coerceIn(0f, 1f)
@@ -147,8 +152,8 @@ fun DailyBarChart(
             plot = plot,
             xTicks = xTicks,
             yTicks = yTicks,
-            xAxisLabel = xAxisLabel,
-            yAxisLabel = yAxisLabel,
+            xAxisLabel = localizedXAxisLabel,
+            yAxisLabel = localizedYAxisLabel,
             axisColor = axisColor,
             gridColor = gridColor,
             tickTextPaint = tickTextPaint,
@@ -162,7 +167,11 @@ fun DailyBarChart(
             val x0 = plot.left + index * slot + slot * 0.18f
             val x1 = plot.left + (index + 1) * slot - slot * 0.18f
             drawRect(
-                color = if (row == selectedRow) selectedColor else barColor,
+                color = if (row == selectedRow) {
+                    selectedColor
+                } else {
+                    barColorsByDate[row.localDate] ?: barColor
+                },
                 topLeft = Offset(x0, plot.bottom - barHeight),
                 size = androidx.compose.ui.geometry.Size((x1 - x0).coerceAtLeast(2f), barHeight.coerceAtLeast(1f))
             )
@@ -180,8 +189,8 @@ fun DailyBarChart(
 
     selectedRow?.let { row ->
         SelectedPointCard(
-            title = title,
-            recordTypeLabel = title,
+            title = localizedTitle,
+            recordTypeLabel = localizedTitle,
             primaryText = "${formatNumber(row.total)} ${row.unit.orEmpty()}".trim(),
             timeText = row.localDate,
             sourceText = sourceText,

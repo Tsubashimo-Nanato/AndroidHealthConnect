@@ -47,5 +47,13 @@ class UiTextTest {
             "1,024 条记录",
             translateUiText("1,024 records", AppLanguagePreference.CHINESE_SIMPLIFIED)
         )
+        assertEquals(
+            "8 个阶段",
+            translateUiText("8 stages", AppLanguagePreference.CHINESE_SIMPLIFIED)
+        )
+        assertEquals(
+            "已选择：Sun",
+            translateUiText("Selected: Sun", AppLanguagePreference.CHINESE_SIMPLIFIED)
+        )
     }
 }

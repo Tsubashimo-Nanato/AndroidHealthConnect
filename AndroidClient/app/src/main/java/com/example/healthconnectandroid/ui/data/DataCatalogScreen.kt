@@ -58,6 +58,7 @@ import com.example.healthconnectandroid.ui.format.DisplayPreferences
 import com.example.healthconnectandroid.ui.format.MetricDisplayFormatter
 import com.example.healthconnectandroid.ui.i18n.uiText
 import java.time.Instant
+import kotlinx.coroutines.flow.collectLatest
 
 @Composable
 fun DataCatalogScreen(
@@ -65,29 +66,50 @@ fun DataCatalogScreen(
     grantedPermissions: Set<String>,
     displayPreferences: DisplayPreferences,
     onOpenDetail: (String) -> Unit,
+    dataRevision: Int = 0,
     modifier: Modifier = Modifier
 ) {
     var reloadVersion by remember { mutableIntStateOf(0) }
-    var categories by remember { mutableStateOf<List<InspectorCategorySummary>>(emptyList()) }
+    val initialView = remember(grantedPermissions, displayPreferences.zoneId) {
+        catalogQueries.cachedView(grantedPermissions, displayPreferences.zoneId)
+    }
+    var categories by remember(grantedPermissions, displayPreferences.zoneId) {
+        mutableStateOf(sortDataCategories(initialView?.categories.orEmpty()))
+    }
     var status by remember { mutableStateOf("Loading local data...") }
-    var loading by remember { mutableStateOf(false) }
+    var loading by remember { mutableStateOf(initialView?.refreshing ?: categories.isEmpty()) }
+    var handledReloadVersion by remember { mutableIntStateOf(0) }
 
-    LaunchedEffect(grantedPermissions, reloadVersion, displayPreferences.zoneId) {
-        loading = true
-        status = "Loading local data..."
-        runCatching { catalogQueries.inspectorCategories(grantedPermissions, displayPreferences.zoneId) }
-            .onSuccess {
-                categories = it.sortedWith(
-                    compareBy<InspectorCategorySummary> { featuredSortWeight(it.descriptor.key) }
-                        .thenBy { dataCardSortWeight(it) }
-                        .thenBy { categoryLabel(it.descriptor.category) }
-                        .thenBy { it.descriptor.displayName }
-                )
-                status = "${MetricDisplayFormatter.formatCount(it.size)} types, local cache, " +
-                    "${MetricDisplayFormatter.formatRecordCount(it.sumOf { summary -> summary.recordCount })}"
+    LaunchedEffect(grantedPermissions, displayPreferences.zoneId) {
+        catalogQueries.observeCategories(grantedPermissions, displayPreferences.zoneId)
+            .collectLatest { view ->
+                categories = sortDataCategories(view.categories)
+                loading = view.refreshing
+                status = if (view.refreshing) {
+                    if (view.readyTypes < view.totalTypes) {
+                        "Preparing ${view.readyTypes}/${view.totalTypes} local summaries"
+                    } else {
+                        "Refreshing local summaries"
+                    }
+                } else {
+                    "${MetricDisplayFormatter.formatCount(view.readyTypes)} types, local cache, " +
+                        MetricDisplayFormatter.formatRecordCount(
+                            view.categories.sumOf { summary -> summary.recordCount }
+                        )
+                }
             }
-            .onFailure { status = "Load failed: ${it.message}" }
-        loading = false
+    }
+
+    LaunchedEffect(reloadVersion, dataRevision, displayPreferences.zoneId) {
+        if (categories.isEmpty()) loading = true
+        runCatching {
+            catalogQueries.prepareCatalog(
+                zoneId = displayPreferences.zoneId,
+                forceRefresh = reloadVersion > handledReloadVersion
+            )
+        }.onSuccess {
+            handledReloadVersion = reloadVersion
+        }.onFailure { status = "Load failed: ${it.message}" }
     }
 
     Column(
@@ -101,7 +123,9 @@ fun DataCatalogScreen(
             status = status,
             loading = loading,
             displayPreferences = displayPreferences,
-            onRefresh = { reloadVersion++ }
+            onRefresh = {
+                reloadVersion++
+            }
         )
 
         LazyColumn(
@@ -146,6 +170,14 @@ fun DataCatalogScreen(
         }
     }
 }
+
+private fun sortDataCategories(categories: List<InspectorCategorySummary>): List<InspectorCategorySummary> =
+    categories.sortedWith(
+        compareBy<InspectorCategorySummary> { featuredSortWeight(it.descriptor.key) }
+            .thenBy { dataCardSortWeight(it) }
+            .thenBy { categoryLabel(it.descriptor.category) }
+            .thenBy { it.descriptor.displayName }
+    )
 
 @Composable
 private fun DataStatusStrip(

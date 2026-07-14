@@ -68,6 +68,22 @@ class UploadBatchJsonTest {
         )
     }
 
+    @Test
+    fun readCursorAdvancesOnlyPastUploadedHealthRows() {
+        val rows = PendingUploadRows(
+            records = listOf(record().copy(localId = 15), record().copy(localId = -4)),
+            values = listOf(value().copy(localId = 28)),
+            aggregates = listOf(aggregate().copy(localId = 37))
+        )
+
+        val cursor = UploadReadCursor(recordLocalId = 12, valueLocalId = 22, aggregateLocalId = 32)
+            .advance(rows)
+
+        assertEquals(15, cursor.recordLocalId)
+        assertEquals(28, cursor.valueLocalId)
+        assertEquals(37, cursor.aggregateLocalId)
+    }
+
     private fun record(): HealthRecordEntity =
         HealthRecordEntity(
             localId = 11,

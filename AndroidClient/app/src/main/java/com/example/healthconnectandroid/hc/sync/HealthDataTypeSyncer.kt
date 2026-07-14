@@ -64,6 +64,7 @@ class HealthDataTypeSyncer(
     private val healthDao = db.healthRecordDao()
     private val syncDao = db.healthSyncRunDao()
     private val aggregateDao = db.healthAggregateDao()
+    private val retentionDao = db.healthRetentionDao()
 
     private fun ensureAvailable(): String? = try {
         val status = HealthConnectClient.getSdkStatus(appContext)
@@ -154,6 +155,22 @@ class HealthDataTypeSyncer(
                 startedAt = startedAt
             )
 
+            val archivedBefore = retentionDao.archivedBeforeEpochMillis(key)
+                ?.let(Instant::ofEpochMilli)
+            // Archived rows already have compact local history; clamping prevents full sync from restoring purged raw data.
+            val readStart = archivedBefore?.takeIf { it.isAfter(start) } ?: start
+            if (!readStart.isBefore(end)) {
+                return syncResultAndLog(
+                    result = HealthDataTypeSyncResult(
+                        key = key,
+                        requestedStart = start,
+                        requestedEnd = end,
+                        skippedReason = "Requested raw range is already archived locally"
+                    ),
+                    startedAt = startedAt
+                )
+            }
+
             val grantedPermissions = client.permissionController.getGrantedPermissions()
             if (requireBackgroundReadPermission) {
                 if (!backgroundReadFeatureAvailable()) {
@@ -219,7 +236,7 @@ class HealthDataTypeSyncer(
             var valuesStored = 0
             var localBytesWritten = 0L
 
-            reader.readPages(client, start, end) { page ->
+            reader.readPages(client, readStart, end) { page ->
                 val pageSourceBytes = page.sumOf { it.approxBytes() }
                 recordsRead += page.size
                 sourceBytesRead += pageSourceBytes
@@ -286,7 +303,7 @@ class HealthDataTypeSyncer(
             }
             val aggregateResult = syncDailyAggregatesIfAvailable(
                 descriptor = descriptor,
-                start = start,
+                start = readStart,
                 end = end,
                 zoneId = zoneId
             )

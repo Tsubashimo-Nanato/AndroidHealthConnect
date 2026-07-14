@@ -3,6 +3,7 @@ package com.example.healthconnectandroid.hc
 import android.content.Context
 import android.util.Log
 import androidx.work.BackoffPolicy
+import androidx.work.Constraints
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.PeriodicWorkRequestBuilder
@@ -12,6 +13,8 @@ import com.example.healthconnectandroid.AppPreferences
 import com.example.healthconnectandroid.data.AppDb
 import com.example.healthconnectandroid.hc.sync.HealthSyncService
 import com.example.healthconnectandroid.hc.sync.SyncRunStatus
+import com.example.healthconnectandroid.hc.query.CatalogRefreshPolicy
+import com.example.healthconnectandroid.hc.query.CatalogRefreshWorker
 import com.example.healthconnectandroid.hc.upload.HealthUploadWorker
 import com.example.healthconnectandroid.hc.upload.UploadAutoQueueDecision
 import com.example.healthconnectandroid.hc.upload.UploadAutoQueuePolicy
@@ -57,9 +60,17 @@ class PeriodicHealthSyncWorker(
             summary = summary
         )
         Log.i(TAG, "Periodic sync status=$status $summary")
+        refreshChangedCatalogTypes(results)
         queueAutoUploadIfEnabled()
 
         return if (errorCount > 0) Result.retry() else Result.success()
+    }
+
+    private suspend fun refreshChangedCatalogTypes(results: List<HealthDataTypeSyncResult>) {
+        val changedTypes = CatalogRefreshPolicy.changedRecordTypes(results)
+        if (changedTypes.isEmpty()) return
+        AppDb.get(applicationContext).healthCatalogSnapshotDao().markDirty(changedTypes)
+        CatalogRefreshWorker.enqueue(applicationContext)
     }
 
     private fun queueAutoUploadIfEnabled() {
@@ -96,6 +107,11 @@ class PeriodicHealthSyncWorker(
                 DEFAULT_INTERVAL_HOURS,
                 TimeUnit.HOURS
             )
+                .setConstraints(
+                    Constraints.Builder()
+                        .setRequiresBatteryNotLow(true)
+                        .build()
+                )
                 .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, BACKOFF_MINUTES, TimeUnit.MINUTES)
                 .addTag(WORK_NAME)
                 .build()

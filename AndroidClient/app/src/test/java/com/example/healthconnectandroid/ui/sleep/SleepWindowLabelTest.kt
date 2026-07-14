@@ -1,16 +1,15 @@
 package com.example.healthconnectandroid.ui.sleep
 
 import com.example.healthconnectandroid.hc.InspectorTimeRange
-import java.time.DayOfWeek
 import java.time.LocalDate
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class SleepWindowLabelTest {
     @Test
-    fun weeklyLabelUsesDefaultSundayStart() {
+    fun weeklyLabelUsesRollingSevenDaysEndingAtAnchor() {
         assertEquals(
-            "May 10-16",
+            "May 4-10",
             sleepWindowLabel(InspectorTimeRange.WEEKLY, LocalDate.of(2026, 5, 10))
         )
     }
@@ -24,26 +23,38 @@ class SleepWindowLabelTest {
     }
 
     @Test
-    fun weeklyLabelRespectsMondayWeekStart() {
+    fun weeklyLabelUsesAnchorEvenInMiddleOfCalendarWeek() {
         assertEquals(
-            "May 4-10",
+            "May 1-7",
             sleepWindowLabel(
                 range = InspectorTimeRange.WEEKLY,
-                anchorDate = LocalDate.of(2026, 5, 7),
-                weekStart = DayOfWeek.MONDAY
+                anchorDate = LocalDate.of(2026, 5, 7)
             )
         )
     }
 
     @Test
-    fun weeklyMatrixKeyUsesVisibleWeekStart() {
+    fun weeklyMatrixKeyUsesRollingWindowStart() {
         assertEquals(
-            "week:2026-05-10",
+            "week:2026-05-05",
             sleepMatrixKey(
                 range = InspectorTimeRange.WEEKLY,
-                anchorDate = LocalDate.of(2026, 5, 11),
-                weekStart = DayOfWeek.SUNDAY
+                anchorDate = LocalDate.of(2026, 5, 11)
             )
         )
+    }
+
+    @Test
+    fun weeklyWindowMovesBySevenDaysWithoutCalendarWeekSnapping() {
+        val shifted = sleepShiftWindowDate(
+            range = InspectorTimeRange.WEEKLY,
+            anchorDate = LocalDate.of(2026, 5, 10),
+            cells = -1,
+            zoneId = java.time.ZoneOffset.UTC
+        )
+
+        assertEquals(LocalDate.of(2026, 5, 3), shifted)
+        assertEquals(LocalDate.of(2026, 4, 27), sleepVisibleStartDate(InspectorTimeRange.WEEKLY, shifted))
+        assertEquals(LocalDate.of(2026, 5, 3), sleepVisibleEndDate(InspectorTimeRange.WEEKLY, shifted))
     }
 }

@@ -68,6 +68,20 @@ interface HealthRecordDao {
     @Query("DELETE FROM health_records")
     suspend fun clearRecords()
 
+    @Query("SELECT COUNT(*) FROM health_records")
+    suspend fun countRecords(): Int
+
+    @Query(
+        """
+        SELECT localId, startEpochMillis, endEpochMillis
+        FROM health_records
+        WHERE localId > :afterLocalId
+        ORDER BY localId
+        LIMIT :limit
+        """
+    )
+    suspend fun retentionScanPage(afterLocalId: Long, limit: Int): List<HealthRecordRetentionRow>
+
     @Query(
         """
         SELECT * FROM health_records
@@ -137,31 +151,52 @@ interface HealthRecordDao {
         SELECT
             recordType AS recordType,
             COUNT(*) AS recordCount,
+            SUM(
+                CASE
+                    WHEN startEpochMillis < :endEpochMillis
+                      AND COALESCE(endEpochMillis, startEpochMillis) >= :startEpochMillis
+                    THEN 1
+                    ELSE 0
+                END
+            ) AS recentRecordCount,
             MAX(lastReadEpochMillis) AS lastSyncedEpochMillis,
             MAX(startEpochMillis) AS latestRecordEpochMillis
         FROM health_records
         GROUP BY recordType
         """
     )
-    suspend fun summaryRows(): List<HealthRecordSummaryRow>
+    suspend fun catalogSummaryRows(
+        startEpochMillis: Long,
+        endEpochMillis: Long
+    ): List<HealthRecordSummaryRow>
 
     @Query(
         """
         SELECT
-            recordType AS recordType,
+            :recordType AS recordType,
             COUNT(*) AS recordCount,
+            COALESCE(
+                SUM(
+                    CASE
+                        WHEN startEpochMillis < :endEpochMillis
+                          AND COALESCE(endEpochMillis, startEpochMillis) >= :startEpochMillis
+                        THEN 1
+                        ELSE 0
+                    END
+                ),
+                0
+            ) AS recentRecordCount,
             MAX(lastReadEpochMillis) AS lastSyncedEpochMillis,
             MAX(startEpochMillis) AS latestRecordEpochMillis
         FROM health_records
-        WHERE startEpochMillis < :endEpochMillis
-          AND COALESCE(endEpochMillis, startEpochMillis) >= :startEpochMillis
-        GROUP BY recordType
+        WHERE recordType = :recordType
         """
     )
-    suspend fun summaryRowsForRange(
+    suspend fun catalogSummaryForType(
+        recordType: String,
         startEpochMillis: Long,
         endEpochMillis: Long
-    ): List<HealthRecordSummaryRow>
+    ): HealthRecordSummaryRow
 
     @Query("SELECT DISTINCT recordType FROM health_records ORDER BY recordType ASC")
     suspend fun storedRecordTypes(): List<String>
@@ -953,19 +988,6 @@ interface HealthRecordDao {
 
     @Query(
         """
-        WITH latest_records_with_numeric AS (
-            SELECT
-                r.recordType AS recordType,
-                MAX(r.startEpochMillis) AS latestRecordEpochMillis
-            FROM health_records r
-            WHERE EXISTS (
-                SELECT 1
-                FROM health_values v
-                WHERE v.recordLocalId = r.localId
-                  AND v.numericValue IS NOT NULL
-            )
-            GROUP BY r.recordType
-        )
         SELECT
             r.localId AS localRecordId,
             v.localId AS localValueId,
@@ -993,15 +1015,50 @@ interface HealthRecordDao {
             NULL AS rawJson
         FROM health_records r
         INNER JOIN health_values v ON v.recordLocalId = r.localId
-        INNER JOIN latest_records_with_numeric l ON l.recordType = r.recordType
-            AND l.latestRecordEpochMillis = r.startEpochMillis
-        WHERE v.numericValue IS NOT NULL
-        ORDER BY r.recordType ASC,
+        WHERE r.recordType = :recordType
+          AND v.numericValue IS NOT NULL
+        ORDER BY r.startEpochMillis DESC,
             COALESCE(v.startEpochMillis, v.sampleEpochMillis, r.startEpochMillis) DESC,
             COALESCE(v.sequence, 2147483647) ASC
+        LIMIT 1
         """
     )
-    suspend fun latestNumericRowsFromLatestNumericRecords(): List<HealthCsvRow>
+    suspend fun latestNumericRowFromLatestRecord(recordType: String): HealthCsvRow?
+
+    @Query(
+        """
+        WITH values_for_date AS (
+            SELECT
+                r.recordType AS recordType,
+                v.numericValue AS numericValue,
+                v.unit AS unit
+            FROM health_values v
+            INNER JOIN health_records r ON r.localId = v.recordLocalId
+            WHERE v.localDate = :localDate
+              AND v.numericValue IS NOT NULL
+
+            UNION ALL
+
+            SELECT
+                r.recordType AS recordType,
+                v.numericValue AS numericValue,
+                v.unit AS unit
+            FROM health_values v
+            INNER JOIN health_records r ON r.localId = v.recordLocalId
+            WHERE v.localDate IS NULL
+              AND r.localDate = :localDate
+              AND v.numericValue IS NOT NULL
+        )
+        SELECT
+            recordType AS recordType,
+            :localDate AS localDate,
+            SUM(numericValue) AS total,
+            MAX(unit) AS unit
+        FROM values_for_date
+        GROUP BY recordType
+        """
+    )
+    suspend fun numericTotalsForTypesOnDate(localDate: String): List<HealthDailyAggregateByTypeRow>
 
     @Query(
         """
@@ -1021,22 +1078,6 @@ interface HealthRecordDao {
         recordType: String,
         localDate: String
     ): HealthDailyAggregateRow?
-
-    @Query(
-        """
-        SELECT
-            r.recordType AS recordType,
-            COALESCE(v.localDate, r.localDate) AS localDate,
-            SUM(v.numericValue) AS total,
-            MAX(v.unit) AS unit
-        FROM health_records r
-        INNER JOIN health_values v ON v.recordLocalId = r.localId
-        WHERE v.numericValue IS NOT NULL
-          AND COALESCE(v.localDate, r.localDate) = :localDate
-        GROUP BY r.recordType, COALESCE(v.localDate, r.localDate)
-        """
-    )
-    suspend fun numericTotalsForTypesOnDate(localDate: String): List<HealthDailyAggregateByTypeRow>
 
     @Query(
         """

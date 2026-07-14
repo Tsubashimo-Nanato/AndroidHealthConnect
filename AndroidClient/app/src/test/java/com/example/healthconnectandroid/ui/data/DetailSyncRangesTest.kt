@@ -1,7 +1,6 @@
 package com.example.healthconnectandroid.ui.data
 
 import com.example.healthconnectandroid.hc.InspectorTimeRange
-import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -29,7 +28,6 @@ class DetailSyncRangesTest {
             isSleep = false,
             range = InspectorTimeRange.LAST_7_DAYS,
             sleepWindowEndDate = LocalDate.parse("2026-06-01"),
-            weekStart = DayOfWeek.SUNDAY,
             zoneId = zoneId,
             now = now
         )
@@ -39,20 +37,19 @@ class DetailSyncRangesTest {
     }
 
     @Test
-    fun selectedRangeForPastSleepWeekEndsAfterVisibleWeek() {
+    fun selectedRangeForPastSleepWeekEndsAfterAnchorDate() {
         val now = Instant.parse("2026-06-10T12:00:00Z")
 
         val (start, end) = DetailSyncRanges.selectedRange(
             isSleep = true,
             range = InspectorTimeRange.WEEKLY,
             sleepWindowEndDate = LocalDate.parse("2026-05-04"),
-            weekStart = DayOfWeek.SUNDAY,
             zoneId = zoneId,
             now = now
         )
 
-        assertEquals(Instant.parse("2026-05-02T15:00:00Z"), start)
-        assertEquals(Instant.parse("2026-05-09T15:00:00Z"), end)
+        assertEquals(Instant.parse("2026-04-27T15:00:00Z"), start)
+        assertEquals(Instant.parse("2026-05-04T15:00:00Z"), end)
     }
 
     @Test
@@ -63,7 +60,6 @@ class DetailSyncRangesTest {
             isSleep = true,
             range = InspectorTimeRange.MONTHLY,
             sleepWindowEndDate = LocalDate.parse("2026-06-01"),
-            weekStart = DayOfWeek.SUNDAY,
             zoneId = zoneId,
             now = now
         )

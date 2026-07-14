@@ -1,5 +1,5 @@
 # Documentation
 
-This folder is for durable project documentation.
+This folder holds durable project documentation.
 
-Local planning notes and scratch data live in `Workspace/` and are not committed.
+Local planning notes, smoke-test dumps, temporary screenshots, generated databases, and scratch data belong in `Workspace/`, which is intentionally ignored by git.

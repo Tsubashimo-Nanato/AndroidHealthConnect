@@ -111,25 +111,32 @@ interface HealthUploadDao {
         """
         SELECT r.*
         FROM health_records r
-        WHERE NOT EXISTS (
+        WHERE r.localId > :afterLocalId
+          AND NOT EXISTS (
             SELECT 1 FROM health_upload_ack ack
             WHERE ack.serverKey = :serverKey
               AND ack.itemKind = 'record'
               AND ack.localId = r.localId
         )
           AND (:startEpochMillis IS NULL OR COALESCE(r.endEpochMillis, r.startEpochMillis) >= :startEpochMillis)
-        ORDER BY r.updatedEpochMillis ASC, r.localId ASC
+        ORDER BY r.localId ASC
         LIMIT :limit
         """
     )
-    suspend fun pendingRecords(serverKey: String, startEpochMillis: Long?, limit: Int): List<HealthRecordEntity>
+    suspend fun pendingRecords(
+        serverKey: String,
+        startEpochMillis: Long?,
+        afterLocalId: Long,
+        limit: Int
+    ): List<HealthRecordEntity>
 
     @Query(
         """
         SELECT v.*
         FROM health_values v
         LEFT JOIN health_records r ON r.localId = v.recordLocalId
-        WHERE NOT EXISTS (
+        WHERE v.localId > :afterLocalId
+          AND NOT EXISTS (
             SELECT 1 FROM health_upload_ack ack
             WHERE ack.serverKey = :serverKey
               AND ack.itemKind = 'value'
@@ -145,28 +152,39 @@ interface HealthUploadDao {
                   r.startEpochMillis
               ) >= :startEpochMillis
           )
-        ORDER BY v.recordLocalId ASC, v.sequence ASC, v.localId ASC
+        ORDER BY v.localId ASC
         LIMIT :limit
         """
     )
-    suspend fun pendingValues(serverKey: String, startEpochMillis: Long?, limit: Int): List<HealthValueEntity>
+    suspend fun pendingValues(
+        serverKey: String,
+        startEpochMillis: Long?,
+        afterLocalId: Long,
+        limit: Int
+    ): List<HealthValueEntity>
 
     @Query(
         """
         SELECT a.*
         FROM health_aggregate_summaries a
-        WHERE NOT EXISTS (
+        WHERE a.localId > :afterLocalId
+          AND NOT EXISTS (
             SELECT 1 FROM health_upload_ack ack
             WHERE ack.serverKey = :serverKey
               AND ack.itemKind = 'aggregate'
               AND ack.localId = a.localId
         )
           AND (:startEpochMillis IS NULL OR a.bucketEndEpochMillis >= :startEpochMillis)
-        ORDER BY a.computedEpochMillis ASC, a.localId ASC
+        ORDER BY a.localId ASC
         LIMIT :limit
         """
     )
-    suspend fun pendingAggregates(serverKey: String, startEpochMillis: Long?, limit: Int): List<HealthAggregateEntity>
+    suspend fun pendingAggregates(
+        serverKey: String,
+        startEpochMillis: Long?,
+        afterLocalId: Long,
+        limit: Int
+    ): List<HealthAggregateEntity>
 
     @Query(
         """

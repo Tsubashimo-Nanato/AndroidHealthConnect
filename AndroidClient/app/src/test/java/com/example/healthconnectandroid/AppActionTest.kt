@@ -10,6 +10,7 @@ class AppActionTest {
         assertTrue(AppAction.PERIODIC_TOGGLE.blocksSyncSettings)
         assertTrue(AppAction.FULL_RESYNC.blocksSyncSettings)
         assertTrue(AppAction.BACKGROUND_NOW.blocksSyncSettings)
+        assertTrue(AppAction.CLEAR_LOCAL_DATA.blocksSyncSettings)
         assertFalse(AppAction.SMART_SYNC.blocksSyncSettings)
         assertFalse(AppAction.UPLOAD.blocksSyncSettings)
     }
@@ -18,6 +19,7 @@ class AppActionTest {
     fun uploadBusyActionsAreExplicit() {
         assertTrue(AppAction.UPLOAD.blocksUpload)
         assertTrue(AppAction.UPLOAD_TEST.blocksUpload)
+        assertTrue(AppAction.CLEAR_LOCAL_DATA.blocksUpload)
         assertFalse(AppAction.FULL_RESYNC.blocksUpload)
     }
 
@@ -28,5 +30,12 @@ class AppActionTest {
         assertTrue(AppAction.EXPORT_ZIP.isExport)
         assertTrue(AppAction.EXPORT_TYPE.isExport)
         assertFalse(AppAction.UPLOAD.isExport)
+    }
+
+    @Test
+    fun localDataRemovalBlocksDataManagementControls() {
+        assertTrue(AppAction.CLEAR_LOCAL_DATA.blocksDataManagement)
+        assertTrue(AppAction.EXPORT_ALL.blocksDataManagement)
+        assertFalse(AppAction.UPLOAD.blocksDataManagement)
     }
 }

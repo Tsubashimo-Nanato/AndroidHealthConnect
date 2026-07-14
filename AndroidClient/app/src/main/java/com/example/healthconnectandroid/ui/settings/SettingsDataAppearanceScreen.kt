@@ -65,9 +65,9 @@ fun DataManagementSection(
         PrimaryActionButton(if (busy) "Preparing..." else "Export CSV", enabled = !busy, onClick = onExportAllCsv)
         SecondaryActionButton("Export ZIP", enabled = !busy, onClick = onExportZip)
         SecondaryActionButton("Export HR CSV", enabled = !busy, onClick = onExportHrCsv)
-        SecondaryActionButton("Remove Local Data", enabled = !busy, onClick = onRequestClear)
+        SecondaryActionButton("Release local data", enabled = !busy, onClick = onRequestClear)
         Text(
-            uiText("Remove Local Data clears this app's cached records, summaries, and sync history. Health Connect data is not deleted."),
+            uiText("Choose a retention range before deleting this app's health data. Health Connect source data and medicine history are not deleted."),
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         StatusMessageCard(status)

@@ -128,11 +128,13 @@ class HealthUploadService(
                 serverMode = settings.serverMode
             )
         }
+        val batchProfile = resolveUploadProfile(endpoint)
 
         var batchNumber = 0
         var uploadedRecords = 0
         var uploadedValues = 0
         var uploadedAggregates = 0
+        var readCursor = UploadReadCursor()
         val totalAtStart = pending.total
         onProgress(
             UploadProgress(
@@ -146,7 +148,7 @@ class HealthUploadService(
         while (pending.total > 0 && (maxBatches == null || batchNumber < maxBatches)) {
             coroutineContext.ensureActive()
             batchNumber += 1
-            val rows = loadPendingBatch(endpoint.serverKey, startEpochMillis)
+            val rows = loadPendingBatch(endpoint.serverKey, startEpochMillis, batchProfile, readCursor)
             if (rows.isEmpty) break
             val batch = UploadBatch.fromRows(
                 schemaVersion = SCHEMA_VERSION,
@@ -166,12 +168,13 @@ class HealthUploadService(
                 )
             )
 
-            when (val postResult = postBatch(endpoint, settings.apiKey, batch)) {
+            when (val postResult = postBatch(endpoint, settings.apiKey, batch, batchProfile.requestCompression)) {
                 is PostBatchResult.Success -> {
                     markUploaded(endpoint.serverKey, rows.ackItems, batch.batchId)
                     uploadedRecords += rows.records.size
                     uploadedValues += rows.values.size
                     uploadedAggregates += rows.aggregates.size
+                    readCursor = readCursor.advance(rows)
                     pending = pending.minusUploaded(
                         recordsUploaded = rows.records.size,
                         valuesUploaded = rows.values.size,
@@ -263,11 +266,29 @@ class HealthUploadService(
 
     private suspend fun loadPendingBatch(
         serverKey: String,
-        startEpochMillis: Long?
+        startEpochMillis: Long?,
+        profile: UploadBatchProfile,
+        cursor: UploadReadCursor
     ): PendingUploadRows {
-        val records = uploadDao.pendingRecords(serverKey, startEpochMillis, RECORD_LIMIT)
-        val values = uploadDao.pendingValues(serverKey, startEpochMillis, VALUE_LIMIT)
-        val aggregates = uploadDao.pendingAggregates(serverKey, startEpochMillis, AGGREGATE_LIMIT)
+        // Keyset reads keep later batches from rescanning every acknowledged row in multi-gigabyte databases.
+        val records = uploadDao.pendingRecords(
+            serverKey,
+            startEpochMillis,
+            cursor.recordLocalId,
+            profile.recordLimit
+        )
+        val values = uploadDao.pendingValues(
+            serverKey,
+            startEpochMillis,
+            cursor.valueLocalId,
+            profile.valueLimit
+        )
+        val aggregates = uploadDao.pendingAggregates(
+            serverKey,
+            startEpochMillis,
+            cursor.aggregateLocalId,
+            profile.aggregateLimit
+        )
         val healthRows = PendingUploadRows(
             records = records,
             values = values,
@@ -275,16 +296,17 @@ class HealthUploadService(
             ackItems = healthAcks(records, values, aggregates)
         )
 
-        return healthRows + loadPendingMedicineRows(serverKey, startEpochMillis, healthRows)
+        return healthRows + loadPendingMedicineRows(serverKey, startEpochMillis, healthRows, profile)
     }
 
     private suspend fun loadPendingMedicineRows(
         serverKey: String,
         startEpochMillis: Long?,
-        healthRows: PendingUploadRows
+        healthRows: PendingUploadRows,
+        profile: UploadBatchProfile
     ): PendingUploadRows {
-        var recordSlots = (RECORD_LIMIT - healthRows.records.size).coerceAtLeast(0)
-        var valueSlots = (VALUE_LIMIT - healthRows.values.size).coerceAtLeast(0)
+        var recordSlots = (profile.recordLimit - healthRows.records.size).coerceAtLeast(0)
+        var valueSlots = (profile.valueLimit - healthRows.values.size).coerceAtLeast(0)
         if (recordSlots == 0 || valueSlots == 0) return PendingUploadRows()
 
         val itemLimit = minOf(recordSlots, valueSlots / MedicineUploadRows.MEDICINE_ITEM_VALUE_COUNT)
@@ -331,16 +353,41 @@ class HealthUploadService(
     private fun uploadMessage(message: String, range: UploadTimeRange): String =
         if (range == UploadTimeRange.ALL) message else "$message (${range.label})"
 
+    private fun resolveUploadProfile(endpoint: UploadEndpoint): UploadBatchProfile {
+        val request = Request.Builder()
+            .url(endpoint.statusUrl)
+            .get()
+            .build()
+        return try {
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) UploadCapabilityPolicy.Legacy
+                else UploadCapabilityPolicy.fromStatusJson(response.body?.string())
+            }
+        } catch (_: IOException) {
+            // Capability discovery is optional; legacy upload remains available when status cannot be read.
+            UploadCapabilityPolicy.Legacy
+        }
+    }
+
     private fun postBatch(
         endpoint: UploadEndpoint,
         apiKey: String,
-        batch: UploadBatch
+        batch: UploadBatch,
+        compression: UploadRequestCompression
     ): PostBatchResult {
-        val request = Request.Builder()
+        val jsonBody = batch.toJson().toString().toRequestBody(JSON_MEDIA_TYPE)
+        val requestBody = when (compression) {
+            UploadRequestCompression.NONE -> jsonBody
+            UploadRequestCompression.GZIP -> GzipRequestBody(jsonBody)
+        }
+        val requestBuilder = Request.Builder()
             .url(endpoint.ingestBatchesUrl)
             .addHeader(API_KEY_HEADER, apiKey.trim())
-            .post(batch.toJson().toString().toRequestBody(JSON_MEDIA_TYPE))
-            .build()
+            .post(requestBody)
+        if (compression == UploadRequestCompression.GZIP) {
+            requestBuilder.addHeader("Content-Encoding", "gzip")
+        }
+        val request = requestBuilder.build()
 
         return try {
             client.newCall(request).execute().use { response ->
@@ -432,10 +479,7 @@ class HealthUploadService(
     companion object {
         private const val API_KEY_HEADER = "X-API-Key"
         private const val SCHEMA_VERSION = 1
-        private const val RECORD_LIMIT = 1000
-        private const val VALUE_LIMIT = 5000
-        private const val AGGREGATE_LIMIT = 1000
-        const val BACKGROUND_MAX_BATCHES_PER_RUN = 100
+        const val BACKGROUND_MAX_BATCHES_PER_RUN = 200
         private const val ITEM_RECORD = "record"
         private const val ITEM_VALUE = "value"
         private const val ITEM_AGGREGATE = "aggregate"

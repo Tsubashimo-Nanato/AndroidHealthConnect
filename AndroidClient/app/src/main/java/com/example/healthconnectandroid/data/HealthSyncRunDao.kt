@@ -84,4 +84,7 @@ interface HealthSyncRunDao {
 
     @Query("DELETE FROM health_sync_runs")
     suspend fun clearAll()
+
+    @Query("DELETE FROM health_sync_runs WHERE COALESCE(finishedEpochMillis, startedEpochMillis) < :cutoffEpochMillis")
+    suspend fun deleteBefore(cutoffEpochMillis: Long): Int
 }
