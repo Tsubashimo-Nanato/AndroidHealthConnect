@@ -1,11 +1,15 @@
 package com.example.healthconnectandroid
 
 import android.content.Context
+import android.content.SharedPreferences
 import com.example.healthconnectandroid.hc.upload.UploadEndpointPolicy
+import com.example.healthconnectandroid.hc.upload.UploadEndpointValidation
 import com.example.healthconnectandroid.hc.upload.UploadResultSeverity
 import com.example.healthconnectandroid.hc.upload.UploadServerMode
 import com.example.healthconnectandroid.hc.upload.UploadSettings
 import com.example.healthconnectandroid.hc.upload.UploadStatus
+import com.example.healthconnectandroid.security.SecureUploadSettingsReadResult
+import com.example.healthconnectandroid.security.SecureUploadSettingsStore
 import java.time.LocalDate
 import java.time.Period
 import java.time.ZoneId
@@ -90,6 +94,14 @@ data class UserProfile(
         get() = dateOfBirth?.let(AgeCalculator::ageOn)
 }
 
+sealed interface UploadSettingsLoadResult {
+    val settings: UploadSettings
+
+    data class Available(override val settings: UploadSettings) : UploadSettingsLoadResult
+    data class SecureStorageUnavailable(override val settings: UploadSettings) : UploadSettingsLoadResult
+    data class ReentryRequired(override val settings: UploadSettings) : UploadSettingsLoadResult
+}
+
 object AppPreferences {
     private const val PREFS_NAME = "health_connect_app_preferences"
     private const val KEY_THEME_MODE = "theme_mode"
@@ -110,6 +122,8 @@ object AppPreferences {
     private const val KEY_UPLOAD_API_KEY = "upload_api_key"
     private const val KEY_UPLOAD_DEVICE_ID = "upload_device_id"
     private const val KEY_UPLOAD_AUTO_ENABLED = "upload_auto_enabled"
+    private const val KEY_UPLOAD_SECURE_MIGRATION_COMPLETE = "upload_secure_migration_complete"
+    private const val KEY_UPLOAD_LEGACY_CLEANUP_PENDING = "upload_legacy_cleanup_pending"
     private const val KEY_UPLOAD_LAST_TIME = "upload_last_time"
     private const val KEY_UPLOAD_LAST_RESULT = "upload_last_result"
     private const val KEY_UPLOAD_LAST_SEVERITY = "upload_last_severity"
@@ -235,8 +249,75 @@ object AppPreferences {
         }.apply()
     }
 
-    fun uploadSettings(context: Context): UploadSettings {
+    @Synchronized
+    fun loadUploadSettings(context: Context): UploadSettingsLoadResult {
         val prefs = prefs(context)
+        val secureResult = SecureUploadSettingsStore.read(context)
+        val secureState = when (secureResult) {
+            is SecureUploadSettingsReadResult.Value -> SecureUploadSettingsState.VALUE
+            SecureUploadSettingsReadResult.Missing -> SecureUploadSettingsState.MISSING
+            SecureUploadSettingsReadResult.Corrupt -> SecureUploadSettingsState.CORRUPT
+            SecureUploadSettingsReadResult.Unavailable -> SecureUploadSettingsState.UNAVAILABLE
+        }
+        val action = LegacyUploadMigrationPolicy.decide(
+            secureState = secureState,
+            migrationComplete = prefs.getBoolean(KEY_UPLOAD_SECURE_MIGRATION_COMPLETE, false),
+            hasLegacyConfiguration = hasLegacyUploadPreferences(prefs)
+        )
+        return when (action) {
+            LegacyUploadMigrationAction.USE_SECURE -> {
+                recordMigrationCompleteAndCleanup(prefs)
+                UploadSettingsLoadResult.Available(
+                    (secureResult as SecureUploadSettingsReadResult.Value).settings
+                )
+            }
+            LegacyUploadMigrationAction.MIGRATE_LEGACY ->
+                migrateLegacyUploadSettings(context, prefs)
+            LegacyUploadMigrationAction.REQUIRE_REENTRY -> {
+                // Mark the one-way boundary before cleanup. A damaged or removed secure payload
+                // must never make an older plaintext API key authoritative again.
+                recordMigrationCompleteAndCleanup(prefs)
+                UploadSettingsLoadResult.ReentryRequired(defaultUploadSettings(context))
+            }
+            LegacyUploadMigrationAction.DEFER ->
+                UploadSettingsLoadResult.SecureStorageUnavailable(defaultUploadSettings(context))
+        }
+    }
+
+    @Synchronized
+    fun setUploadSettings(
+        context: Context,
+        settings: UploadSettings,
+        replaceCorruptKey: Boolean = false
+    ): Boolean {
+        if (UploadEndpointPolicy.validate(settings) is UploadEndpointValidation.Invalid) return false
+        if (!SecureUploadSettingsStore.write(context, settings, replaceCorruptKey)) return false
+
+        recordMigrationCompleteAndCleanup(prefs(context))
+        return true
+    }
+
+    private fun migrateLegacyUploadSettings(
+        context: Context,
+        prefs: SharedPreferences
+    ): UploadSettingsLoadResult {
+        val settings = legacyUploadSettings(context, prefs)
+        if (UploadEndpointPolicy.validate(settings) is UploadEndpointValidation.Invalid) {
+            recordMigrationCompleteAndCleanup(prefs)
+            return UploadSettingsLoadResult.ReentryRequired(defaultUploadSettings(context))
+        }
+        return if (SecureUploadSettingsStore.write(context, settings)) {
+            recordMigrationCompleteAndCleanup(prefs)
+            UploadSettingsLoadResult.Available(settings)
+        } else {
+            UploadSettingsLoadResult.SecureStorageUnavailable(settings)
+        }
+    }
+
+    private fun legacyUploadSettings(
+        context: Context,
+        prefs: SharedPreferences
+    ): UploadSettings {
         val mode = prefs.getString(KEY_UPLOAD_SERVER_MODE, UploadServerMode.PRODUCTION.name)
             ?.let { raw -> UploadServerMode.values().firstOrNull { it.name == raw } }
             ?: UploadServerMode.PRODUCTION
@@ -244,27 +325,61 @@ object AppPreferences {
             ?: UploadEndpointPolicy.DEFAULT_LOCAL_BASE_URL
         val productionUrl = prefs.getString(KEY_UPLOAD_PRODUCTION_URL, UploadEndpointPolicy.PRODUCTION_BASE_URL)
             ?: UploadEndpointPolicy.PRODUCTION_BASE_URL
-        val apiKey = prefs.getString(KEY_UPLOAD_API_KEY, "") ?: ""
         return UploadSettings(
             serverMode = mode,
             productionBaseUrl = productionUrl,
             localBaseUrl = localUrl,
-            apiKey = apiKey,
+            apiKey = prefs.getString(KEY_UPLOAD_API_KEY, "")?.trim().orEmpty(),
             deviceId = uploadDeviceId(context),
             autoUploadEnabled = prefs.getBoolean(KEY_UPLOAD_AUTO_ENABLED, false)
         )
     }
 
-    fun setUploadSettings(context: Context, settings: UploadSettings) {
-        prefs(context).edit().apply {
-            putString(KEY_UPLOAD_SERVER_MODE, settings.serverMode.name)
-            putString(KEY_UPLOAD_PRODUCTION_URL, settings.productionBaseUrl.trim())
-            putString(KEY_UPLOAD_LOCAL_URL, settings.localBaseUrl.trim())
-            putString(KEY_UPLOAD_API_KEY, settings.apiKey.trim())
-            putString(KEY_UPLOAD_DEVICE_ID, settings.deviceId)
-            putBoolean(KEY_UPLOAD_AUTO_ENABLED, settings.autoUploadEnabled)
-        }.apply()
+    private fun defaultUploadSettings(context: Context): UploadSettings =
+        UploadSettings(deviceId = uploadDeviceId(context))
+
+    /** Records the one-way migration boundary, then retries plaintext cleanup until it sticks. */
+    private fun recordMigrationCompleteAndCleanup(prefs: SharedPreferences) {
+        val cleanupNeeded = hasLegacyUploadPreferences(prefs) ||
+            prefs.getBoolean(KEY_UPLOAD_LEGACY_CLEANUP_PENDING, false)
+        val beforeCleanup = LegacyUploadMigrationPolicy.markerAfterCleanupAttempt(
+            cleanupNeeded = cleanupNeeded,
+            cleanupSucceeded = !cleanupNeeded
+        )
+        prefs.edit()
+            .putBoolean(KEY_UPLOAD_SECURE_MIGRATION_COMPLETE, beforeCleanup.migrationComplete)
+            .putBoolean(KEY_UPLOAD_LEGACY_CLEANUP_PENDING, beforeCleanup.cleanupPending)
+            .commit()
+        if (!cleanupNeeded) return
+
+        val cleaned = prefs.edit().apply {
+            remove(KEY_UPLOAD_SERVER_MODE)
+            remove(KEY_UPLOAD_PRODUCTION_URL)
+            remove(KEY_UPLOAD_LOCAL_URL)
+            remove(KEY_UPLOAD_API_KEY)
+            remove(KEY_UPLOAD_AUTO_ENABLED)
+            putBoolean(KEY_UPLOAD_SECURE_MIGRATION_COMPLETE, true)
+            putBoolean(KEY_UPLOAD_LEGACY_CLEANUP_PENDING, false)
+        }.commit()
+        if (!cleaned) {
+            // Best-effort recording keeps cleanup retryable after a transient preferences failure.
+            val retryMarker = LegacyUploadMigrationPolicy.markerAfterCleanupAttempt(
+                cleanupNeeded = true,
+                cleanupSucceeded = false
+            )
+            prefs.edit()
+                .putBoolean(KEY_UPLOAD_SECURE_MIGRATION_COMPLETE, retryMarker.migrationComplete)
+                .putBoolean(KEY_UPLOAD_LEGACY_CLEANUP_PENDING, retryMarker.cleanupPending)
+                .commit()
+        }
     }
+
+    private fun hasLegacyUploadPreferences(prefs: SharedPreferences): Boolean =
+        prefs.contains(KEY_UPLOAD_SERVER_MODE) ||
+            prefs.contains(KEY_UPLOAD_PRODUCTION_URL) ||
+            prefs.contains(KEY_UPLOAD_LOCAL_URL) ||
+            prefs.contains(KEY_UPLOAD_API_KEY) ||
+            prefs.contains(KEY_UPLOAD_AUTO_ENABLED)
 
     fun uploadStatus(context: Context): UploadStatus {
         val prefs = prefs(context)

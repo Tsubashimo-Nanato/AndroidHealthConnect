@@ -30,14 +30,14 @@ class UploadAutoQueuePolicyTest {
         )
 
         assertEquals(
-            UploadAutoQueueDecision.Invalid("API key is required"),
+            UploadAutoQueueDecision.Invalid("API key must be at least 32 characters"),
             decision
         )
     }
 
     private fun settings(
         autoUploadEnabled: Boolean,
-        apiKey: String = "test-api-key"
+        apiKey: String = "k".repeat(UploadEndpointPolicy.MINIMUM_API_KEY_LENGTH)
     ): UploadSettings =
         UploadSettings(
             serverMode = UploadServerMode.PRODUCTION,

@@ -14,7 +14,9 @@ sealed interface UploadScanApplyResult {
 }
 
 object UploadScanPolicy {
-    private val PlainApiKeyPattern = Regex("""^[A-Za-z0-9._~+/=-]{12,256}$""")
+    private val PlainApiKeyPattern = Regex(
+        """^[A-Za-z0-9._~+/=-]{${UploadEndpointPolicy.MINIMUM_API_KEY_LENGTH},${UploadEndpointPolicy.MAXIMUM_API_KEY_LENGTH}}$"""
+    )
     private const val PAIRING_SCHEME = "nanato-hc"
     private const val PAIRING_HOST = "pair"
 

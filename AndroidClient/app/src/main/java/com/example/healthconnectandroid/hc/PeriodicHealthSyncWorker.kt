@@ -10,6 +10,7 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.example.healthconnectandroid.AppPreferences
+import com.example.healthconnectandroid.UploadSettingsLoadResult
 import com.example.healthconnectandroid.data.AppDb
 import com.example.healthconnectandroid.hc.sync.HealthSyncService
 import com.example.healthconnectandroid.hc.sync.SyncRunStatus
@@ -74,7 +75,32 @@ class PeriodicHealthSyncWorker(
     }
 
     private fun queueAutoUploadIfEnabled() {
-        val settings = AppPreferences.uploadSettings(applicationContext)
+        val settingsLoad = AppPreferences.loadUploadSettings(applicationContext)
+        if (settingsLoad is UploadSettingsLoadResult.SecureStorageUnavailable) {
+            val message = "Auto upload not queued: secure settings are temporarily unavailable"
+            AppPreferences.setUploadStatus(
+                applicationContext,
+                AppPreferences.uploadStatus(applicationContext).copy(
+                    connectionResult = message,
+                    severity = UploadResultSeverity.WARNING
+                )
+            )
+            Log.w(TAG, message)
+            return
+        }
+        if (settingsLoad is UploadSettingsLoadResult.ReentryRequired) {
+            val message = "Auto upload not queued: secure settings must be entered again"
+            AppPreferences.setUploadStatus(
+                applicationContext,
+                AppPreferences.uploadStatus(applicationContext).copy(
+                    connectionResult = message,
+                    severity = UploadResultSeverity.ERROR
+                )
+            )
+            Log.e(TAG, message)
+            return
+        }
+        val settings = settingsLoad.settings
         when (val decision = UploadAutoQueuePolicy.decide(settings)) {
             UploadAutoQueueDecision.Disabled -> Unit
             is UploadAutoQueueDecision.Queue -> {

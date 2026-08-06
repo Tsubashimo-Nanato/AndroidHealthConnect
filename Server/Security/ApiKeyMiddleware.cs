@@ -1,74 +1,55 @@
 using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.Configuration;
-using System.Security.Cryptography;
-using System.Text;
 
 namespace HC_server.Security
 {
     public sealed class ApiKeyMiddleware : IMiddleware
     {
         private const string HeaderName = "X-API-Key";
-        private readonly IReadOnlyList<string> apiKeys;
+        private readonly ValidatedApiKeySnapshot apiKeys;
 
-        public ApiKeyMiddleware(IConfiguration configuration)
+        public ApiKeyMiddleware(ValidatedApiKeySnapshot apiKeys)
         {
-            apiKeys = configuration
-                .GetSection("ApiKeys")
-                .Get<string[]>()
-                ?.Where(key => !string.IsNullOrWhiteSpace(key))
-                .Select(key => key.Trim())
-                .Distinct(StringComparer.Ordinal)
-                .ToArray()
-                ?? Array.Empty<string>();
+            this.apiKeys = apiKeys;
         }
 
         public async Task InvokeAsync(HttpContext ctx, RequestDelegate next)
         {
-            var path = ctx.Request.Path.Value ?? "";
+            var path = ctx.Request.Path;
 
-            if (HttpMethods.IsGet(ctx.Request.Method))
+            if (HttpMethods.IsGet(ctx.Request.Method) && IsPublicAssetPath(path))
             {
-                if (path == "/" ||
-                    path.StartsWith("/swagger") ||
-                    path.StartsWith("/favicon") ||
-                    path.StartsWith("/index") ||
-                    path.StartsWith("/css") ||
-                    path.StartsWith("/js") ||
-                    path.StartsWith("/lib") ||
-                    path.StartsWith("/assets") ||
-                    Path.HasExtension(path))
-                {
-                    await next(ctx);
-                    return;
-                }
+                await next(ctx);
+                return;
             }
 
-            if (apiKeys.Count == 0)
+            if (apiKeys.IsEmpty)
             {
                 ctx.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
                 await ctx.Response.WriteAsync("Server API key is not configured.");
                 return;
             }
 
-            if (!ctx.Request.Headers.TryGetValue(HeaderName, out var key) || !IsValidKey(key.ToString()))
+            if (!ctx.Request.Headers.TryGetValue(HeaderName, out var key) || !apiKeys.Matches(key.ToString()))
             {
                 ctx.Response.StatusCode = StatusCodes.Status401Unauthorized;
                 await ctx.Response.WriteAsync("Missing or invalid API key.");
                 return;
             }
 
+            // Protected responses can contain health data. A custom API-key header does not
+            // automatically prevent shared proxies from caching a successful GET response.
+            ctx.Response.Headers.CacheControl = "no-store";
             await next(ctx);
         }
 
-        private bool IsValidKey(string candidate)
-        {
-            var candidateBytes = Encoding.UTF8.GetBytes(candidate);
-            return apiKeys.Any(expected =>
-            {
-                var expectedBytes = Encoding.UTF8.GetBytes(expected);
-                return candidateBytes.Length == expectedBytes.Length &&
-                    CryptographicOperations.FixedTimeEquals(candidateBytes, expectedBytes);
-            });
-        }
+        private static bool IsPublicAssetPath(PathString path) =>
+            path == "/" ||
+            path.StartsWithSegments("/swagger") ||
+            path == "/favicon.ico" ||
+            path == "/index.html" ||
+            path.StartsWithSegments("/css") ||
+            path.StartsWithSegments("/js") ||
+            path.StartsWithSegments("/lib") ||
+            path.StartsWithSegments("/assets");
     }
 }

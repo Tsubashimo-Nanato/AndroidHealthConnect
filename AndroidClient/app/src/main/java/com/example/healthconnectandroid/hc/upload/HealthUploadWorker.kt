@@ -11,6 +11,7 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import com.example.healthconnectandroid.AppPreferences
+import com.example.healthconnectandroid.UploadSettingsLoadResult
 import com.example.healthconnectandroid.data.AppDb
 import com.example.healthconnectandroid.hc.retention.HealthRetentionWorker
 import java.util.concurrent.TimeUnit
@@ -21,7 +22,28 @@ class HealthUploadWorker(
 ) : CoroutineWorker(appContext, params) {
 
     override suspend fun doWork(): Result {
-        val settings = AppPreferences.uploadSettings(applicationContext)
+        val settingsLoad = AppPreferences.loadUploadSettings(applicationContext)
+        if (settingsLoad is UploadSettingsLoadResult.SecureStorageUnavailable) {
+            AppPreferences.setUploadStatus(
+                applicationContext,
+                AppPreferences.uploadStatus(applicationContext).copy(
+                    lastResult = "Upload deferred: secure settings are temporarily unavailable",
+                    severity = UploadResultSeverity.WARNING
+                )
+            )
+            return Result.retry()
+        }
+        if (settingsLoad is UploadSettingsLoadResult.ReentryRequired) {
+            AppPreferences.setUploadStatus(
+                applicationContext,
+                AppPreferences.uploadStatus(applicationContext).copy(
+                    lastResult = "Upload stopped: secure settings must be entered again",
+                    severity = UploadResultSeverity.ERROR
+                )
+            )
+            return Result.failure()
+        }
+        val settings = settingsLoad.settings
         val service = HealthUploadService(AppDb.get(applicationContext))
         val result = service.uploadPending(
             settings = settings,

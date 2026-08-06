@@ -56,7 +56,7 @@ class HealthArchiveBuilderTest {
         val now = Instant.parse("2026-07-12T00:00:00Z")
 
         assertTrue(HealthRetentionPolicy.acceptsServerKey("PRODUCTION:https://example.test/"))
-        assertFalse(HealthRetentionPolicy.acceptsServerKey("LOCAL_DEBUG:http://192.168.0.2/"))
+        assertFalse(HealthRetentionPolicy.acceptsServerKey("LOCAL_DEBUG:http://10.23.45.68/"))
         assertEquals(Instant.parse("2026-06-12T00:00:00Z").toEpochMilli(), HealthRetentionPolicy.cutoffEpochMillis(now))
     }
 

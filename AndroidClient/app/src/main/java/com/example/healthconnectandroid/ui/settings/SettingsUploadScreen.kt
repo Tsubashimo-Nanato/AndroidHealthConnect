@@ -54,6 +54,7 @@ import java.time.Instant
 @Composable
 fun SettingsUploadScreen(
     settings: UploadSettings,
+    settingsGeneration: Long = 0L,
     uploadStatus: UploadStatus,
     pendingCounts: UploadPendingCounts,
     debugEnabled: Boolean,
@@ -75,6 +76,7 @@ fun SettingsUploadScreen(
     ) {
         UploadSettingsSections(
             settings = settings,
+            settingsGeneration = settingsGeneration,
             uploadStatus = uploadStatus,
             pendingCounts = pendingCounts,
             debugEnabled = debugEnabled,
@@ -94,6 +96,7 @@ fun SettingsUploadScreen(
 @Composable
 fun UploadSettingsSections(
     settings: UploadSettings,
+    settingsGeneration: Long = 0L,
     uploadStatus: UploadStatus,
     pendingCounts: UploadPendingCounts,
     debugEnabled: Boolean,
@@ -107,14 +110,22 @@ fun UploadSettingsSections(
     destinationModifier: Modifier = Modifier,
     statusModifier: Modifier = Modifier
 ) {
-    var serverMode by rememberSaveable(settings, debugEnabled) {
+    var serverMode by rememberSaveable(settingsGeneration, settings, debugEnabled) {
         mutableStateOf(if (debugEnabled) settings.serverMode else UploadServerMode.PRODUCTION)
     }
-    var productionUrl by rememberSaveable(settings) { mutableStateOf(settings.productionBaseUrl) }
-    var localUrl by rememberSaveable(settings) { mutableStateOf(settings.localBaseUrl) }
-    var apiKey by rememberSaveable(settings) { mutableStateOf(settings.apiKey) }
-    var autoUploadEnabled by rememberSaveable(settings) { mutableStateOf(settings.autoUploadEnabled) }
-    var apiKeyVisible by rememberSaveable { mutableStateOf(false) }
+    var productionUrl by rememberSaveable(settingsGeneration, settings) {
+        mutableStateOf(settings.productionBaseUrl)
+    }
+    var localUrl by rememberSaveable(settingsGeneration, settings) {
+        mutableStateOf(settings.localBaseUrl)
+    }
+    // Credentials are never written to a Bundle/SavedState. Process recreation reloads them
+    // from the Keystore-backed settings store passed in through [settings].
+    var apiKey by remember(settingsGeneration, settings.apiKey) { mutableStateOf(settings.apiKey) }
+    var autoUploadEnabled by rememberSaveable(settingsGeneration, settings) {
+        mutableStateOf(settings.autoUploadEnabled)
+    }
+    var apiKeyVisible by remember { mutableStateOf(false) }
     val editedSettings = remember(serverMode, productionUrl, localUrl, apiKey, settings.deviceId, autoUploadEnabled) {
         UploadSettings(
             serverMode = serverMode,
@@ -175,7 +186,9 @@ fun UploadSettingsSections(
             OutlinedTextField(
                 modifier = Modifier.fillMaxWidth(),
                 value = apiKey,
-                onValueChange = { apiKey = it.trim().take(256) },
+                onValueChange = {
+                    apiKey = it.trim().take(UploadEndpointPolicy.MAXIMUM_API_KEY_LENGTH)
+                },
                 label = { Text(uiText("API key")) },
                 visualTransformation = if (apiKeyVisible) VisualTransformation.None else PasswordVisualTransformation(),
                 trailingIcon = {

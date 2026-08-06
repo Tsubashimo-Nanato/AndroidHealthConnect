@@ -485,8 +485,13 @@ class HealthUploadService(
         private const val ITEM_AGGREGATE = "aggregate"
         private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
 
-        private fun defaultClient(): OkHttpClient =
+        internal fun defaultClient(): OkHttpClient =
             OkHttpClient.Builder()
+                // OkHttp only strips the standard Authorization header on a cross-host
+                // redirect. This client uses X-API-Key, so following a redirect could leak
+                // both that credential and, for 307/308, the health-data request body.
+                .followRedirects(false)
+                .followSslRedirects(false)
                 .connectTimeout(20, TimeUnit.SECONDS)
                 .readTimeout(90, TimeUnit.SECONDS)
                 .writeTimeout(90, TimeUnit.SECONDS)

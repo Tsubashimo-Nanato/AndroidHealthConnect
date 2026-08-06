@@ -6,7 +6,7 @@
 ![Server](https://img.shields.io/badge/API-.NET%208-512bd4)
 [![License: AGPL-3.0-only](https://img.shields.io/badge/License-AGPL--3.0--only-blue.svg)](LICENSE)
 
-**Health Data Sync** is a local-first Android app for inspecting Health Connect data, exporting it to CSV/ZIP, and optionally uploading normalized batches to a small self-hosted .NET API. It is built as a portfolio-grade end-to-end health-data pipeline: Android Health Connect -> local Room/SQLite cache -> Compose dashboards and charts -> API-key protected upload server -> browser graph inspector.
+**Health Data Sync** is a local-first Android app for inspecting Health Connect data, exporting it to CSV/ZIP, and optionally uploading normalized batches to a small self-hosted .NET API. The system covers the path from Health Connect ingestion and local Room/SQLite storage to Compose dashboards, explicit exports, an API-key-protected upload server, and a browser graph inspector.
 
 The app focuses on personal observability rather than medical advice. It reads supported Health Connect records, keeps the working copy local, and makes export/upload explicit user-controlled actions.
 
@@ -50,8 +50,6 @@ HealthConnect/
   docs/            Durable project documentation
 ```
 
-`Workspace/` contains local planning notes, smoke-test evidence, and scratch data used during development. It is intentionally ignored by git.
-
 ## Application Scenarios
 
 - **Personal health archive:** keep a local, queryable copy of wearable data before exporting or uploading anything.
@@ -82,8 +80,8 @@ Build and test the Android app:
 ```powershell
 cd AndroidClient
 
-# Point JAVA_HOME at any installed Java 17+ JDK.
-$env:JAVA_HOME = "E:\Tools\Java\jdk-17"
+# Point JAVA_HOME at an installed Java 17+ JDK.
+$env:JAVA_HOME = "<path-to-jdk-17>"
 $env:Path = "$env:JAVA_HOME\bin;$env:Path"
 
 .\gradlew.bat :app:testDebugUnitTest :app:compileDebugKotlin
@@ -94,17 +92,20 @@ Run the server:
 
 ```powershell
 cd Server
+$keyBytes = New-Object byte[] 32
+[Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($keyBytes)
+$env:ApiKeys__0 = [Convert]::ToBase64String($keyBytes)
 dotnet build HC_server.sln
 dotnet run --project HC_server.csproj
 ```
 
-The development config includes API key `123`. Non-development deployments must configure at least one non-default `ApiKeys` entry.
+The command above creates a random development key for the current shell. No API key is stored in the repository. Configured keys must contain 32 to 256 characters, and non-development deployments must configure at least one private `ApiKeys` entry. The server validates one immutable key snapshot at startup; configuration reloads do not change the active credentials.
 
 Smoke-test the existing upload API:
 
 ```powershell
 $base = "http://localhost:5045/health/api/v1"
-$headers = @{ "X-API-Key" = "123" }
+$headers = @{ "X-API-Key" = $env:ApiKeys__0 }
 
 Invoke-RestMethod "$base/status" -Headers $headers
 
@@ -149,7 +150,19 @@ Debug builds permit local HTTP for LAN testing. Release builds keep cleartext di
 - It does not write Health Connect records.
 - CSV/ZIP exports are created only when the user chooses a destination.
 - Uploads require configured endpoint settings and an API key.
+- The Android client atomically encrypts its upload configuration, including the API key and endpoint selection, with AES-GCM backed by Android Keystore. Settings saved by an older version are migrated from ordinary preferences on first access and the plaintext key is removed there only after the encrypted configuration is written successfully.
+- Temporary secure-storage failures preserve the existing encrypted configuration and defer background uploads instead of clearing credentials or mixing a new key with an older endpoint.
+- Android backup is disabled, and every app-private root, file, database, and preferences domain is explicitly excluded from cloud backup and device transfer. This covers health data, the local database, legacy upload fields, the device identifier, and Keystore-backed ciphertext.
 - Raw health exports, local databases, API keys, device IDs, and device QA screenshots are not committed.
+
+## Release Verification Gates
+
+The automated JVM and server suites do not replace these device checks before publishing a release:
+
+- Run the Android instrumentation suite on a supported emulator and a physical device.
+- Use Android Backup Manager (`bmgr`) on a disposable test install to confirm no app-private preferences, databases, or files enter a backup or restore set.
+- Verify a real device-to-device transfer does not restore health data, the local database, upload credentials, or device identifiers.
+- Exercise secure-settings behavior while the device is locked and after Keystore invalidation; temporary provider/lock failures must defer access, while permanent invalidation must require credential reentry.
 
 ## Suggested GitHub Topics
 

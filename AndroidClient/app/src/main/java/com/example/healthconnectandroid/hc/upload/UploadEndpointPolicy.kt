@@ -5,10 +5,20 @@ import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 object UploadEndpointPolicy {
     const val PRODUCTION_BASE_URL = "https://www.tsubashimonanato.com/health/api/v1/"
     const val DEFAULT_LOCAL_BASE_URL = "http://10.0.2.2:8000/health/api/v1/"
+    const val MINIMUM_API_KEY_LENGTH = 32
+    const val MAXIMUM_API_KEY_LENGTH = 256
 
     fun validate(settings: UploadSettings, requireApiKey: Boolean = true): UploadEndpointValidation {
-        if (requireApiKey && settings.apiKey.trim().isBlank()) {
-            return UploadEndpointValidation.Invalid("API key is required")
+        val apiKeyLength = settings.apiKey.trim().length
+        if (requireApiKey && apiKeyLength < MINIMUM_API_KEY_LENGTH) {
+            return UploadEndpointValidation.Invalid(
+                "API key must be at least $MINIMUM_API_KEY_LENGTH characters"
+            )
+        }
+        if (requireApiKey && apiKeyLength > MAXIMUM_API_KEY_LENGTH) {
+            return UploadEndpointValidation.Invalid(
+                "API key must not exceed $MAXIMUM_API_KEY_LENGTH characters"
+            )
         }
 
         val rawBaseUrl = when (settings.serverMode) {

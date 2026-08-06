@@ -21,20 +21,12 @@ var configuredApiKeys = builder.Configuration
     .GetSection("ApiKeys")
     .Get<string[]>()
     ?.Where(key => !string.IsNullOrWhiteSpace(key))
-    .Select(key => key.Trim())
     .ToArray()
     ?? Array.Empty<string>();
-if (!builder.Environment.IsDevelopment())
-{
-    if (configuredApiKeys.Length == 0)
-    {
-        throw new InvalidOperationException("At least one ApiKeys entry is required outside Development.");
-    }
-    if (configuredApiKeys.Contains("123", StringComparer.Ordinal))
-    {
-        throw new InvalidOperationException("The default development API key cannot be used outside Development.");
-    }
-}
+var apiKeySnapshot = ValidatedApiKeySnapshot.Create(
+    configuredApiKeys,
+    requireAtLeastOne: !builder.Environment.IsDevelopment()
+);
 
 builder.Services.AddControllers();
 
@@ -55,6 +47,7 @@ builder.Services.AddSwaggerGen(c =>
     });
 });
 
+builder.Services.AddSingleton(apiKeySnapshot);
 builder.Services.AddTransient<ApiKeyMiddleware>();
 var app = builder.Build();
 
@@ -65,6 +58,11 @@ using (var scope = app.Services.CreateScope())
     await UploadSchemaInitializer.EnsureUploadTablesAsync(db);
 }
 
+// Authenticate before StaticFileMiddleware can short-circuit the pipeline. The middleware's
+// explicit GET allowlist keeps the public shell/assets available without making every file
+// placed under wwwroot public by accident.
+app.UseMiddleware<ApiKeyMiddleware>();
+
 app.UseDefaultFiles();
 app.UseStaticFiles();
 
@@ -74,7 +72,7 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
-app.UseMiddleware<ApiKeyMiddleware>();
-
 app.MapControllers();
 app.Run();
+
+public partial class Program { }

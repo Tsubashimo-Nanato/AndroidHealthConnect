@@ -5,6 +5,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class UploadEndpointPolicyTest {
+    private val validApiKey = "k".repeat(UploadEndpointPolicy.MINIMUM_API_KEY_LENGTH)
+
     @Test
     fun defaultLocalDebugBaseUsesFastApiPort() {
         assertEquals("http://10.0.2.2:8000/health/api/v1/", UploadEndpointPolicy.DEFAULT_LOCAL_BASE_URL)
@@ -15,7 +17,7 @@ class UploadEndpointPolicyTest {
         val result = UploadEndpointPolicy.validate(
             UploadSettings(
                 serverMode = UploadServerMode.PRODUCTION,
-                apiKey = "key",
+                apiKey = validApiKey,
                 deviceId = "device"
             )
         )
@@ -33,7 +35,7 @@ class UploadEndpointPolicyTest {
             UploadSettings(
                 serverMode = UploadServerMode.PRODUCTION,
                 productionBaseUrl = "https://tsubashimonanato.com/health/api/v1",
-                apiKey = "key",
+                apiKey = validApiKey,
                 deviceId = "device"
             )
         )
@@ -51,7 +53,7 @@ class UploadEndpointPolicyTest {
             UploadSettings(
                 serverMode = UploadServerMode.PRODUCTION,
                 productionBaseUrl = "https://tsubashimonanato.com/health/api/v1/ingest/batches",
-                apiKey = "key",
+                apiKey = validApiKey,
                 deviceId = "device"
             )
         )
@@ -68,7 +70,7 @@ class UploadEndpointPolicyTest {
             UploadSettings(
                 serverMode = UploadServerMode.PRODUCTION,
                 productionBaseUrl = "https://tsubashimonanato.com/health/api/v1/status",
-                apiKey = "key",
+                apiKey = validApiKey,
                 deviceId = "device"
             )
         )
@@ -85,16 +87,16 @@ class UploadEndpointPolicyTest {
         val result = UploadEndpointPolicy.validate(
             UploadSettings(
                 serverMode = UploadServerMode.LOCAL_DEBUG,
-                localBaseUrl = "http://192.168.0.96:8000/health/api/v1/ingest/batches",
-                apiKey = "key",
+                localBaseUrl = "http://10.23.45.67:8000/health/api/v1/ingest/batches",
+                apiKey = validApiKey,
                 deviceId = "device"
             )
         )
 
         assertTrue(result is UploadEndpointValidation.Valid)
         val endpoint = (result as UploadEndpointValidation.Valid).endpoint
-        assertEquals("http://192.168.0.96:8000/health/api/v1/", endpoint.baseUrl)
-        assertEquals("http://192.168.0.96:8000/health/api/v1/ingest/batches", endpoint.ingestBatchesUrl)
+        assertEquals("http://10.23.45.67:8000/health/api/v1/", endpoint.baseUrl)
+        assertEquals("http://10.23.45.67:8000/health/api/v1/ingest/batches", endpoint.ingestBatchesUrl)
     }
 
     @Test
@@ -103,7 +105,7 @@ class UploadEndpointPolicyTest {
             UploadSettings(
                 serverMode = UploadServerMode.PRODUCTION,
                 productionBaseUrl = "http://tsubashimonanato.com/health/api/v1/",
-                apiKey = "key",
+                apiKey = validApiKey,
                 deviceId = "device"
             )
         )
@@ -116,17 +118,17 @@ class UploadEndpointPolicyTest {
         val result = UploadEndpointPolicy.validate(
             UploadSettings(
                 serverMode = UploadServerMode.LOCAL_DEBUG,
-                localBaseUrl = "http://192.168.0.96/health/api/v1",
-                apiKey = "key",
+                localBaseUrl = "http://10.23.45.67/health/api/v1",
+                apiKey = validApiKey,
                 deviceId = "device"
             )
         )
 
         assertTrue(result is UploadEndpointValidation.Valid)
         val endpoint = (result as UploadEndpointValidation.Valid).endpoint
-        assertEquals("http://192.168.0.96/health/api/v1/", endpoint.baseUrl)
-        assertEquals("http://192.168.0.96/health/api/v1/status", endpoint.statusUrl)
-        assertEquals("http://192.168.0.96/health/api/v1/ingest/batches", endpoint.ingestBatchesUrl)
+        assertEquals("http://10.23.45.67/health/api/v1/", endpoint.baseUrl)
+        assertEquals("http://10.23.45.67/health/api/v1/status", endpoint.statusUrl)
+        assertEquals("http://10.23.45.67/health/api/v1/ingest/batches", endpoint.ingestBatchesUrl)
     }
 
     @Test
@@ -135,7 +137,7 @@ class UploadEndpointPolicyTest {
             UploadSettings(
                 serverMode = UploadServerMode.LOCAL_DEBUG,
                 localBaseUrl = "http://127.0.0.1:8000/health/api/v1",
-                apiKey = "key",
+                apiKey = validApiKey,
                 deviceId = "device"
             )
         )
@@ -153,7 +155,7 @@ class UploadEndpointPolicyTest {
             UploadSettings(
                 serverMode = UploadServerMode.LOCAL_DEBUG,
                 localBaseUrl = "http://PC-LAN-IP:8000/health/api/v1",
-                apiKey = "key",
+                apiKey = validApiKey,
                 deviceId = "device"
             )
         )
@@ -171,7 +173,7 @@ class UploadEndpointPolicyTest {
             UploadSettings(
                 serverMode = UploadServerMode.LOCAL_DEBUG,
                 localBaseUrl = "http://10.0.2.2:8000/health/api/v1",
-                apiKey = "key",
+                apiKey = validApiKey,
                 deviceId = "device"
             )
         )
@@ -205,5 +207,24 @@ class UploadEndpointPolicyTest {
         assertTrue(
             UploadEndpointPolicy.validate(settings, requireApiKey = false) is UploadEndpointValidation.Valid
         )
+    }
+
+    @Test
+    fun authenticatedCallsUseTheSameKeyLengthBoundsAsTheServer() {
+        val tooShort = UploadSettings(
+            serverMode = UploadServerMode.PRODUCTION,
+            apiKey = "k".repeat(UploadEndpointPolicy.MINIMUM_API_KEY_LENGTH - 1),
+            deviceId = "device"
+        )
+        val maximumLength = tooShort.copy(
+            apiKey = "k".repeat(UploadEndpointPolicy.MAXIMUM_API_KEY_LENGTH)
+        )
+        val tooLong = tooShort.copy(
+            apiKey = "k".repeat(UploadEndpointPolicy.MAXIMUM_API_KEY_LENGTH + 1)
+        )
+
+        assertTrue(UploadEndpointPolicy.validate(tooShort) is UploadEndpointValidation.Invalid)
+        assertTrue(UploadEndpointPolicy.validate(maximumLength) is UploadEndpointValidation.Valid)
+        assertTrue(UploadEndpointPolicy.validate(tooLong) is UploadEndpointValidation.Invalid)
     }
 }
