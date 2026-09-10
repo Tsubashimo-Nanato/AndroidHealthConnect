@@ -65,6 +65,7 @@ import com.example.healthconnectandroid.hc.sync.syncAllStatusText
 import com.example.healthconnectandroid.hc.upload.HealthUploadService
 import com.example.healthconnectandroid.hc.upload.HealthUploadWorker
 import com.example.healthconnectandroid.hc.upload.ProfilePairingStore
+import com.example.healthconnectandroid.hc.upload.ProfileUploadCredential
 import com.example.healthconnectandroid.hc.upload.UploadAutoQueueDecision
 import com.example.healthconnectandroid.hc.upload.UploadAutoQueuePolicy
 import com.example.healthconnectandroid.hc.upload.UploadDebugModePolicy
@@ -124,6 +125,8 @@ import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 import java.time.Instant
+import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -135,6 +138,12 @@ private val HR_PERMISSION = HealthDataTypeRegistry.heartRate.requiredReadPermiss
 private const val TAG = "HealthConnect"
 private const val VISIBLE_DATA_CACHE_TTL_MILLIS = 60_000L
 private const val MEDICINE_SEED_VERSION = 1
+private const val UPLOAD_SETTINGS_SECURE_STORAGE_ERROR =
+    "Upload settings not saved: secure API key storage is unavailable"
+private const val UPLOAD_SETTINGS_SECURE_STORAGE_READ_ERROR =
+    "Upload settings unavailable: secure storage is temporarily unavailable"
+private const val UPLOAD_SETTINGS_REENTRY_REQUIRED =
+    "Upload settings must be entered again because the encrypted configuration could not be recovered"
 
 class MainActivity : ComponentActivity() {
     private var pendingTypeExportKey: String? = null
@@ -425,8 +434,13 @@ class MainActivity : ComponentActivity() {
         var userProfile by remember { mutableStateOf(activeProfile.userProfile) }
         var userPreferences by remember { mutableStateOf(AppPreferences.userPreferences(this@MainActivity)) }
         var uploadSettings by remember {
-            mutableStateOf(AppPreferences.uploadSettings(this@MainActivity, activeProfile.id))
+            mutableStateOf(UploadSettings(deviceId = UUID.randomUUID().toString()))
         }
+        val uploadSettingsCoordinator = remember { UploadSettingsOperationCoordinator() }
+        var uploadSettingsOperationBusy by remember { mutableStateOf(false) }
+        var uploadSettingsOperationGeneration by remember { mutableLongStateOf(0L) }
+        var uploadSettingsReady by remember { mutableStateOf(false) }
+        var uploadSettingsReentryRequired by remember { mutableStateOf(false) }
         var uploadStatus by remember {
             mutableStateOf(AppPreferences.uploadStatus(this@MainActivity, activeProfile.id))
         }
@@ -575,8 +589,40 @@ class MainActivity : ComponentActivity() {
             dataCatalogRevision++
         }
 
+        fun applyUploadSettingsLoad(
+            loadResult: UploadSettingsLoadResult,
+            availableMessage: String = "Ready"
+        ) {
+            uploadSettings = loadResult.settings
+            when (loadResult) {
+                is UploadSettingsLoadResult.Available -> {
+                    uploadSettingsReady = true
+                    uploadSettingsReentryRequired = false
+                    uploadActionStatus = availableMessage
+                }
+                is UploadSettingsLoadResult.ReentryRequired -> {
+                    uploadSettingsReady = false
+                    uploadSettingsReentryRequired = true
+                    uploadActionStatus = UPLOAD_SETTINGS_REENTRY_REQUIRED
+                }
+                is UploadSettingsLoadResult.SecureStorageUnavailable -> {
+                    uploadSettingsReady = false
+                    uploadSettingsReentryRequired = false
+                    uploadActionStatus = UPLOAD_SETTINGS_SECURE_STORAGE_READ_ERROR
+                }
+            }
+        }
+
+        suspend fun reloadUploadSettings(availableMessage: String = "Ready") {
+            val loadResult = withContext(Dispatchers.IO) {
+                AppPreferences.loadUploadSettings(this@MainActivity, activeProfile.id)
+            }
+            applyUploadSettingsLoad(loadResult, availableMessage)
+        }
+
         fun refreshUploadStatus() {
             uploadStatus = AppPreferences.uploadStatus(this@MainActivity, activeProfile.id)
+            if (!uploadSettingsReady) return
             scope.launch {
                 loadUploadPendingCounts(uploadSettings, force = true)
             }
@@ -753,30 +799,119 @@ class MainActivity : ComponentActivity() {
             if (!activeProfile.ownsHealthConnect && settings.profileCredential == null) {
                 "Upload is unavailable for this local profile"
             } else {
-            when (val decision = UploadAutoQueuePolicy.decide(settings)) {
-                UploadAutoQueueDecision.Disabled -> null
-                is UploadAutoQueueDecision.Queue -> {
-                    HealthUploadWorker.enqueue(this@MainActivity, activeProfile.id)
-                    "Auto upload queued"
+                when (val decision = UploadAutoQueuePolicy.decide(settings)) {
+                    UploadAutoQueueDecision.Disabled -> null
+                    is UploadAutoQueueDecision.Queue -> {
+                        HealthUploadWorker.enqueue(this@MainActivity, activeProfile.id)
+                        "Auto upload queued"
+                    }
+                    is UploadAutoQueueDecision.Invalid ->
+                        "Auto upload not queued: ${decision.reason}"
                 }
-                is UploadAutoQueueDecision.Invalid ->
-                    "Auto upload not queued: ${decision.reason}"
-            }
             }
 
-        fun redeemPairing(pairing: UploadPairingCode) {
-            scope.launch {
-                if (actionInProgress != null) {
-                    uploadActionStatus = "Another action is still running"
-                    return@launch
+        fun restorePairingCredential(previous: ProfileUploadCredential?) {
+            runCatching {
+                if (previous == null) {
+                    ProfilePairingStore.clear(this@MainActivity, activeProfile.id)
+                } else {
+                    ProfilePairingStore.save(this@MainActivity, activeProfile.id, previous)
                 }
-                actionInProgress = AppAction.UPLOAD_PAIRING
-                uploadActionStatus = "Pairing with server..."
+            }.onFailure { throwable ->
+                Log.e(TAG, "Failed to restore pairing after settings write failure", throwable)
+            }
+        }
+
+        fun uploadSettingsBlockedMessage(settings: UploadSettings): String {
+            val endpointValidation = UploadEndpointPolicy.validate(settings)
+            if (endpointValidation is UploadEndpointValidation.Invalid) {
+                return endpointValidation.reason
+            }
+            return if (uploadSettingsReentryRequired) {
+                UPLOAD_SETTINGS_REENTRY_REQUIRED
+            } else {
+                UPLOAD_SETTINGS_SECURE_STORAGE_READ_ERROR
+            }
+        }
+
+        fun acquireUploadSettingsOperation(): UploadSettingsOperationLease? {
+            if (actionInProgress?.blocksUpload == true || uploadSettingsOperationBusy) {
+                uploadActionStatus = "Another upload action is already in progress"
+                return null
+            }
+            val lease = uploadSettingsCoordinator.tryBegin()
+            if (lease == null) {
+                uploadActionStatus = "Another upload action is already in progress"
+                return null
+            }
+            uploadSettingsOperationBusy = true
+            uploadSettingsOperationGeneration = lease.generation
+            return lease
+        }
+
+        fun finishUploadSettingsOperation(lease: UploadSettingsOperationLease) {
+            if (uploadSettingsCoordinator.finish(lease) &&
+                uploadSettingsOperationGeneration == lease.generation
+            ) {
+                uploadSettingsOperationBusy = false
+            }
+        }
+
+        fun launchUploadSettingsOperation(
+            lease: UploadSettingsOperationLease,
+            block: suspend () -> Unit
+        ) {
+            scope.launch {
+                try {
+                    uploadSettingsCoordinator.runExclusive(lease, block)
+                } finally {
+                    finishUploadSettingsOperation(lease)
+                }
+            }
+        }
+
+        suspend fun persistUploadSettings(
+            lease: UploadSettingsOperationLease,
+            settings: UploadSettings,
+            replaceCorruptKey: Boolean
+        ): Boolean {
+            val saved = withContext(Dispatchers.IO) {
+                AppPreferences.setUploadSettings(
+                    this@MainActivity,
+                    settings,
+                    activeProfile.id,
+                    replaceCorruptKey = replaceCorruptKey
+                )
+            }
+            if (!uploadSettingsCoordinator.isCurrent(lease)) return false
+            if (!saved) {
+                val reloaded = withContext(Dispatchers.IO) {
+                    AppPreferences.loadUploadSettings(this@MainActivity, activeProfile.id)
+                }
+                if (!uploadSettingsCoordinator.isCurrent(lease)) return false
+                applyUploadSettingsLoad(reloaded, UPLOAD_SETTINGS_SECURE_STORAGE_ERROR)
+                return false
+            }
+            uploadSettingsReady = true
+            uploadSettingsReentryRequired = false
+            uploadSettings = settings
+            return true
+        }
+
+        fun redeemPairing(
+            pairing: UploadPairingCode,
+            lease: UploadSettingsOperationLease,
+            currentSettings: UploadSettings,
+            replaceCorruptKey: Boolean
+        ) {
+            actionInProgress = AppAction.UPLOAD_PAIRING
+            uploadActionStatus = "Pairing with server..."
+            launchUploadSettingsOperation(lease) {
                 try {
                     val clientDeviceId = ProfilePairingStore.clientDeviceId(
                         context = this@MainActivity,
                         localProfileId = activeProfile.id,
-                        legacyDeviceId = uploadSettings.deviceId,
+                        legacyDeviceId = currentSettings.deviceId,
                         useLegacyId = activeProfile.ownsHealthConnect
                     )
                     when (
@@ -792,28 +927,35 @@ class MainActivity : ComponentActivity() {
                     ) {
                         is UploadPairingResult.Success -> {
                             val credential = result.credential
+                            val previousCredential = ProfilePairingStore.load(
+                                this@MainActivity,
+                                activeProfile.id
+                            )
                             ProfilePairingStore.save(this@MainActivity, activeProfile.id, credential)
-                            val pairedSettings = uploadSettings.copy(
+                            val pairedSettings = currentSettings.copy(
                                 serverMode = credential.serverMode,
                                 productionBaseUrl = if (
                                     credential.serverMode == UploadServerMode.PRODUCTION
                                 ) {
                                     credential.uploadBaseUrl
                                 } else {
-                                    uploadSettings.productionBaseUrl
+                                    currentSettings.productionBaseUrl
                                 },
                                 localBaseUrl = if (
                                     credential.serverMode == UploadServerMode.LOCAL_DEBUG
                                 ) {
                                     credential.uploadBaseUrl
                                 } else {
-                                    uploadSettings.localBaseUrl
+                                    currentSettings.localBaseUrl
                                 },
                                 apiKey = "",
                                 profileCredential = credential
                             )
-                            uploadSettings = pairedSettings
-                            AppPreferences.setUploadSettings(this@MainActivity, pairedSettings, activeProfile.id)
+                            if (!persistUploadSettings(lease, pairedSettings, replaceCorruptKey)) {
+                                restorePairingCredential(previousCredential)
+                                reloadUploadSettings(UPLOAD_SETTINGS_SECURE_STORAGE_ERROR)
+                                return@launchUploadSettingsOperation
+                            }
                             if (credential.serverMode == UploadServerMode.LOCAL_DEBUG) {
                                 debugEnabled = true
                                 AppPreferences.setDebugModeEnabled(this@MainActivity, true)
@@ -823,7 +965,11 @@ class MainActivity : ComponentActivity() {
                                 connectionResult = "Paired ${credential.serverProfileName}",
                                 severity = UploadResultSeverity.SUCCESS
                             )
-                            AppPreferences.setUploadStatus(this@MainActivity, uploadStatus, activeProfile.id)
+                            AppPreferences.setUploadStatus(
+                                this@MainActivity,
+                                uploadStatus,
+                                activeProfile.id
+                            )
                             uploadActionStatus = "Paired ${credential.serverProfileName}"
                             refreshUploadStatus()
                         }
@@ -842,10 +988,15 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        fun applyScannedUploadText(rawText: String) {
-            when (val result = UploadScanPolicy.applyScannedText(uploadSettings, rawText)) {
+        fun applyScannedUploadText(
+            rawText: String,
+            lease: UploadSettingsOperationLease,
+            currentSettings: UploadSettings,
+            replaceCorruptKey: Boolean
+        ) {
+            if (!uploadSettingsCoordinator.isCurrent(lease)) return
+            when (val result = UploadScanPolicy.applyScannedText(currentSettings, rawText)) {
                 is UploadScanApplyResult.Success -> {
-                    ProfilePairingStore.clear(this@MainActivity, activeProfile.id)
                     val legacyResult = result.copy(
                         settings = result.settings.copy(profileCredential = null)
                     )
@@ -854,43 +1005,80 @@ class MainActivity : ComponentActivity() {
                         debugEnabled = debugEnabled,
                         success = legacyResult
                     )
-                    uploadSettings = update.settings
-                    uploadStatus = update.status
-                    debugEnabled = update.debugEnabled
-                    AppPreferences.setUploadSettings(this@MainActivity, update.settings, activeProfile.id)
-                    AppPreferences.setUploadStatus(this@MainActivity, update.status, activeProfile.id)
-                    AppPreferences.setDebugModeEnabled(this@MainActivity, update.debugEnabled)
-                    uploadActionStatus = update.message
-                    refreshUploadStatus()
+                    launchUploadSettingsOperation(lease) {
+                        if (!persistUploadSettings(lease, update.settings, replaceCorruptKey)) {
+                            return@launchUploadSettingsOperation
+                        }
+                        ProfilePairingStore.clear(this@MainActivity, activeProfile.id)
+                        uploadStatus = update.status
+                        debugEnabled = update.debugEnabled
+                        AppPreferences.setUploadStatus(this@MainActivity, update.status, activeProfile.id)
+                        AppPreferences.setDebugModeEnabled(this@MainActivity, update.debugEnabled)
+                        uploadActionStatus = update.message
+                        refreshUploadStatus()
+                    }
                 }
-                is UploadScanApplyResult.Redeem -> redeemPairing(result.pairing)
+                is UploadScanApplyResult.Redeem -> redeemPairing(
+                    pairing = result.pairing,
+                    lease = lease,
+                    currentSettings = currentSettings,
+                    replaceCorruptKey = replaceCorruptKey
+                )
                 is UploadScanApplyResult.Invalid -> {
                     uploadActionStatus = "QR scan failed: ${result.message}"
+                    finishUploadSettingsOperation(lease)
                 }
             }
         }
 
         fun scanUploadQr() {
+            if (!UploadSettingsWritePolicy.canEdit(uploadSettingsReady, uploadSettingsReentryRequired)) {
+                uploadActionStatus = UPLOAD_SETTINGS_SECURE_STORAGE_READ_ERROR
+                return
+            }
+            val lease = acquireUploadSettingsOperation() ?: return
+            val settingsSnapshot = uploadSettings
+            val replaceCorruptKey = uploadSettingsReentryRequired
+            val callbackClaimed = AtomicBoolean(false)
             uploadActionStatus = "Opening pairing scanner..."
-            val options = GmsBarcodeScannerOptions.Builder()
-                .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
-                .build()
-            GmsBarcodeScanning.getClient(this@MainActivity, options)
-                .startScan()
-                .addOnSuccessListener { barcode ->
-                    val rawValue = barcode.rawValue?.trim()
-                    if (rawValue.isNullOrBlank()) {
-                        uploadActionStatus = "QR scan failed: empty code"
-                    } else {
-                        applyScannedUploadText(rawValue)
+            try {
+                val options = GmsBarcodeScannerOptions.Builder()
+                    .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
+                    .build()
+                GmsBarcodeScanning.getClient(this@MainActivity, options)
+                    .startScan()
+                    .addOnSuccessListener { barcode ->
+                        if (!callbackClaimed.compareAndSet(false, true)) return@addOnSuccessListener
+                        val rawValue = barcode.rawValue?.trim()
+                        if (rawValue.isNullOrBlank()) {
+                            uploadActionStatus = "QR scan failed: empty code"
+                            finishUploadSettingsOperation(lease)
+                        } else {
+                            applyScannedUploadText(
+                                rawValue,
+                                lease,
+                                settingsSnapshot,
+                                replaceCorruptKey
+                            )
+                        }
                     }
-                }
-                .addOnCanceledListener {
-                    uploadActionStatus = "Pairing scan cancelled"
-                }
-                .addOnFailureListener { throwable ->
-                    uploadActionStatus = "QR scan failed: ${throwable.message ?: throwable.javaClass.simpleName}"
-                }
+                    .addOnCanceledListener {
+                        if (!callbackClaimed.compareAndSet(false, true)) return@addOnCanceledListener
+                        uploadActionStatus = "Pairing scan cancelled"
+                        finishUploadSettingsOperation(lease)
+                    }
+                    .addOnFailureListener { throwable ->
+                        if (!callbackClaimed.compareAndSet(false, true)) return@addOnFailureListener
+                        uploadActionStatus =
+                            "QR scan failed: ${throwable.message ?: throwable.javaClass.simpleName}"
+                        finishUploadSettingsOperation(lease)
+                    }
+            } catch (throwable: Throwable) {
+                callbackClaimed.set(true)
+                uploadActionStatus =
+                    "QR scan failed: ${throwable.message ?: throwable.javaClass.simpleName}"
+                finishUploadSettingsOperation(lease)
+            }
         }
 
         fun togglePeriodicSync() {
@@ -1014,30 +1202,58 @@ class MainActivity : ComponentActivity() {
         }
 
         fun saveUploadSettings(settings: UploadSettings) {
-            uploadSettings = settings
-            AppPreferences.setUploadSettings(this@MainActivity, settings, activeProfile.id)
-            uploadStatus = uploadStatus.copy(serverMode = settings.serverMode)
-            AppPreferences.setUploadStatus(this@MainActivity, uploadStatus, activeProfile.id)
-            val autoUploadMessage = queueAutoUpload(settings)
-            if (autoUploadMessage?.startsWith("Auto upload not queued:") == true) {
-                uploadStatus = uploadStatus.copy(
-                    connectionResult = autoUploadMessage,
-                    severity = UploadResultSeverity.WARNING,
-                    serverMode = settings.serverMode
+            if (!UploadSettingsWritePolicy.canWrite(
+                    storageReady = uploadSettingsReady,
+                    reentryRequired = uploadSettingsReentryRequired,
+                    settings = settings,
+                    intent = UploadSettingsWriteIntent.CONFIGURATION
                 )
-                AppPreferences.setUploadStatus(this@MainActivity, uploadStatus, activeProfile.id)
+            ) {
+                uploadActionStatus = uploadSettingsBlockedMessage(settings)
+                return
             }
-            uploadActionStatus = autoUploadMessage?.let { "Upload settings saved. $it" }
-                ?: "Upload settings saved"
-            refreshUploadStatus()
+            val replaceCorruptKey = uploadSettingsReentryRequired
+            val lease = acquireUploadSettingsOperation() ?: return
+            launchUploadSettingsOperation(lease) {
+                if (!persistUploadSettings(lease, settings, replaceCorruptKey)) {
+                    return@launchUploadSettingsOperation
+                }
+                uploadStatus = uploadStatus.copy(serverMode = settings.serverMode)
+                AppPreferences.setUploadStatus(this@MainActivity, uploadStatus, activeProfile.id)
+                val autoUploadMessage = queueAutoUpload(settings)
+                if (autoUploadMessage?.startsWith("Auto upload not queued:") == true) {
+                    uploadStatus = uploadStatus.copy(
+                        connectionResult = autoUploadMessage,
+                        severity = UploadResultSeverity.WARNING,
+                        serverMode = settings.serverMode
+                    )
+                    AppPreferences.setUploadStatus(this@MainActivity, uploadStatus, activeProfile.id)
+                }
+                uploadActionStatus = autoUploadMessage?.let { "Upload settings saved. $it" }
+                    ?: "Upload settings saved"
+                refreshUploadStatus()
+            }
         }
 
         fun testUploadConnection(settings: UploadSettings) {
-            scope.launch {
+            if (!UploadSettingsWritePolicy.canWrite(
+                    storageReady = uploadSettingsReady,
+                    reentryRequired = uploadSettingsReentryRequired,
+                    settings = settings,
+                    intent = UploadSettingsWriteIntent.CONFIGURATION
+                )
+            ) {
+                uploadActionStatus = uploadSettingsBlockedMessage(settings)
+                return
+            }
+            val replaceCorruptKey = uploadSettingsReentryRequired
+            val lease = acquireUploadSettingsOperation() ?: return
+            actionInProgress = AppAction.UPLOAD_TEST
+            launchUploadSettingsOperation(lease) {
                 try {
-                    actionInProgress = AppAction.UPLOAD_TEST
-                    uploadSettings = settings
-                    AppPreferences.setUploadSettings(this@MainActivity, settings, activeProfile.id)
+                    if (!persistUploadSettings(lease, settings, replaceCorruptKey)) {
+                        return@launchUploadSettingsOperation
+                    }
                     uploadActionStatus = "Testing upload server..."
                     val counts = runCatching { uploadService.pendingCounts(settings) }
                         .onSuccess { pendingCounts ->
@@ -1071,12 +1287,25 @@ class MainActivity : ComponentActivity() {
         }
 
         fun uploadNow(settings: UploadSettings, range: UploadTimeRange) {
-            scope.launch {
+            if (!UploadSettingsWritePolicy.canWrite(
+                    storageReady = uploadSettingsReady,
+                    reentryRequired = uploadSettingsReentryRequired,
+                    settings = settings,
+                    intent = UploadSettingsWriteIntent.CONFIGURATION
+                )
+            ) {
+                uploadActionStatus = uploadSettingsBlockedMessage(settings)
+                return
+            }
+            val replaceCorruptKey = uploadSettingsReentryRequired
+            val lease = acquireUploadSettingsOperation() ?: return
+            actionInProgress = AppAction.UPLOAD
+            launchUploadSettingsOperation(lease) {
                 try {
-                    actionInProgress = AppAction.UPLOAD
                     uploadProgress = null
-                    uploadSettings = settings
-                    AppPreferences.setUploadSettings(this@MainActivity, settings, activeProfile.id)
+                    if (!persistUploadSettings(lease, settings, replaceCorruptKey)) {
+                        return@launchUploadSettingsOperation
+                    }
                     uploadActionStatus = uploadStartStatus(range)
                     val result = uploadService.uploadPending(settings, range) { progress ->
                         uploadProgress = progress
@@ -1117,6 +1346,36 @@ class MainActivity : ComponentActivity() {
                     uploadProgress = null
                     actionInProgress = null
                 }
+            }
+        }
+
+        fun toggleUploadDebug() {
+            val settingsSnapshot = uploadSettings
+            val update = UploadDebugModePolicy.setDebugMode(
+                currentSettings = settingsSnapshot,
+                currentStatus = uploadStatus,
+                enabled = !debugEnabled
+            )
+            if (!UploadSettingsWritePolicy.canWrite(
+                    storageReady = uploadSettingsReady,
+                    reentryRequired = uploadSettingsReentryRequired,
+                    settings = update.settings,
+                    intent = UploadSettingsWriteIntent.REQUIRES_EXISTING_CONFIGURATION
+                )
+            ) {
+                uploadActionStatus = uploadSettingsBlockedMessage(update.settings)
+                return
+            }
+            val lease = acquireUploadSettingsOperation() ?: return
+            launchUploadSettingsOperation(lease) {
+                if (!persistUploadSettings(lease, update.settings, replaceCorruptKey = false)) {
+                    return@launchUploadSettingsOperation
+                }
+                debugEnabled = update.debugEnabled
+                uploadStatus = update.status
+                AppPreferences.setDebugModeEnabled(this@MainActivity, update.debugEnabled)
+                AppPreferences.setUploadStatus(this@MainActivity, update.status, activeProfile.id)
+                uploadActionStatus = update.message
             }
         }
 
@@ -1164,6 +1423,7 @@ class MainActivity : ComponentActivity() {
 
         LaunchedEffect(Unit) {
             try {
+                reloadUploadSettings()
                 refreshHealthConnectAccess()
                 ensureBackgroundSyncScheduled()
                 runCatching { catalogQueries.warmCache() }
@@ -1194,6 +1454,7 @@ class MainActivity : ComponentActivity() {
                     MedicineReminderScheduler.scheduleAll(
                         context = this@MainActivity,
                         repository = medicineRepository,
+                        profileId = activeProfile.id,
                         zoneId = displayPreferences.zoneId
                     )
                 }.onFailure { throwable ->
@@ -1234,19 +1495,24 @@ class MainActivity : ComponentActivity() {
                 medicineOverlayReminderEnabled =
                     AppPreferences.medicineOverlayReminderEnabled(this@MainActivity)
                 medicineOverlayPermissionGranted = hasMedicineOverlayPermission()
+                notificationPermissionGranted = hasNotificationPermission()
                 val exactAlarmAccess = hasMedicineExactAlarmAccess()
                 if (exactAlarmAccess && !medicineExactAlarmAccessGranted) {
                     scope.launch {
                         MedicineReminderScheduler.scheduleAll(
-                            this@MainActivity,
-                            medicineRepository,
-                            activeProfile.id
+                            context = this@MainActivity,
+                            repository = medicineRepository,
+                            profileId = activeProfile.id,
+                            zoneId = displayPreferences.zoneId
                         )
                     }
                 }
                 medicineExactAlarmAccessGranted = exactAlarmAccess
                 if (initialLoadFinished) {
                     scope.launch {
+                        if (!uploadSettingsReady && !uploadSettingsReentryRequired) {
+                            reloadUploadSettings()
+                        }
                         refreshHealthConnectAccess()
                         ensureBackgroundSyncScheduled()
                         refreshVisibleDestination(nav.destination)
@@ -1390,10 +1656,16 @@ class MainActivity : ComponentActivity() {
                                 syncBusy = actionInProgress?.blocksSyncSettings == true,
                                 syncProgress = syncProgress,
                                 uploadSettings = uploadSettings,
+                                uploadSettingsGeneration = uploadSettingsOperationGeneration,
                                 uploadStatus = uploadStatus,
                                 uploadPendingCounts = uploadPendingCounts,
                                 debugEnabled = debugEnabled,
-                                uploadBusy = actionInProgress?.blocksUpload == true,
+                                uploadBusy = !UploadSettingsWritePolicy.canEdit(
+                                    uploadSettingsReady,
+                                    uploadSettingsReentryRequired
+                                ) ||
+                                    uploadSettingsOperationBusy ||
+                                    actionInProgress?.blocksUpload == true,
                                 uploadProgress = uploadProgress,
                                 onRequestPlatform = {
                                     requestHealthConnectPermissions(setOf(HR_PERMISSION))
@@ -1454,29 +1726,7 @@ class MainActivity : ComponentActivity() {
                                     storageToolsStatus = "Choose ZIP destination..."
                                     createCsvZip.launch("health_connect_csv_${exportFileStamp()}.zip")
                                 },
-                                onToggleDebug = {
-                                    val nextDebugEnabled = !debugEnabled
-                                    val update = UploadDebugModePolicy.setDebugMode(
-                                        currentSettings = uploadSettings,
-                                        currentStatus = uploadStatus,
-                                        enabled = nextDebugEnabled
-                                    )
-                                    debugEnabled = update.debugEnabled
-                                    uploadSettings = update.settings
-                                    uploadStatus = update.status
-                                    AppPreferences.setDebugModeEnabled(this@MainActivity, update.debugEnabled)
-                                    AppPreferences.setUploadSettings(
-                                        this@MainActivity,
-                                        update.settings,
-                                        activeProfile.id
-                                    )
-                                    AppPreferences.setUploadStatus(
-                                        this@MainActivity,
-                                        update.status,
-                                        activeProfile.id
-                                    )
-                                    storageToolsStatus = update.message
-                                },
+                                onToggleDebug = ::toggleUploadDebug,
                                 onSyncHours = { hours ->
                                     scope.launch {
                                         storageToolsStatus = "Syncing heart rate for last ${hours}h..."

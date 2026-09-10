@@ -42,7 +42,7 @@ class UploadRetentionPolicyTest {
         serverMode = mode,
         productionBaseUrl = UploadEndpointPolicy.PRODUCTION_BASE_URL,
         localBaseUrl = UploadEndpointPolicy.DEFAULT_LOCAL_BASE_URL,
-        apiKey = "test-key",
+        apiKey = "k".repeat(UploadEndpointPolicy.MINIMUM_API_KEY_LENGTH),
         deviceId = "test-device"
     )
 }

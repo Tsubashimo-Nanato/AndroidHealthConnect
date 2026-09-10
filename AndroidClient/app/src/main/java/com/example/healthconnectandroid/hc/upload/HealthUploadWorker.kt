@@ -14,6 +14,7 @@ import androidx.work.workDataOf
 import com.example.healthconnectandroid.AppPreferences
 import com.example.healthconnectandroid.LocalProfile
 import com.example.healthconnectandroid.LocalProfileStore
+import com.example.healthconnectandroid.UploadSettingsLoadResult
 import com.example.healthconnectandroid.data.AppDb
 import com.example.healthconnectandroid.hc.retention.HealthRetentionWorker
 import java.util.concurrent.TimeUnit
@@ -31,7 +32,30 @@ class HealthUploadWorker(
 
     private suspend fun runUpload(): Result {
         val profile = workerProfile() ?: return Result.failure()
-        val settings = AppPreferences.uploadSettings(applicationContext, profile.id)
+        val settingsLoad = AppPreferences.loadUploadSettings(applicationContext, profile.id)
+        if (settingsLoad is UploadSettingsLoadResult.SecureStorageUnavailable) {
+            AppPreferences.setUploadStatus(
+                applicationContext,
+                AppPreferences.uploadStatus(applicationContext, profile.id).copy(
+                    lastResult = "Upload deferred: secure settings are temporarily unavailable",
+                    severity = UploadResultSeverity.WARNING
+                ),
+                profile.id
+            )
+            return Result.retry()
+        }
+        if (settingsLoad is UploadSettingsLoadResult.ReentryRequired) {
+            AppPreferences.setUploadStatus(
+                applicationContext,
+                AppPreferences.uploadStatus(applicationContext, profile.id).copy(
+                    lastResult = "Upload stopped: secure settings must be entered again",
+                    severity = UploadResultSeverity.ERROR
+                ),
+                profile.id
+            )
+            return Result.failure()
+        }
+        val settings = settingsLoad.settings
         val service = HealthUploadService(AppDb.get(applicationContext, profile.id))
         val pending = service.pendingCounts(settings)
         val constrainedRun = inputData.getBoolean(KEY_CONSTRAINED_RUN, false)
@@ -118,9 +142,7 @@ class HealthUploadWorker(
             profileId: String,
             existingWorkPolicy: ExistingWorkPolicy
         ) {
-            val profile = LocalProfileStore.profile(context, profileId) ?: return
-            val settings = AppPreferences.uploadSettings(context, profileId)
-            if (!profile.ownsHealthConnect && settings.profileCredential == null) return
+            LocalProfileStore.profile(context, profileId) ?: return
             val request = OneTimeWorkRequestBuilder<HealthUploadWorker>()
                 .setInputData(workDataOf(KEY_PROFILE_ID to profileId))
                 .setConstraints(

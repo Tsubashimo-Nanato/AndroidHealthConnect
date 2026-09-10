@@ -7,6 +7,7 @@ import com.example.healthconnectandroid.data.MedicineItemEntity
 import com.example.healthconnectandroid.hc.upload.HealthUploadWorker
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -48,25 +49,30 @@ class LocalProfileIsolationTest {
         val suffix = System.nanoTime().toString()
         val first = requireCreated(LocalProfileStore.create(context, "Upload A $suffix"))
         val second = requireCreated(LocalProfileStore.create(context, "Upload B $suffix"))
-        val firstSettings = AppPreferences.uploadSettings(context, first.id).copy(
+        val firstSettings = AppPreferences.loadUploadSettings(context, first.id).settings.copy(
             productionBaseUrl = "https://first.example.test/health/api/v1/ingest/batches",
-            apiKey = "first-key",
+            apiKey = "f".repeat(32),
             autoUploadEnabled = true
         )
-        val secondSettings = AppPreferences.uploadSettings(context, second.id).copy(
+        val secondSettings = AppPreferences.loadUploadSettings(context, second.id).settings.copy(
             productionBaseUrl = "https://second.example.test/health/api/v1/ingest/batches",
-            apiKey = "second-key",
+            apiKey = "s".repeat(32),
             autoUploadEnabled = false
         )
 
-        AppPreferences.setUploadSettings(context, firstSettings, first.id)
-        AppPreferences.setUploadSettings(context, secondSettings, second.id)
+        assertTrue(AppPreferences.setUploadSettings(context, firstSettings, first.id))
+        assertTrue(AppPreferences.setUploadSettings(context, secondSettings, second.id))
 
-        assertEquals(firstSettings, AppPreferences.uploadSettings(context, first.id))
-        assertEquals(secondSettings, AppPreferences.uploadSettings(context, second.id))
+        val firstReloaded = AppPreferences.loadUploadSettings(context, first.id)
+        val secondReloaded = AppPreferences.loadUploadSettings(context, second.id)
+        assertTrue(firstReloaded is UploadSettingsLoadResult.Available)
+        assertTrue(secondReloaded is UploadSettingsLoadResult.Available)
+        assertEquals(firstSettings, firstReloaded.settings)
+        assertEquals(secondSettings, secondReloaded.settings)
+        assertFalse(firstReloaded.settings.apiKey == secondReloaded.settings.apiKey)
         assertNotEquals(
-            AppPreferences.uploadSettings(context, first.id).deviceId,
-            AppPreferences.uploadSettings(context, second.id).deviceId
+            firstReloaded.settings.deviceId,
+            secondReloaded.settings.deviceId
         )
 
         HealthUploadWorker.enqueue(context, "missing-$suffix")

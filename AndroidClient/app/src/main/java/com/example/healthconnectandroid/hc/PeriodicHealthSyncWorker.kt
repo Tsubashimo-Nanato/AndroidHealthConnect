@@ -15,6 +15,7 @@ import androidx.work.workDataOf
 import com.example.healthconnectandroid.AppPreferences
 import com.example.healthconnectandroid.LocalProfile
 import com.example.healthconnectandroid.LocalProfileStore
+import com.example.healthconnectandroid.UploadSettingsLoadResult
 import com.example.healthconnectandroid.data.AppDb
 import com.example.healthconnectandroid.hc.sync.HealthSyncService
 import com.example.healthconnectandroid.hc.sync.HistoryBackfillBatchResult
@@ -135,7 +136,34 @@ class PeriodicHealthSyncWorker(
     }
 
     private fun queueAutoUploadIfEnabled(profileId: String, afterCurrent: Boolean = false) {
-        val settings = AppPreferences.uploadSettings(applicationContext, profileId)
+        val settingsLoad = AppPreferences.loadUploadSettings(applicationContext, profileId)
+        if (settingsLoad is UploadSettingsLoadResult.SecureStorageUnavailable) {
+            val message = "Auto upload not queued: secure settings are temporarily unavailable"
+            AppPreferences.setUploadStatus(
+                applicationContext,
+                AppPreferences.uploadStatus(applicationContext, profileId).copy(
+                    connectionResult = message,
+                    severity = UploadResultSeverity.WARNING
+                ),
+                profileId
+            )
+            Log.w(TAG, message)
+            return
+        }
+        if (settingsLoad is UploadSettingsLoadResult.ReentryRequired) {
+            val message = "Auto upload not queued: secure settings must be entered again"
+            AppPreferences.setUploadStatus(
+                applicationContext,
+                AppPreferences.uploadStatus(applicationContext, profileId).copy(
+                    connectionResult = message,
+                    severity = UploadResultSeverity.ERROR
+                ),
+                profileId
+            )
+            Log.e(TAG, message)
+            return
+        }
+        val settings = settingsLoad.settings
         when (val decision = UploadAutoQueuePolicy.decide(settings)) {
             UploadAutoQueueDecision.Disabled -> Unit
             is UploadAutoQueueDecision.Queue -> {

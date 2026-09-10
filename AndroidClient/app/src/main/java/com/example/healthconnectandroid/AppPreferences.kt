@@ -1,12 +1,17 @@
 package com.example.healthconnectandroid
 
 import android.content.Context
+import android.content.SharedPreferences
 import com.example.healthconnectandroid.hc.upload.UploadEndpointPolicy
 import com.example.healthconnectandroid.hc.upload.ProfilePairingStore
+import com.example.healthconnectandroid.hc.upload.ProfileUploadCredential
+import com.example.healthconnectandroid.hc.upload.UploadEndpointValidation
 import com.example.healthconnectandroid.hc.upload.UploadResultSeverity
 import com.example.healthconnectandroid.hc.upload.UploadServerMode
 import com.example.healthconnectandroid.hc.upload.UploadSettings
 import com.example.healthconnectandroid.hc.upload.UploadStatus
+import com.example.healthconnectandroid.security.SecureUploadSettingsReadResult
+import com.example.healthconnectandroid.security.SecureUploadSettingsStore
 import java.time.LocalDate
 import java.time.Period
 import java.time.ZoneId
@@ -91,6 +96,14 @@ data class UserProfile(
         get() = dateOfBirth?.let(AgeCalculator::ageOn)
 }
 
+sealed interface UploadSettingsLoadResult {
+    val settings: UploadSettings
+
+    data class Available(override val settings: UploadSettings) : UploadSettingsLoadResult
+    data class SecureStorageUnavailable(override val settings: UploadSettings) : UploadSettingsLoadResult
+    data class ReentryRequired(override val settings: UploadSettings) : UploadSettingsLoadResult
+}
+
 object AppPreferences {
     private const val PREFS_NAME = "health_connect_app_preferences"
     private const val KEY_THEME_MODE = "theme_mode"
@@ -111,6 +124,8 @@ object AppPreferences {
     private const val KEY_UPLOAD_API_KEY = "upload_api_key"
     private const val KEY_UPLOAD_DEVICE_ID = "upload_device_id"
     private const val KEY_UPLOAD_AUTO_ENABLED = "upload_auto_enabled"
+    private const val KEY_UPLOAD_SECURE_MIGRATION_COMPLETE = "upload_secure_migration_complete"
+    private const val KEY_UPLOAD_LEGACY_CLEANUP_PENDING = "upload_legacy_cleanup_pending"
     private const val KEY_UPLOAD_LAST_TIME = "upload_last_time"
     private const val KEY_UPLOAD_LAST_RESULT = "upload_last_result"
     private const val KEY_UPLOAD_LAST_SEVERITY = "upload_last_severity"
@@ -240,18 +255,109 @@ object AppPreferences {
         }.apply()
     }
 
-    fun uploadSettings(
+    @Synchronized
+    fun loadUploadSettings(
         context: Context,
         profileId: String = LocalProfileStore.activeProfile(context).id
-    ): UploadSettings {
+    ): UploadSettingsLoadResult {
+        val profile = requireProfile(context, profileId)
         val prefs = prefs(context)
-        val profile = requireNotNull(LocalProfileStore.profile(context, profileId)) {
-            "Unknown local profile: $profileId"
-        }
         val credential = ProfilePairingStore.load(context, profileId)
-        fun key(baseKey: String): String =
-            scopedUploadPreferenceKey(baseKey, profileId, profile.ownsHealthConnect)
+        val key = uploadPreferenceKey(profile)
+        val secureScope = secureUploadScope(profile)
+        val secureResult = SecureUploadSettingsStore.read(context, secureScope)
+        val secureState = when (secureResult) {
+            is SecureUploadSettingsReadResult.Value -> SecureUploadSettingsState.VALUE
+            SecureUploadSettingsReadResult.Missing -> SecureUploadSettingsState.MISSING
+            SecureUploadSettingsReadResult.Corrupt -> SecureUploadSettingsState.CORRUPT
+            SecureUploadSettingsReadResult.Unavailable -> SecureUploadSettingsState.UNAVAILABLE
+        }
+        val action = LegacyUploadMigrationPolicy.decide(
+            secureState = secureState,
+            migrationComplete = prefs.getBoolean(key(KEY_UPLOAD_SECURE_MIGRATION_COMPLETE), false),
+            hasLegacyConfiguration = hasLegacyUploadPreferences(prefs, key)
+        )
+        return when (action) {
+            LegacyUploadMigrationAction.USE_SECURE -> {
+                recordMigrationCompleteAndCleanup(prefs, key)
+                UploadSettingsLoadResult.Available(
+                    (secureResult as SecureUploadSettingsReadResult.Value)
+                        .settings
+                        .copy(profileCredential = credential)
+                )
+            }
+            LegacyUploadMigrationAction.USE_DEFAULTS ->
+                UploadSettingsLoadResult.Available(
+                    defaultUploadSettings(context, profile, credential)
+                )
+            LegacyUploadMigrationAction.MIGRATE_LEGACY ->
+                migrateLegacyUploadSettings(context, prefs, profile, credential, key, secureScope)
+            LegacyUploadMigrationAction.REQUIRE_REENTRY -> {
+                // Mark the one-way boundary before cleanup. A damaged or removed secure payload
+                // must never make an older plaintext API key authoritative again.
+                recordMigrationCompleteAndCleanup(prefs, key)
+                UploadSettingsLoadResult.ReentryRequired(
+                    defaultUploadSettings(context, profile, credential)
+                )
+            }
+            LegacyUploadMigrationAction.DEFER ->
+                UploadSettingsLoadResult.SecureStorageUnavailable(
+                    defaultUploadSettings(context, profile, credential)
+                )
+        }
+    }
 
+    @Synchronized
+    fun setUploadSettings(
+        context: Context,
+        settings: UploadSettings,
+        profileId: String = LocalProfileStore.activeProfile(context).id,
+        replaceCorruptKey: Boolean = false
+    ): Boolean {
+        val profile = requireProfile(context, profileId)
+        val key = uploadPreferenceKey(profile)
+        if (UploadEndpointPolicy.validate(settings) is UploadEndpointValidation.Invalid) return false
+        if (!SecureUploadSettingsStore.write(
+                context = context,
+                settings = settings,
+                storageScope = secureUploadScope(profile),
+                replaceCorruptKey = replaceCorruptKey
+            )
+        ) return false
+
+        recordMigrationCompleteAndCleanup(prefs(context), key)
+        return true
+    }
+
+    private fun migrateLegacyUploadSettings(
+        context: Context,
+        prefs: SharedPreferences,
+        profile: LocalProfile,
+        credential: ProfileUploadCredential?,
+        key: (String) -> String,
+        secureScope: String?
+    ): UploadSettingsLoadResult {
+        val settings = legacyUploadSettings(context, prefs, credential, key)
+        if (UploadEndpointPolicy.validate(settings) is UploadEndpointValidation.Invalid) {
+            recordMigrationCompleteAndCleanup(prefs, key)
+            return UploadSettingsLoadResult.ReentryRequired(
+                defaultUploadSettings(context, profile, credential)
+            )
+        }
+        return if (SecureUploadSettingsStore.write(context, settings, secureScope)) {
+            recordMigrationCompleteAndCleanup(prefs, key)
+            UploadSettingsLoadResult.Available(settings)
+        } else {
+            UploadSettingsLoadResult.SecureStorageUnavailable(settings)
+        }
+    }
+
+    private fun legacyUploadSettings(
+        context: Context,
+        prefs: SharedPreferences,
+        credential: ProfileUploadCredential?,
+        key: (String) -> String
+    ): UploadSettings {
         val defaultMode = credential?.serverMode ?: UploadServerMode.PRODUCTION
         val mode = prefs.getString(key(KEY_UPLOAD_SERVER_MODE), defaultMode.name)
             ?.let { raw -> UploadServerMode.values().firstOrNull { it.name == raw } }
@@ -267,49 +373,99 @@ object AppPreferences {
         val localUrl = prefs.getString(key(KEY_UPLOAD_LOCAL_URL), defaultLocalUrl) ?: defaultLocalUrl
         val productionUrl = prefs.getString(key(KEY_UPLOAD_PRODUCTION_URL), defaultProductionUrl)
             ?: defaultProductionUrl
-        val apiKey = prefs.getString(key(KEY_UPLOAD_API_KEY), "") ?: ""
         return UploadSettings(
             serverMode = mode,
             productionBaseUrl = productionUrl,
             localBaseUrl = localUrl,
-            apiKey = apiKey,
+            apiKey = prefs.getString(key(KEY_UPLOAD_API_KEY), "")?.trim().orEmpty(),
             deviceId = uploadDeviceId(context, key(KEY_UPLOAD_DEVICE_ID)),
             autoUploadEnabled = prefs.getBoolean(key(KEY_UPLOAD_AUTO_ENABLED), false),
             profileCredential = credential
         )
     }
 
-    fun setUploadSettings(
+    private fun defaultUploadSettings(
         context: Context,
-        settings: UploadSettings,
-        profileId: String = LocalProfileStore.activeProfile(context).id
-    ) {
-        val profile = requireNotNull(LocalProfileStore.profile(context, profileId)) {
-            "Unknown local profile: $profileId"
-        }
-        fun key(baseKey: String): String =
-            scopedUploadPreferenceKey(baseKey, profileId, profile.ownsHealthConnect)
-
-        prefs(context).edit().apply {
-            putString(key(KEY_UPLOAD_SERVER_MODE), settings.serverMode.name)
-            putString(key(KEY_UPLOAD_PRODUCTION_URL), settings.productionBaseUrl.trim())
-            putString(key(KEY_UPLOAD_LOCAL_URL), settings.localBaseUrl.trim())
-            putString(key(KEY_UPLOAD_API_KEY), settings.apiKey.trim())
-            putString(key(KEY_UPLOAD_DEVICE_ID), settings.deviceId)
-            putBoolean(key(KEY_UPLOAD_AUTO_ENABLED), settings.autoUploadEnabled)
-        }.apply()
+        profile: LocalProfile,
+        credential: ProfileUploadCredential?
+    ): UploadSettings {
+        val key = uploadPreferenceKey(profile)
+        val defaults = UploadSettings(
+            deviceId = uploadDeviceId(context, key(KEY_UPLOAD_DEVICE_ID)),
+            profileCredential = credential
+        )
+        if (credential == null) return defaults
+        return defaults.copy(
+            serverMode = credential.serverMode,
+            productionBaseUrl = if (credential.serverMode == UploadServerMode.PRODUCTION) {
+                credential.uploadBaseUrl
+            } else {
+                defaults.productionBaseUrl
+            },
+            localBaseUrl = if (credential.serverMode == UploadServerMode.LOCAL_DEBUG) {
+                credential.uploadBaseUrl
+            } else {
+                defaults.localBaseUrl
+            }
+        )
     }
+
+    /** Records the one-way migration boundary, then retries plaintext cleanup until it sticks. */
+    private fun recordMigrationCompleteAndCleanup(
+        prefs: SharedPreferences,
+        key: (String) -> String
+    ) {
+        val cleanupNeeded = hasLegacyUploadPreferences(prefs, key) ||
+            prefs.getBoolean(key(KEY_UPLOAD_LEGACY_CLEANUP_PENDING), false)
+        val beforeCleanup = LegacyUploadMigrationPolicy.markerAfterCleanupAttempt(
+            cleanupNeeded = cleanupNeeded,
+            cleanupSucceeded = !cleanupNeeded
+        )
+        prefs.edit()
+            .putBoolean(key(KEY_UPLOAD_SECURE_MIGRATION_COMPLETE), beforeCleanup.migrationComplete)
+            .putBoolean(key(KEY_UPLOAD_LEGACY_CLEANUP_PENDING), beforeCleanup.cleanupPending)
+            .commit()
+        if (!cleanupNeeded) return
+
+        val cleaned = prefs.edit().apply {
+            remove(key(KEY_UPLOAD_SERVER_MODE))
+            remove(key(KEY_UPLOAD_PRODUCTION_URL))
+            remove(key(KEY_UPLOAD_LOCAL_URL))
+            remove(key(KEY_UPLOAD_API_KEY))
+            remove(key(KEY_UPLOAD_AUTO_ENABLED))
+            putBoolean(key(KEY_UPLOAD_SECURE_MIGRATION_COMPLETE), true)
+            putBoolean(key(KEY_UPLOAD_LEGACY_CLEANUP_PENDING), false)
+        }.commit()
+        if (!cleaned) {
+            // Best-effort recording keeps cleanup retryable after a transient preferences failure.
+            val retryMarker = LegacyUploadMigrationPolicy.markerAfterCleanupAttempt(
+                cleanupNeeded = true,
+                cleanupSucceeded = false
+            )
+            prefs.edit()
+                .putBoolean(key(KEY_UPLOAD_SECURE_MIGRATION_COMPLETE), retryMarker.migrationComplete)
+                .putBoolean(key(KEY_UPLOAD_LEGACY_CLEANUP_PENDING), retryMarker.cleanupPending)
+                .commit()
+        }
+    }
+
+    private fun hasLegacyUploadPreferences(
+        prefs: SharedPreferences,
+        key: (String) -> String
+    ): Boolean =
+        prefs.contains(key(KEY_UPLOAD_SERVER_MODE)) ||
+            prefs.contains(key(KEY_UPLOAD_PRODUCTION_URL)) ||
+            prefs.contains(key(KEY_UPLOAD_LOCAL_URL)) ||
+            prefs.contains(key(KEY_UPLOAD_API_KEY)) ||
+            prefs.contains(key(KEY_UPLOAD_AUTO_ENABLED))
 
     fun uploadStatus(
         context: Context,
         profileId: String = LocalProfileStore.activeProfile(context).id
     ): UploadStatus {
         val prefs = prefs(context)
-        val profile = requireNotNull(LocalProfileStore.profile(context, profileId)) {
-            "Unknown local profile: $profileId"
-        }
-        fun key(baseKey: String): String =
-            scopedUploadPreferenceKey(baseKey, profileId, profile.ownsHealthConnect)
+        val profile = requireProfile(context, profileId)
+        val key = uploadPreferenceKey(profile)
 
         val severity = prefs.getString(key(KEY_UPLOAD_LAST_SEVERITY), UploadResultSeverity.IDLE.name)
             ?.let { raw -> UploadResultSeverity.values().firstOrNull { it.name == raw } }
@@ -332,11 +488,8 @@ object AppPreferences {
         status: UploadStatus,
         profileId: String = LocalProfileStore.activeProfile(context).id
     ) {
-        val profile = requireNotNull(LocalProfileStore.profile(context, profileId)) {
-            "Unknown local profile: $profileId"
-        }
-        fun key(baseKey: String): String =
-            scopedUploadPreferenceKey(baseKey, profileId, profile.ownsHealthConnect)
+        val profile = requireProfile(context, profileId)
+        val key = uploadPreferenceKey(profile)
 
         prefs(context).edit().apply {
             if (status.lastUploadEpochMillis == null) {
@@ -365,6 +518,20 @@ object AppPreferences {
         prefs.edit().putString(storageKey, generated).apply()
         return generated
     }
+
+    private fun requireProfile(context: Context, profileId: String): LocalProfile =
+        requireNotNull(LocalProfileStore.profile(context, profileId)) {
+            "Unknown local profile: $profileId"
+        }
+
+    private fun uploadPreferenceKey(profile: LocalProfile): (String) -> String = { baseKey ->
+        scopedUploadPreferenceKey(baseKey, profile.id, profile.ownsHealthConnect)
+    }
+
+    // The original Health Connect owner keeps the pre-profile alias so existing encrypted
+    // settings remain readable. Secondary profiles receive isolated encrypted payloads.
+    private fun secureUploadScope(profile: LocalProfile): String? =
+        profile.id.takeUnless { profile.ownsHealthConnect }
 
     internal fun scopedUploadPreferenceKey(
         baseKey: String,

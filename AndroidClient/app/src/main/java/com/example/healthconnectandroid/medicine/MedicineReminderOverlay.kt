@@ -53,6 +53,7 @@ import kotlinx.coroutines.withContext
 
 internal class MedicineReminderOverlayHost {
     var currentRoot: View? = null
+    var currentScrim: View? = null
     var currentPanel: View? = null
     var currentWindowManager: WindowManager? = null
     var stopMotion: (() -> Unit)? = null
@@ -113,6 +114,7 @@ object MedicineReminderOverlay {
             )
             windowManager.addView(overlay.root, overlayParams())
             host.currentRoot = overlay.root
+            host.currentScrim = overlay.scrim
             host.currentPanel = overlay.panel
             host.currentWindowManager = windowManager
             host.stopMotion = overlay.motion::stop
@@ -135,12 +137,20 @@ object MedicineReminderOverlay {
         host: MedicineReminderOverlayHost
     ): OverlayView {
         val root = FrameLayout(context).apply {
-            setBackgroundColor(OVERLAY_SCRIM)
-            setPadding(dp(context, 18), dp(context, 30), dp(context, 18), dp(context, 30))
             isClickable = true
             isFocusable = true
+        }
+        val scrim = View(context).apply {
+            setBackgroundColor(OVERLAY_SCRIM)
             alpha = 0f
         }
+        root.addView(
+            scrim,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
+        )
         val panel = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(context, 24), dp(context, 22), dp(context, 24), dp(context, 22))
@@ -159,7 +169,12 @@ object MedicineReminderOverlay {
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.WRAP_CONTENT,
                 Gravity.CENTER
-            )
+            ).apply {
+                leftMargin = dp(context, 18)
+                topMargin = dp(context, 30)
+                rightMargin = dp(context, 18)
+                bottomMargin = dp(context, 30)
+            }
         )
 
         val accent = View(context).apply {
@@ -286,6 +301,7 @@ object MedicineReminderOverlay {
         panel.addView(buttonRow(context, cancelButton, takenButton), topMarginParams(context, 22))
         return OverlayView(
             root = root,
+            scrim = scrim,
             panel = panel,
             motion = MedicineReminderTiltController(context, panel)
         )
@@ -394,9 +410,11 @@ object MedicineReminderOverlay {
         overlay.root.post {
             if (host.currentRoot !== overlay.root) return@post
             vibrateOnce(context)
-            overlay.root.animate()
+            // Keeping the scrim separate avoids compositing the animated panel twice.
+            overlay.scrim.animate()
                 .alpha(1f)
                 .setDuration(SCRIM_ENTER_DURATION_MILLIS)
+                .withLayer()
                 .start()
             overlay.panel.animate()
                 .alpha(1f)
@@ -406,6 +424,7 @@ object MedicineReminderOverlay {
                 .rotation(0f)
                 .setDuration(PANEL_ENTER_DURATION_MILLIS)
                 .setInterpolator(ENTER_INTERPOLATOR)
+                .withLayer()
                 .withEndAction {
                     if (host.currentRoot === overlay.root) overlay.motion.start()
                 }
@@ -432,17 +451,19 @@ object MedicineReminderOverlay {
 
     private fun dismissOnMain(host: MedicineReminderOverlayHost) {
         val root = host.currentRoot ?: return
+        val scrim = host.currentScrim ?: return removeImmediately(host)
         val panel = host.currentPanel ?: return removeImmediately(host)
         if (host.dismissing) return
 
         host.dismissing = true
         host.stopMotion?.invoke()
         host.stopMotion = null
-        root.animate().cancel()
+        scrim.animate().cancel()
         panel.animate().cancel()
-        root.animate()
+        scrim.animate()
             .alpha(0f)
             .setDuration(EXIT_DURATION_MILLIS)
+            .withLayer()
             .start()
         panel.animate()
             .alpha(0f)
@@ -450,6 +471,7 @@ object MedicineReminderOverlay {
             .scaleY(0.94f)
             .translationY(dp(root.context, 24).toFloat())
             .setDuration(EXIT_DURATION_MILLIS)
+            .withLayer()
             .withEndAction {
                 if (host.currentRoot === root) removeImmediately(host)
             }
@@ -466,6 +488,7 @@ object MedicineReminderOverlay {
                 }
         }
         host.currentRoot = null
+        host.currentScrim = null
         host.currentPanel = null
         host.currentWindowManager = null
         host.stopMotion = null
@@ -597,6 +620,7 @@ object MedicineReminderOverlay {
 
     private data class OverlayView(
         val root: View,
+        val scrim: View,
         val panel: View,
         val motion: MedicineReminderTiltController
     )

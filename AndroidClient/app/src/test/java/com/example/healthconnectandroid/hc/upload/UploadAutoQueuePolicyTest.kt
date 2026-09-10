@@ -37,7 +37,7 @@ class UploadAutoQueuePolicyTest {
 
     private fun settings(
         autoUploadEnabled: Boolean,
-        apiKey: String = "test-api-key"
+        apiKey: String = "k".repeat(UploadEndpointPolicy.MINIMUM_API_KEY_LENGTH)
     ): UploadSettings =
         UploadSettings(
             serverMode = UploadServerMode.PRODUCTION,

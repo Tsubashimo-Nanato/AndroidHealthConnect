@@ -42,6 +42,7 @@ fun SettingsHealthConnectScreen(
     syncBusy: Boolean,
     syncProgress: SyncProgress?,
     uploadSettings: UploadSettings,
+    uploadSettingsGeneration: Long,
     uploadStatus: UploadStatus,
     uploadPendingCounts: UploadPendingCounts,
     debugEnabled: Boolean,
@@ -116,6 +117,7 @@ fun SettingsHealthConnectScreen(
         }
         UploadSettingsSections(
             settings = uploadSettings,
+            settingsGeneration = uploadSettingsGeneration,
             uploadStatus = uploadStatus,
             pendingCounts = uploadPendingCounts,
             debugEnabled = debugEnabled,
