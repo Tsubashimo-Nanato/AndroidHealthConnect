@@ -9,11 +9,13 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.example.healthconnectandroid.AppLanguagePreference
 import com.example.healthconnectandroid.AppPreferences
+import com.example.healthconnectandroid.LocalProfileStore
 import com.example.healthconnectandroid.R
 import com.example.healthconnectandroid.ui.medicine.translateMedicineUiText
 
@@ -28,7 +30,8 @@ object MedicineReminderNotifier {
     fun showReminder(
         context: Context,
         slot: MedicineSlot,
-        medicines: List<MedicineItem>
+        medicines: List<MedicineItem>,
+        profileId: String = LocalProfileStore.activeProfile(context).id
     ) {
         if (medicines.isEmpty()) return
 
@@ -40,7 +43,7 @@ object MedicineReminderNotifier {
                 overlayPermissionGranted = overlayAllowed,
                 medicineCount = medicines.size
             ) &&
-            MedicineReminderOverlay.show(context, slot, medicines)
+            MedicineReminderOverlay.show(context, slot, medicines, profileId)
         ) {
             return
         }
@@ -51,7 +54,7 @@ object MedicineReminderNotifier {
         val language = AppPreferences.userPreferences(context).language
         val text = reminderText(slot, medicines.size, language)
 
-        val promptIntent = promptIntent(context, slot)
+        val promptIntent = promptIntent(context, slot, profileId)
         val builder = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle(translateMedicineUiText("Medicine check", language))
@@ -70,12 +73,16 @@ object MedicineReminderNotifier {
 
         val notification = builder.build()
 
-        notify(context, slot, notification)
+        notify(context, slot, profileId, notification)
     }
 
-    fun cancel(context: Context, slot: MedicineSlot) {
+    fun cancel(
+        context: Context,
+        slot: MedicineSlot,
+        profileId: String = LocalProfileStore.activeProfile(context).id
+    ) {
         NotificationManagerCompat.from(context)
-            .cancel(MedicineReminderScheduler.notificationId(slot))
+            .cancel(MedicineReminderScheduler.notificationId(profileId, slot))
     }
 
     private fun reminderText(
@@ -99,21 +106,21 @@ object MedicineReminderNotifier {
             }
         }
 
-    fun promptIntent(context: Context, slot: MedicineSlot): PendingIntent {
+    fun promptIntent(context: Context, slot: MedicineSlot, profileId: String): PendingIntent {
         val intent = Intent(context, MedicineReminderActivity::class.java).apply {
             action = MedicineReminderIntents.ACTION_OPEN_MEDICINE_PROMPT
             putExtra(MedicineReminderIntents.EXTRA_SLOT, slot.id)
+            putExtra(MedicineReminderIntents.EXTRA_PROFILE_ID, profileId)
         }
         return PendingIntent.getActivity(
             context,
-            MedicineReminderScheduler.notificationId(slot),
+            MedicineReminderScheduler.notificationId(profileId, slot),
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
     }
 
     private fun ensureChannel(context: Context) {
-        if (Build.VERSION.SDK_INT < 26) return
         val manager = context.getSystemService(NotificationManager::class.java)
         val channel = NotificationChannel(
             CHANNEL_ID,
@@ -131,14 +138,18 @@ object MedicineReminderNotifier {
     private fun notify(
         context: Context,
         slot: MedicineSlot,
+        profileId: String,
         notification: android.app.Notification
     ) {
         if (!canNotify(context)) return
         runCatching {
             NotificationManagerCompat.from(context)
-                .notify(MedicineReminderScheduler.notificationId(slot), notification)
+                .notify(MedicineReminderScheduler.notificationId(profileId, slot), notification)
+        }.onFailure { error ->
+            Log.w(TAG, "Medicine reminder notification failed", error)
         }
     }
 
     private const val CHANNEL_ID = "medicine_checks_urgent"
+    private const val TAG = "MedicineReminder"
 }

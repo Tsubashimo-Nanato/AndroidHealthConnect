@@ -70,7 +70,9 @@ fun DataManagementSection(
             uiText("Choose a retention range before deleting this app's health data. Health Connect source data and medicine history are not deleted."),
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
-        StatusMessageCard(status)
+        if (status != "Ready") {
+            StatusMessageCard(status)
+        }
     }
 }
 

@@ -24,13 +24,13 @@ class UploadAutoQueuePolicyTest {
     }
 
     @Test
-    fun enabledSettingRequiresApiKey() {
+    fun enabledSettingRequiresUploadAuthentication() {
         val decision = UploadAutoQueuePolicy.decide(
             settings(autoUploadEnabled = true, apiKey = "")
         )
 
         assertEquals(
-            UploadAutoQueueDecision.Invalid("API key is required"),
+            UploadAutoQueueDecision.Invalid("API key or Pairing QR is required"),
             decision
         )
     }

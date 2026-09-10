@@ -4,12 +4,18 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
@@ -51,11 +57,13 @@ fun SettingsMedicineScreen(
     status: String,
     overlayReminderEnabled: Boolean,
     overlayPermissionGranted: Boolean,
+    exactAlarmAccessGranted: Boolean,
     onAddMedicine: (String, Set<MedicineSlot>) -> Unit,
     onArchiveMedicine: (Long) -> Unit,
     onSaveReminder: (MedicineSlot, String, Boolean, Boolean) -> Unit,
     onOverlayReminderChange: (Boolean) -> Unit,
     onRequestOverlayPermission: () -> Unit,
+    onRequestExactAlarmAccess: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val language = LocalAppLanguage.current
@@ -66,15 +74,13 @@ fun SettingsMedicineScreen(
         modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(18.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(18.dp)
     ) {
-        Text(medicineUiText("Medicine"), modifier = Modifier.rowFadeIn(0), style = MaterialTheme.typography.headlineSmall)
-
         AppSection(
             title = medicineUiText("Add Medicine"),
             subtitle = medicineUiText("Choose when this medicine is usually taken"),
-            modifier = Modifier.rowFadeIn(1)
+            modifier = Modifier.rowFadeIn(0)
         ) {
             OutlinedTextField(
                 value = name,
@@ -83,18 +89,31 @@ fun SettingsMedicineScreen(
                 label = { Text(medicineUiText("Medicine name")) },
                 singleLine = true
             )
-            MedicineSlot.entries.forEach { slot ->
-                SlotCheckRow(
-                    slot = slot,
-                    checked = slot in selectedSlots,
-                    onToggle = {
-                        selectedSlots = if (slot in selectedSlots) {
-                            selectedSlots - slot
-                        } else {
-                            selectedSlots + slot
+            for (index in MedicineSlot.entries.indices step 2) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    for (column in 0..1) {
+                        val slot = MedicineSlot.entries.getOrNull(index + column)
+                        if (slot == null) {
+                            Spacer(Modifier.weight(1f))
+                            continue
                         }
+                        SlotCheckRow(
+                            slot = slot,
+                            checked = slot in selectedSlots,
+                            modifier = Modifier.weight(1f),
+                            onToggle = {
+                                selectedSlots = if (slot in selectedSlots) {
+                                    selectedSlots - slot
+                                } else {
+                                    selectedSlots + slot
+                                }
+                            }
+                        )
                     }
-                )
+                }
             }
             PrimaryActionButton(
                 label = medicineUiText("Add medicine"),
@@ -109,7 +128,7 @@ fun SettingsMedicineScreen(
         AppSection(
             title = medicineUiText("Reminder Times"),
             subtitle = medicineUiText("The notification asks whether you already took it"),
-            modifier = Modifier.rowFadeIn(2)
+            modifier = Modifier.rowFadeIn(1)
         ) {
             OverlayReminderSection(
                 enabled = overlayReminderEnabled,
@@ -117,10 +136,24 @@ fun SettingsMedicineScreen(
                 onEnabledChange = onOverlayReminderChange,
                 onRequestPermission = onRequestOverlayPermission
             )
+            if (
+                snapshot.reminderTimes.values.any(MedicineReminderTime::alarmEnabled) &&
+                !exactAlarmAccessGranted
+            ) {
+                StatusMessageCard(
+                    message = medicineUiText("Exact alarm access is needed for Alarm mode."),
+                    tone = StatusTone.Warning
+                )
+                SecondaryActionButton(
+                    label = medicineUiText("Allow exact alarms"),
+                    onClick = onRequestExactAlarmAccess
+                )
+            }
             MedicineSlot.scheduledSlots.forEach { slot ->
                 ReminderTimeRow(
                     slot = slot,
                     reminder = snapshot.reminderTimes[slot],
+                    exactAlarmAccessGranted = exactAlarmAccessGranted,
                     onSaveReminder = onSaveReminder
                 )
             }
@@ -129,7 +162,7 @@ fun SettingsMedicineScreen(
         AppSection(
             title = medicineUiText("Current Medicines"),
             subtitle = medicineUiText("Stored locally"),
-            modifier = Modifier.rowFadeIn(3)
+            modifier = Modifier.rowFadeIn(2)
         ) {
             if (snapshot.medicines.isEmpty()) {
                 EmptyState(medicineUiText("No medicine yet"), medicineUiText("Add a medicine above."))
@@ -141,7 +174,9 @@ fun SettingsMedicineScreen(
                     )
                 }
             }
-            StatusMessageCard(translateMedicineUiText(status, language), tone = statusToneForMessage(status))
+            if (status != "Medicine ready") {
+                StatusMessageCard(translateMedicineUiText(status, language), tone = statusToneForMessage(status))
+            }
         }
     }
 }
@@ -150,14 +185,16 @@ fun SettingsMedicineScreen(
 private fun SlotCheckRow(
     slot: MedicineSlot,
     checked: Boolean,
-    onToggle: () -> Unit
+    onToggle: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     val language = LocalAppLanguage.current
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .clickable(role = Role.Checkbox, onClick = onToggle),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
         Checkbox(checked = checked, onCheckedChange = { onToggle() })
         Column(Modifier.weight(1f)) {
@@ -221,6 +258,7 @@ private fun OverlayReminderSection(
 private fun ReminderTimeRow(
     slot: MedicineSlot,
     reminder: MedicineReminderTime?,
+    exactAlarmAccessGranted: Boolean,
     onSaveReminder: (MedicineSlot, String, Boolean, Boolean) -> Unit
 ) {
     val language = LocalAppLanguage.current
@@ -228,9 +266,16 @@ private fun ReminderTimeRow(
     var timeText by remember(slot, fallback.label) { mutableStateOf(fallback.label) }
     var enabled by remember(slot, fallback.enabled) { mutableStateOf(fallback.enabled) }
     var alarmEnabled by remember(slot, fallback.alarmEnabled) { mutableStateOf(fallback.alarmEnabled) }
+    var expanded by remember(slot) { mutableStateOf(false) }
 
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(role = Role.Button) { expanded = !expanded },
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             Column(Modifier.weight(1f)) {
                 Text(slot.displayLabel(language), style = MaterialTheme.typography.titleSmall)
                 Text(
@@ -239,37 +284,58 @@ private fun ReminderTimeRow(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            Switch(checked = enabled, onCheckedChange = { enabled = it })
-        }
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable(role = Role.Switch) { alarmEnabled = !alarmEnabled },
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text(medicineUiText("Alarm mode"), style = MaterialTheme.typography.bodyMedium)
-                Text(
-                    medicineUiText("Uses a system alarm for this slot"),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+            Switch(
+                checked = enabled,
+                onCheckedChange = {
+                    enabled = it
+                    expanded = true
+                }
+            )
+            IconButton(onClick = { expanded = !expanded }) {
+                Icon(
+                    imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = medicineUiText(if (expanded) "Collapse" else "Expand")
                 )
             }
-            Switch(checked = alarmEnabled, onCheckedChange = { alarmEnabled = it })
         }
-        AppActionRow {
-            OutlinedTextField(
-                value = timeText,
-                onValueChange = { timeText = it },
-                modifier = Modifier.weight(1f),
-                label = { Text(uiText("HH:mm")) },
-                singleLine = true
-            )
-            SecondaryActionButton(
-                label = uiText("Save"),
-                modifier = Modifier.weight(1f),
-                onClick = { onSaveReminder(slot, timeText, enabled, alarmEnabled) }
-            )
+        if (expanded) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(role = Role.Switch) { alarmEnabled = !alarmEnabled },
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(medicineUiText("Alarm mode"), style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        medicineUiText(
+                            if (alarmEnabled && !exactAlarmAccessGranted) {
+                                "Uses a standard reminder until exact alarms are allowed"
+                            } else {
+                                "Uses a system alarm for this slot"
+                            }
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(checked = alarmEnabled, onCheckedChange = { alarmEnabled = it })
+            }
+            AppActionRow {
+                OutlinedTextField(
+                    value = timeText,
+                    onValueChange = { timeText = it },
+                    modifier = Modifier.weight(1f),
+                    label = { Text(uiText("HH:mm")) },
+                    singleLine = true
+                )
+                SecondaryActionButton(
+                    label = uiText("Save"),
+                    modifier = Modifier.weight(1f),
+                    onClick = { onSaveReminder(slot, timeText, enabled, alarmEnabled) }
+                )
+            }
         }
     }
 }

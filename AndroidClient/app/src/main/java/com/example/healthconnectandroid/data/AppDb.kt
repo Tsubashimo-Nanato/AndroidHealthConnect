@@ -6,6 +6,8 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
+import com.example.healthconnectandroid.LocalProfileStore
+import java.util.concurrent.ConcurrentHashMap
 
 @Database(
     entities = [
@@ -16,6 +18,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         HealthSyncCoverageEntity::class,
         HealthAggregateEntity::class,
         HealthUploadAckEntity::class,
+        HealthChangeTokenEntity::class,
         HealthCatalogSnapshotEntity::class,
         HealthDailyArchiveEntity::class,
         HealthSleepArchiveEntity::class,
@@ -25,7 +28,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         MedicineReminderSettingEntity::class,
         MedicineDoseLogEntity::class
     ],
-    version = 15,
+    version = 16,
     exportSchema = false
 )
 abstract class AppDb : RoomDatabase() {
@@ -35,12 +38,13 @@ abstract class AppDb : RoomDatabase() {
     abstract fun healthSyncCoverageDao(): HealthSyncCoverageDao
     abstract fun healthAggregateDao(): HealthAggregateDao
     abstract fun healthUploadDao(): HealthUploadDao
+    abstract fun healthChangeTokenDao(): HealthChangeTokenDao
     abstract fun healthCatalogSnapshotDao(): HealthCatalogSnapshotDao
     abstract fun healthRetentionDao(): HealthRetentionDao
     abstract fun medicineDao(): MedicineDao
 
     companion object {
-        @Volatile private var INSTANCE: AppDb? = null
+        private val instances = ConcurrentHashMap<String, AppDb>()
 
         private val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
@@ -427,7 +431,6 @@ abstract class AppDb : RoomDatabase() {
                         `hour` INTEGER NOT NULL,
                         `minute` INTEGER NOT NULL,
                         `enabled` INTEGER NOT NULL,
-                        `alarmEnabled` INTEGER NOT NULL DEFAULT 0,
                         `updatedEpochMillis` INTEGER NOT NULL,
                         PRIMARY KEY(`slot`)
                     )
@@ -469,14 +472,25 @@ abstract class AppDb : RoomDatabase() {
             }
         }
 
-        private val MIGRATION_12_13 = object : Migration(12, 13) {
+        internal val MIGRATION_12_13 = object : Migration(12, 13) {
             override fun migrate(db: SupportSQLiteDatabase) {
+                // Some pre-release v12 databases received this column during v10->v11; keep their upgrade valid.
+                if (db.hasMedicineAlarmColumn()) return
                 db.execSQL(
                     "ALTER TABLE `medicine_reminder_settings` " +
                         "ADD COLUMN `alarmEnabled` INTEGER NOT NULL DEFAULT 0"
                 )
             }
         }
+
+        private fun SupportSQLiteDatabase.hasMedicineAlarmColumn(): Boolean =
+            query("PRAGMA table_info(`medicine_reminder_settings`)").use { cursor ->
+                val nameIndex = cursor.getColumnIndexOrThrow("name")
+                while (cursor.moveToNext()) {
+                    if (cursor.getString(nameIndex) == "alarmEnabled") return@use true
+                }
+                false
+            }
 
         private val MIGRATION_13_14 = object : Migration(13, 14) {
             override fun migrate(db: SupportSQLiteDatabase) {
@@ -588,11 +602,36 @@ abstract class AppDb : RoomDatabase() {
             }
         }
 
-        fun get(context: Context): AppDb =
-            INSTANCE ?: synchronized(this) {
-                INSTANCE ?: Room.databaseBuilder(
+        private val MIGRATION_15_16 = object : Migration(15, 16) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Tokens start empty so the first incremental pass establishes a race-free baseline.
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `health_change_tokens` (
+                        `recordType` TEXT NOT NULL,
+                        `token` TEXT NOT NULL,
+                        `updatedAtEpochMillis` INTEGER NOT NULL,
+                        PRIMARY KEY(`recordType`)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    "ALTER TABLE `health_sync_runs` " +
+                        "ADD COLUMN `recordsDeleted` INTEGER NOT NULL DEFAULT 0"
+                )
+            }
+        }
+
+        fun get(
+            context: Context,
+            profileId: String = LocalProfileStore.activeProfile(context).id
+        ): AppDb {
+            val databaseName = LocalProfileStore.databaseName(context, profileId)
+            return instances[databaseName] ?: synchronized(this) {
+                instances[databaseName] ?: Room.databaseBuilder(
                     context.applicationContext,
-                    AppDb::class.java, "hc_demo.db"
+                    AppDb::class.java,
+                    databaseName
                 )
                     .addMigrations(
                         MIGRATION_1_2,
@@ -608,10 +647,15 @@ abstract class AppDb : RoomDatabase() {
                         MIGRATION_11_12,
                         MIGRATION_12_13,
                         MIGRATION_13_14,
-                        MIGRATION_14_15
+                        MIGRATION_14_15,
+                        MIGRATION_15_16
                     )
                     .build()
-                    .also { INSTANCE = it }
+                    .also { instances[databaseName] = it }
             }
+        }
+
+        fun databaseName(context: Context, profileId: String): String =
+            LocalProfileStore.databaseName(context, profileId)
     }
 }

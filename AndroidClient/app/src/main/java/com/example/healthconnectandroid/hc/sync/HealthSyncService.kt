@@ -14,6 +14,8 @@ import java.time.ZoneId
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
 import kotlin.coroutines.coroutineContext
 
@@ -26,39 +28,26 @@ class HealthSyncService(
 ) {
     private val appContext = context.applicationContext
     private val syncer = HealthDataTypeSyncer(appContext, db)
-    private val syncDao = db.healthSyncRunDao()
     private val coverageDao = db.healthSyncCoverageDao()
+    private val changeTokenDao = db.healthChangeTokenDao()
+    private val retentionDao = db.healthRetentionDao()
 
     suspend fun runSmartSync(
         requireBackgroundReadPermission: Boolean = false,
         onProgress: (SyncProgress) -> Unit = {}
-    ): List<HealthDataTypeSyncResult> {
-        val end = Instant.now()
-        return runDescriptorSync(
+    ): List<HealthDataTypeSyncResult> = syncMutex.withLock {
+        runIncrementalSync(
             mode = SyncMode.SMART,
-            descriptors = HealthDataTypeRegistry.implementedDescriptors,
-            end = end,
             requireBackgroundReadPermission = requireBackgroundReadPermission,
-            isCancellable = false,
-            perTypeTimeout = timeoutConfig.perTypeTimeout,
-            globalTimeout = timeoutConfig.smartSyncTimeout,
             onProgress = onProgress
-        ) { descriptor ->
-            val latestSuccess = syncDao.latestSuccessfulFinishedEpochMillis(descriptor.key)
-                ?.takeIf { it > 0L }
-                ?.let(Instant::ofEpochMilli)
-            SyncRangePolicy.smartStart(
-                end = end,
-                latestSuccessfulFinishedAt = latestSuccess
-            )
-        }
+        )
     }
 
     suspend fun runFullHistorySync(
         onProgress: (SyncProgress) -> Unit = {}
-    ): List<HealthDataTypeSyncResult> {
+    ): List<HealthDataTypeSyncResult> = syncMutex.withLock {
         val end = Instant.now()
-        return runDescriptorSync(
+        runDescriptorSync(
             mode = SyncMode.FULL_HISTORY,
             descriptors = HealthDataTypeRegistry.implementedDescriptors,
             end = end,
@@ -78,7 +67,8 @@ class HealthSyncService(
         end: Instant,
         zoneId: ZoneId = ZoneId.systemDefault(),
         onProgress: (SyncProgress) -> Unit = {}
-    ): HealthDataTypeSyncResult {
+    ): HealthDataTypeSyncResult = syncMutex.withLock {
+        val progressReporter = SyncProgressReporter(onProgress)
         val descriptor = HealthDataTypeRegistry.require(key)
         val coveredWindows = coverageWindowsForRange(key, start, end)
         val totalDailyWindows = SyncWindowPlanner.dailyWindowCount(start, end, zoneId)
@@ -89,7 +79,7 @@ class HealthSyncService(
             coveredWindows = coveredWindows
         )
         val coveredDailyWindows = (totalDailyWindows - missingWindows.size).coerceAtLeast(0)
-        onProgress(
+        progressReporter.emit(
             SyncProgress(
                 mode = SyncMode.SELECTED_TYPE,
                 currentType = descriptor.displayName,
@@ -119,7 +109,7 @@ class HealthSyncService(
                 startedAt = Instant.now()
             )
             recordCoverageIfSuccessful(SyncMode.SELECTED_TYPE, result)
-            onProgress(
+            progressReporter.emit(
                 SyncProgressPolicy.progressForResults(
                     mode = SyncMode.SELECTED_TYPE,
                     currentType = null,
@@ -133,7 +123,7 @@ class HealthSyncService(
                     message = "Selected sync found no missing local days"
                 )
             )
-            return result
+            return@withLock result
         }
 
         val results = mutableListOf<HealthDataTypeSyncResult>()
@@ -148,7 +138,7 @@ class HealthSyncService(
                 requireBackgroundReadPermission = false,
                 timeout = timeoutConfig.selectedSyncTimeout,
                 onTypeProgress = { typeProgress ->
-                    onProgress(
+                    progressReporter.emit(
                         SyncProgressPolicy.progressForTypeStep(
                             mode = SyncMode.SELECTED_TYPE,
                             typeName = descriptor.displayName,
@@ -166,7 +156,7 @@ class HealthSyncService(
             )
             results += result
             recordCoverageIfSuccessful(SyncMode.SELECTED_TYPE, result)
-            onProgress(
+            progressReporter.emit(
                 SyncProgressPolicy.progressForResults(
                     mode = SyncMode.SELECTED_TYPE,
                     currentType = null,
@@ -189,7 +179,7 @@ class HealthSyncService(
             localDaysRequested = missingWindows.size,
             results = results
         )
-        onProgress(
+        progressReporter.emit(
             SyncProgressPolicy.progressForResults(
                 mode = SyncMode.SELECTED_TYPE,
                 currentType = null,
@@ -203,42 +193,303 @@ class HealthSyncService(
                 message = SyncProgressPolicy.selectedCompletionMessage(result)
             )
         )
-        return result
+        result
     }
 
     suspend fun runPeriodicSmartSync(
         requireBackgroundReadPermission: Boolean = true,
         onProgress: (SyncProgress) -> Unit = {}
-    ): List<HealthDataTypeSyncResult> {
-        val end = Instant.now()
-        return runDescriptorSync(
+    ): List<HealthDataTypeSyncResult> = syncMutex.withLock {
+        runIncrementalSync(
             mode = SyncMode.PERIODIC,
-            descriptors = HealthDataTypeRegistry.implementedDescriptors,
-            end = end,
             requireBackgroundReadPermission = requireBackgroundReadPermission,
-            isCancellable = false,
-            perTypeTimeout = timeoutConfig.perTypeTimeout,
-            globalTimeout = timeoutConfig.smartSyncTimeout,
             onProgress = onProgress
-        ) { descriptor ->
-            val latestSuccess = syncDao.latestSuccessfulFinishedEpochMillis(descriptor.key)
-                ?.takeIf { it > 0L }
+        )
+    }
+
+    internal suspend fun runHistoryBackfillBatch(
+        requireBackgroundReadPermission: Boolean = true,
+        now: Instant = Instant.now(),
+        zoneId: ZoneId = ZoneId.systemDefault(),
+        startIndex: Int = 0
+    ): HistoryBackfillBatchResult = syncMutex.withLock {
+        val target = HistoryBackfillPolicy.targetRange(now, zoneId)
+        val descriptors = HealthDataTypeRegistry.implementedDescriptors
+        val results = mutableListOf<HealthDataTypeSyncResult>()
+        var hasMore = false
+        var nextStartIndex = HistoryBackfillPolicy.typeIndex(startIndex, 0, descriptors.size)
+
+        for (offset in descriptors.indices) {
+            coroutineContext.ensureActive()
+            if (!HistoryBackfillPolicy.hasTypeCapacity(results.size)) {
+                hasMore = true
+                nextStartIndex = HistoryBackfillPolicy.typeIndex(startIndex, offset, descriptors.size)
+                break
+            }
+            val descriptorIndex = HistoryBackfillPolicy.typeIndex(startIndex, offset, descriptors.size)
+            val descriptor = descriptors[descriptorIndex]
+            nextStartIndex = HistoryBackfillPolicy.typeIndex(startIndex, offset + 1, descriptors.size)
+            val archivedBefore = retentionDao.archivedBeforeEpochMillis(descriptor.key)
                 ?.let(Instant::ofEpochMilli)
-            SyncRangePolicy.smartStart(
-                end = end,
-                latestSuccessfulFinishedAt = latestSuccess
+            val start = archivedBefore
+                ?.takeIf { it.isAfter(target.start) }
+                ?: target.start
+            if (!start.isBefore(target.end)) continue
+
+            val coveredWindows = coverageWindowsForRange(descriptor.key, start, target.end)
+            val missingWindows = SyncWindowPlanner.missingDailyWindows(
+                requestedStart = start,
+                requestedEnd = target.end,
+                zoneId = zoneId,
+                coveredWindows = coveredWindows
             )
+            val chunk = HistoryBackfillPolicy.latestChunk(
+                missingWindows = missingWindows,
+                maxDays = HistoryBackfillPolicy.maxDaysPerBatch(descriptor.key)
+            ) ?: continue
+
+            val result = runOneTypeWithTimeout(
+                mode = SyncMode.HISTORY_BACKFILL,
+                descriptor = descriptor,
+                start = chunk.start,
+                end = chunk.end,
+                zoneId = zoneId,
+                requireBackgroundReadPermission = requireBackgroundReadPermission,
+                timeout = timeoutConfig.historyBackfillTypeTimeout
+            )
+            results += result
+            recordCoverageIfSuccessful(SyncMode.HISTORY_BACKFILL, result)
+            hasMore = hasMore ||
+                HistoryBackfillPolicy.hasMore(missingWindows, chunk) ||
+                !result.isSuccessfulCoverageWindow()
         }
+
+        HistoryBackfillBatchResult(
+            results = results,
+            hasMore = hasMore,
+            nextStartIndex = nextStartIndex
+        )
     }
 
     suspend fun runLegacyHrDebugSync(hours: Long): Int =
-        syncer.syncLastHours(hours)
+        syncMutex.withLock { syncer.syncLastHours(hours) }
 
     suspend fun queryLegacyHeartRate(at: Instant): HrSample? =
         syncer.getHrAt(at)
 
     fun backgroundReadFeatureAvailable(): Boolean =
         syncer.backgroundReadFeatureAvailable()
+
+    private suspend fun runIncrementalSync(
+        mode: SyncMode,
+        requireBackgroundReadPermission: Boolean,
+        onProgress: (SyncProgress) -> Unit
+    ): List<HealthDataTypeSyncResult> {
+        val descriptors = HealthDataTypeRegistry.implementedDescriptors
+        val results = mutableListOf<HealthDataTypeSyncResult>()
+        val progressReporter = SyncProgressReporter(onProgress)
+        val end = Instant.now()
+        val deadline = end.plus(timeoutConfig.smartSyncTimeout)
+        progressReporter.emit(
+            SyncProgressPolicy.progressForResults(
+                mode = mode,
+                currentType = null,
+                completedTypes = 0,
+                totalTypes = descriptors.size,
+                results = results,
+                rangeStart = null,
+                rangeEnd = end,
+                isCancellable = false,
+                message = "Preparing incremental sync"
+            )
+        )
+
+        descriptors.forEachIndexed { index, descriptor ->
+            coroutineContext.ensureActive()
+            if (Instant.now().isAfter(deadline)) {
+                results += syncer.recordSyntheticSyncResult(
+                    result = HealthDataTypeSyncResult(
+                        key = descriptor.key,
+                        errorMessage = "Incremental sync exceeded ${timeoutConfig.smartSyncTimeout.toMinutes()} minute timeout",
+                        terminalStatus = SyncRunStatus.TIMEOUT
+                    ),
+                    startedAt = Instant.now()
+                )
+                return results
+            }
+            progressReporter.emit(
+                SyncProgressPolicy.progressForResults(
+                    mode = mode,
+                    currentType = descriptor.displayName,
+                    completedTypes = index,
+                    totalTypes = descriptors.size,
+                    results = results,
+                    rangeStart = null,
+                    rangeEnd = end,
+                    isCancellable = false,
+                    phase = SyncProgressPhase.FETCHING,
+                    message = "Checking ${descriptor.displayName} changes"
+                )
+            )
+            val result = runIncrementalTypeWithTimeout(
+                mode = mode,
+                descriptor = descriptor,
+                end = end,
+                requireBackgroundReadPermission = requireBackgroundReadPermission,
+                onTypeProgress = { typeProgress ->
+                    progressReporter.emit(
+                        SyncProgressPolicy.progressForTypeStep(
+                            mode = mode,
+                            typeName = descriptor.displayName,
+                            completedTypes = index,
+                            totalTypes = descriptors.size,
+                            previousResults = results,
+                            typeProgress = typeProgress,
+                            rangeStart = null,
+                            rangeEnd = end,
+                            isCancellable = false
+                        )
+                    )
+                }
+            )
+            results += result
+            progressReporter.emit(
+                SyncProgressPolicy.progressForResults(
+                    mode = mode,
+                    currentType = null,
+                    completedTypes = results.size,
+                    totalTypes = descriptors.size,
+                    results = results,
+                    rangeStart = null,
+                    rangeEnd = end,
+                    isCancellable = false,
+                    phase = SyncProgressPolicy.terminalPhase(result),
+                    message = SyncProgressPolicy.typeCompletionMessage(descriptor.displayName, result)
+                )
+            )
+        }
+        return results
+    }
+
+    private suspend fun runIncrementalTypeWithTimeout(
+        mode: SyncMode,
+        descriptor: HealthDataTypeDescriptor,
+        end: Instant,
+        requireBackgroundReadPermission: Boolean,
+        onTypeProgress: (SyncTypeProgress) -> Unit
+    ): HealthDataTypeSyncResult {
+        val startedAt = Instant.now()
+        return try {
+            withTimeout(timeoutConfig.perTypeTimeout.toMillis()) {
+                runIncrementalType(
+                    mode = mode,
+                    descriptor = descriptor,
+                    end = end,
+                    requireBackgroundReadPermission = requireBackgroundReadPermission,
+                    onTypeProgress = onTypeProgress
+                )
+            }
+        } catch (t: TimeoutCancellationException) {
+            syncer.recordSyntheticSyncResult(
+                result = HealthDataTypeSyncResult(
+                    key = descriptor.key,
+                    errorMessage = "Incremental sync timed out for ${descriptor.displayName}",
+                    terminalStatus = SyncRunStatus.TIMEOUT
+                ),
+                startedAt = startedAt
+            )
+        } catch (t: CancellationException) {
+            throw t
+        } catch (t: Throwable) {
+            syncer.recordSyntheticSyncResult(
+                result = HealthDataTypeSyncResult(
+                    key = descriptor.key,
+                    errorMessage = "Incremental sync failed for ${descriptor.displayName}: " +
+                        (t.message ?: t.javaClass.simpleName),
+                    terminalStatus = SyncRunStatus.ERROR
+                ),
+                startedAt = startedAt
+            )
+        }
+    }
+
+    private suspend fun runIncrementalType(
+        mode: SyncMode,
+        descriptor: HealthDataTypeDescriptor,
+        end: Instant,
+        requireBackgroundReadPermission: Boolean,
+        onTypeProgress: (SyncTypeProgress) -> Unit
+    ): HealthDataTypeSyncResult {
+        val storedToken = changeTokenDao.tokenForType(descriptor.key)?.token
+        if (storedToken != null) {
+            when (
+                val outcome = syncer.syncChanges(
+                    descriptor = descriptor,
+                    initialToken = storedToken,
+                    requireBackgroundReadPermission = requireBackgroundReadPermission,
+                    onProgress = onTypeProgress
+                )
+            ) {
+                is HealthChangeSyncOutcome.Applied -> return outcome.result
+                HealthChangeSyncOutcome.TokenExpired -> Unit
+            }
+        }
+
+        // Capture the token before the baseline read so changes arriving during that read are not lost.
+        val baselineToken = syncer.createChangesToken(descriptor)
+        val start = SyncRangePolicy.smartStart(end)
+        val baseline = syncer.syncDataType(
+            key = descriptor.key,
+            start = start,
+            end = end,
+            requireBackgroundReadPermission = requireBackgroundReadPermission,
+            replaceChangedRecords = true,
+            onProgress = onTypeProgress
+        )
+        recordCoverageIfSuccessful(mode, baseline)
+        if (!baseline.canAdvanceChangesToken()) return baseline
+
+        return when (
+            val catchUp = syncer.syncChanges(
+                descriptor = descriptor,
+                initialToken = baselineToken,
+                requireBackgroundReadPermission = requireBackgroundReadPermission,
+                onProgress = onTypeProgress
+            )
+        ) {
+            is HealthChangeSyncOutcome.Applied -> combineIncrementalResults(descriptor.key, baseline, catchUp.result)
+            HealthChangeSyncOutcome.TokenExpired -> baseline
+        }
+    }
+
+    private fun combineIncrementalResults(
+        key: String,
+        baseline: HealthDataTypeSyncResult,
+        catchUp: HealthDataTypeSyncResult
+    ): HealthDataTypeSyncResult = HealthDataTypeSyncResult(
+        key = key,
+        requestedStart = listOfNotNull(baseline.requestedStart, catchUp.requestedStart).minOrNull(),
+        requestedEnd = listOfNotNull(baseline.requestedEnd, catchUp.requestedEnd).maxOrNull(),
+        recordsRead = baseline.recordsRead + catchUp.recordsRead,
+        recordsInserted = baseline.recordsInserted + catchUp.recordsInserted,
+        recordsUpdated = baseline.recordsUpdated + catchUp.recordsUpdated,
+        recordsDeleted = baseline.recordsDeleted + catchUp.recordsDeleted,
+        recordsSkippedDuplicate = baseline.recordsSkippedDuplicate + catchUp.recordsSkippedDuplicate,
+        valuesStored = baseline.valuesStored + catchUp.valuesStored,
+        aggregateRowsRead = baseline.aggregateRowsRead + catchUp.aggregateRowsRead,
+        aggregateRowsStored = baseline.aggregateRowsStored + catchUp.aggregateRowsStored,
+        sourceBytesRead = baseline.sourceBytesRead + catchUp.sourceBytesRead,
+        localBytesWritten = baseline.localBytesWritten + catchUp.localBytesWritten,
+        sourceStart = listOfNotNull(baseline.sourceStart, catchUp.sourceStart).minOrNull(),
+        sourceEnd = listOfNotNull(baseline.sourceEnd, catchUp.sourceEnd).maxOrNull(),
+        aggregateErrorMessage = catchUp.aggregateErrorMessage ?: baseline.aggregateErrorMessage,
+        skippedReason = catchUp.skippedReason ?: baseline.skippedReason,
+        errorMessage = catchUp.errorMessage ?: baseline.errorMessage,
+        terminalStatus = catchUp.terminalStatus ?: baseline.terminalStatus
+    )
+
+    private fun HealthDataTypeSyncResult.canAdvanceChangesToken(): Boolean =
+        terminalStatus == null && errorMessage == null && skippedReason == null
 
     private suspend fun runDescriptorSync(
         mode: SyncMode,
@@ -252,9 +503,10 @@ class HealthSyncService(
         startForDescriptor: suspend (HealthDataTypeDescriptor) -> Instant
     ): List<HealthDataTypeSyncResult> {
         val results = mutableListOf<HealthDataTypeSyncResult>()
+        val progressReporter = SyncProgressReporter(onProgress)
         // A full sync can span many record types; the global deadline keeps one slow type from hiding the rest.
         val globalDeadline = Instant.now().plus(globalTimeout)
-        onProgress(
+        progressReporter.emit(
             SyncProgressPolicy.progressForResults(
                 mode = mode,
                 currentType = null,
@@ -283,7 +535,7 @@ class HealthSyncService(
                     startedAt = Instant.now()
                 )
                 results += timeoutResult
-                onProgress(
+                progressReporter.emit(
                     SyncProgressPolicy.progressForResults(
                         mode = mode,
                         currentType = null,
@@ -300,7 +552,7 @@ class HealthSyncService(
                 return results
             }
 
-            onProgress(
+            progressReporter.emit(
                 SyncProgressPolicy.progressForResults(
                     mode = mode,
                     currentType = descriptor.displayName,
@@ -323,7 +575,7 @@ class HealthSyncService(
                 requireBackgroundReadPermission = requireBackgroundReadPermission,
                 timeout = perTypeTimeout,
                 onTypeProgress = { typeProgress ->
-                    onProgress(
+                    progressReporter.emit(
                         SyncProgressPolicy.progressForTypeStep(
                             mode = mode,
                             typeName = descriptor.displayName,
@@ -340,7 +592,7 @@ class HealthSyncService(
             )
             results += result
             recordCoverageIfSuccessful(mode, result)
-            onProgress(
+            progressReporter.emit(
                 SyncProgressPolicy.progressForResults(
                     mode = mode,
                     currentType = null,
@@ -452,4 +704,8 @@ class HealthSyncService(
         }
     }
 
+    private companion object {
+        // Manual and WorkManager entry points share the same Health Connect and Room write path.
+        val syncMutex = Mutex()
+    }
 }

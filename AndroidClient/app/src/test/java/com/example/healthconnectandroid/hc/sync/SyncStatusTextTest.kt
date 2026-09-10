@@ -13,6 +13,7 @@ class SyncStatusTextTest {
                     key = "heart_rate",
                     recordsInserted = 3,
                     recordsUpdated = 1,
+                    recordsDeleted = 1,
                     recordsSkippedDuplicate = 2,
                     aggregateRowsStored = 4
                 ),
@@ -39,7 +40,7 @@ class SyncStatusTextTest {
         )
 
         assertEquals(
-            "Smart sync complete: types 5, inserted 3, updated 1, duplicates 2, " +
+            "Smart sync complete: types 5, inserted 3, updated 1, deleted 1, duplicates 2, " +
                 "summaries 4, skipped 1, timeouts 1, cancelled 1, errors 1",
             text
         )

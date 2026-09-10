@@ -31,6 +31,7 @@ internal object CatalogRefreshPolicy {
         results.asSequence()
             .filter { result ->
                 result.recordsStored > 0 ||
+                    result.recordsDeleted > 0 ||
                     result.valuesStored > 0 ||
                     result.aggregateRowsStored > 0
             }

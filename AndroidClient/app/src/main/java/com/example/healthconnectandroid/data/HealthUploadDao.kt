@@ -265,6 +265,18 @@ interface HealthUploadDao {
         limit: Int
     ): List<MedicineDoseLogEntity>
 
+    @Query(
+        """
+        SELECT MAX(COALESCE(r.endEpochMillis, r.startEpochMillis))
+        FROM health_upload_ack ack
+        INNER JOIN health_records r ON r.localId = ack.localId
+        WHERE ack.serverKey LIKE 'PRODUCTION:%'
+          AND ack.itemKind = 'record'
+          AND r.recordType = :recordType
+        """
+    )
+    suspend fun latestProductionAckSourceEndEpochMillis(recordType: String): Long?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAcks(acks: List<HealthUploadAckEntity>)
 

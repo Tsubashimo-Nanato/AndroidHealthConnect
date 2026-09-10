@@ -2,41 +2,40 @@ package com.example.healthconnectandroid.ui.sleep
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
-import com.example.healthconnectandroid.hc.SleepQualityBand
 import com.example.healthconnectandroid.hc.SleepQualityMatrixModel
+import com.example.healthconnectandroid.hc.sleepSessionDate
 import com.example.healthconnectandroid.ui.i18n.uiText
 import java.time.Duration
 import java.time.Instant
@@ -53,64 +52,67 @@ internal data class SleepClockPeriod(
 
 internal data class SleepTimelineDay(
     val date: LocalDate,
-    val qualityBand: SleepQualityBand?,
     val totalSleepMinutes: Long?,
     val periods: List<SleepClockPeriod>
 )
 
 @Composable
-// Weekly and monthly views share one clock rail so stage colors and interaction cannot drift apart.
 fun SleepTimeline(
     model: SleepQualityMatrixModel,
     sessions: List<SleepSessionUiModel>,
     selectedBoxIds: Set<String>,
     onSelectedBoxIdsChange: (Set<String>) -> Unit,
-    zoneId: ZoneId = ZoneId.systemDefault(),
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    zoneId: ZoneId = ZoneId.systemDefault()
 ) {
     val days = remember(model, sessions, zoneId) {
         sleepTimelineDays(model, sessions, zoneId)
     }
-    val timelineState = rememberScrollState()
+    val timelineState = rememberLazyListState()
     val selectedIndex = days.indexOfLast { it.date.toString() in selectedBoxIds }
-    LaunchedEffect(days, selectedIndex, timelineState.maxValue) {
-        if (days.isEmpty() || timelineState.maxValue == 0) return@LaunchedEffect
-        val target = if (selectedIndex <= 0 || days.size <= 1) {
-            0
+    var positionedOnce by remember { mutableStateOf(false) }
+    LaunchedEffect(days, selectedIndex) {
+        if (days.isEmpty()) return@LaunchedEffect
+        val targetIndex = selectedIndex.takeIf { it >= 0 } ?: days.lastIndex
+        val firstVisibleIndex = (targetIndex - VisibleTimelineColumns + 1).coerceAtLeast(0)
+        if (positionedOnce) {
+            timelineState.animateScrollToItem(firstVisibleIndex)
         } else {
-            (timelineState.maxValue * (selectedIndex.toFloat() / days.lastIndex)).toInt()
+            timelineState.scrollToItem(firstVisibleIndex)
+            positionedOnce = true
         }
-        timelineState.scrollTo(target.coerceIn(0, timelineState.maxValue))
     }
 
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         SleepStageLegend()
         BoxWithConstraints(Modifier.fillMaxWidth()) {
             val dayWidth = sleepTimelineColumnWidth(maxWidth)
             Row(Modifier.fillMaxWidth()) {
                 SleepTimeAxis()
-                Row(
-                    modifier = Modifier
-                        .weight(1f)
-                        .horizontalScroll(timelineState),
-                    horizontalArrangement = Arrangement.spacedBy(TimelineColumnSpacing)
-                ) {
-                    days.forEach { day ->
-                        SleepTimelineDayColumn(
-                            day = day,
-                            width = dayWidth,
-                            selected = day.date.toString() in selectedBoxIds,
-                            onClick = { onSelectedBoxIdsChange(setOf(day.date.toString())) }
-                        )
+                Box(modifier = Modifier.weight(1f)) {
+                    SleepTimelineGrid(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(TimelineRailHeight)
+                            .align(Alignment.BottomStart)
+                    )
+                    LazyRow(
+                        state = timelineState,
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(TimelineColumnSpacing)
+                    ) {
+                        items(days, key = { it.date }) { day ->
+                            SleepTimelineDayColumn(
+                                day = day,
+                                width = dayWidth,
+                                selected = day.date.toString() in selectedBoxIds,
+                                onClick = { onSelectedBoxIdsChange(setOf(day.date.toString())) }
+                            )
+                        }
                     }
                 }
             }
         }
-        Text(
-            uiText(if (days.size == 7) "Scroll to explore 7 days" else "Scroll through dates"),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
     }
 }
 
@@ -118,22 +120,28 @@ fun SleepTimeline(
 private fun SleepStageLegend() {
     Row(
         modifier = Modifier
+            .fillMaxWidth()
             .height(20.dp)
-            .horizontalScroll(rememberScrollState()),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+            .padding(start = TimelineAxisWidth),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        listOf("Awake", "REM", "Light sleep", "Deep sleep", "Sleeping").forEach { label ->
+        listOf("REM", "Light sleep", "Deep sleep").forEach { label ->
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(3.dp)
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                Surface(
-                    modifier = Modifier.width(6.dp).height(6.dp),
-                    shape = RoundedCornerShape(99.dp),
-                    color = sleepStageColor(label)
-                ) {}
-                Text(uiText(label), style = MaterialTheme.typography.labelSmall)
+                Canvas(Modifier.width(14.dp).height(3.dp)) {
+                    drawRoundRect(
+                        color = sleepStageColor(label),
+                        cornerRadius = CornerRadius(size.height / 2f)
+                    )
+                }
+                Text(
+                    uiText(label),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
     }
@@ -145,7 +153,14 @@ private fun SleepTimeAxis() {
         modifier = Modifier.width(TimelineAxisWidth),
         horizontalAlignment = Alignment.End
     ) {
-        Spacer(Modifier.height(44.dp))
+        Box(Modifier.height(TimelineHeaderHeight).fillMaxWidth()) {
+            Text(
+                text = uiText("Time"),
+                modifier = Modifier.align(Alignment.BottomEnd).padding(end = 6.dp, bottom = 6.dp),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
         Box(Modifier.height(TimelineRailHeight).fillMaxWidth()) {
             Column(
                 modifier = Modifier.fillMaxHeight().padding(end = 6.dp),
@@ -165,75 +180,106 @@ private fun SleepTimeAxis() {
 }
 
 @Composable
+private fun SleepTimelineGrid(modifier: Modifier = Modifier) {
+    val gridColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.18f)
+    Canvas(modifier) {
+        TimelineTickFractions.forEach { fraction ->
+            val y = size.height * fraction
+            drawLine(
+                color = gridColor,
+                start = Offset(0f, y),
+                end = Offset(size.width, y),
+                strokeWidth = 1.dp.toPx()
+            )
+        }
+    }
+}
+
+@Composable
 private fun SleepTimelineDayColumn(
     day: SleepTimelineDay,
     width: Dp,
     selected: Boolean,
     onClick: () -> Unit
 ) {
-    val durationColors = sleepDurationColors(day.totalSleepMinutes)
+    val durationColor = day.totalSleepMinutes
+        ?.let(::sleepDurationColor)
+        ?: MaterialTheme.colorScheme.outlineVariant
     val accessibilityLabel = buildString {
         append(day.date)
         append(", ")
-        append(uiText(day.qualityBand?.label ?: "No data"))
+        val minutes = day.totalSleepMinutes
+        if (minutes == null) {
+            append(uiText("No data"))
+        } else {
+            append("${minutes / 60}h ${minutes % 60}m")
+        }
     }
-    val containerColor = durationColors.container.copy(alpha = if (selected) 1f else 0.76f)
-    Box(
+    Column(
         modifier = Modifier
             .width(width)
-            .drawBehind {
-                val radius = 12.dp.toPx()
-                drawRoundRect(containerColor, cornerRadius = CornerRadius(radius))
-            }
             .semantics {
                 contentDescription = accessibilityLabel
                 this.selected = selected
             }
-            .clickable(onClick = onClick)
+            .clickable(onClick = onClick),
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(Modifier.width(width).height(TimelineHeaderHeight)) {
             Text(
                 text = sleepTimelineDateLabel(day.date),
-                modifier = Modifier.height(44.dp).padding(top = 4.dp),
+                modifier = Modifier.align(Alignment.TopCenter).padding(top = 4.dp),
                 style = MaterialTheme.typography.labelSmall,
-                color = durationColors.content,
+                color = if (selected) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
                 textAlign = TextAlign.Center
             )
-            SleepDayRail(day.periods, width)
+            Canvas(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .width(if (selected) 28.dp else 20.dp)
+                    .height(if (selected) 3.dp else 2.dp)
+            ) {
+                drawRoundRect(
+                    color = durationColor.copy(alpha = if (selected) 1f else 0.78f),
+                    cornerRadius = CornerRadius(size.height / 2f)
+                )
+            }
         }
+        SleepDayRail(day.periods, width)
     }
 }
 
 @Composable
 private fun SleepDayRail(periods: List<SleepClockPeriod>, width: Dp) {
-    val gridColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.22f)
-    val trackColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.44f)
+    val trackColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.1f)
     Canvas(
         modifier = Modifier
             .width(width)
             .height(TimelineRailHeight)
-            .padding(horizontal = 7.dp)
+            .padding(horizontal = 8.dp)
     ) {
-        listOf(0f, 0.25f, 0.5f, 0.75f, 1f).forEach { fraction ->
-            val y = size.height * fraction
-            drawLine(gridColor, Offset(0f, y), Offset(size.width, y), strokeWidth = 1.dp.toPx())
-        }
-        val trackWidth = 26.dp.toPx()
-        val trackLeft = (size.width - trackWidth) / 2f
-        drawRoundRect(
+        val trackCenter = size.width / 2f
+        drawLine(
             color = trackColor,
-            topLeft = Offset(trackLeft, 0f),
-            size = Size(trackWidth, size.height),
-            cornerRadius = CornerRadius(trackWidth / 2f)
+            start = Offset(trackCenter, 0f),
+            end = Offset(trackCenter, size.height),
+            strokeWidth = 1.dp.toPx()
         )
+        val stageWidth = 18.dp.toPx()
         periods.forEach { period ->
-            val top = size.height * (period.startMinute / MinutesPerDay)
-            val bottom = size.height * (period.endMinute / MinutesPerDay)
+            val startMinute = period.startMinute.coerceIn(0f, MinutesPerDay)
+            val endMinute = period.endMinute.coerceIn(startMinute, MinutesPerDay)
+            val top = size.height * (startMinute / MinutesPerDay)
+            val bottom = size.height * (endMinute / MinutesPerDay)
             drawRoundRect(
                 color = sleepStageColor(period.stageLabel),
-                topLeft = Offset(trackLeft + 3.dp.toPx(), top),
-                size = Size(trackWidth - 6.dp.toPx(), (bottom - top).coerceAtLeast(3.dp.toPx())),
-                cornerRadius = CornerRadius(5.dp.toPx())
+                topLeft = Offset(trackCenter - stageWidth / 2f, top),
+                size = Size(stageWidth, (bottom - top).coerceAtLeast(2.dp.toPx())),
+                cornerRadius = CornerRadius(2.dp.toPx())
             )
         }
     }
@@ -245,7 +291,7 @@ internal fun sleepTimelineDays(
     zoneId: ZoneId
 ): List<SleepTimelineDay> {
     val sessionsByDate = sessions.groupBy { session ->
-        session.analysisStart?.atZone(zoneId)?.toLocalDate()
+        sleepSessionDate(session.analysisStart, session.analysisEnd, zoneId)
     }
     return model.boxes.map { box ->
         val daySessions = sessionsByDate[box.startDate].orEmpty()
@@ -254,29 +300,36 @@ internal fun sleepTimelineDays(
             val end = session.analysisEnd ?: return@mapNotNull null
             if (end.isAfter(start)) Duration.between(start, end) else null
         }
-        val periods = daySessions.flatMap { session ->
-            val stagePeriods = session.stages.flatMap stageLoop@{ stage ->
-                val start = stage.startTime ?: return@stageLoop emptyList()
-                val end = stage.endTime ?: return@stageLoop emptyList()
-                sleepClockPeriods(start, end, sleepStageLabel(stage), zoneId)
-            }
-            if (stagePeriods.isNotEmpty()) {
-                stagePeriods
-            } else {
-                val start = session.analysisStart
-                val end = session.analysisEnd
-                if (start == null || end == null) emptyList() else sleepClockPeriods(start, end, "Sleeping", zoneId)
-            }
-        }
+        val periods = daySessions.flatMap { session -> sleepTimelinePeriods(session, zoneId) }
         SleepTimelineDay(
             date = box.startDate,
-            qualityBand = box.qualityBand,
             totalSleepMinutes = validDurations
                 .takeIf { it.isNotEmpty() }
                 ?.sumOf { it.toMinutes() },
             periods = periods
         )
     }
+}
+
+private fun sleepTimelinePeriods(session: SleepSessionUiModel, zoneId: ZoneId): List<SleepClockPeriod> {
+    val stagePeriods = session.stages.flatMap stageLoop@{ stage ->
+        val label = sleepStageLabel(stage)
+        // Awake remains negative space, making interruptions legible on a narrow 24-hour rail.
+        if (!isSleepTimelineStageVisible(label)) return@stageLoop emptyList()
+        val start = stage.startTime ?: return@stageLoop emptyList()
+        val end = stage.endTime ?: return@stageLoop emptyList()
+        sleepClockPeriods(start, end, label, zoneId)
+    }
+    if (stagePeriods.isNotEmpty()) return stagePeriods
+
+    val start = session.analysisStart ?: return emptyList()
+    val end = session.analysisEnd ?: return emptyList()
+    return sleepClockPeriods(start, end, "Sleeping", zoneId)
+}
+
+internal fun isSleepTimelineStageVisible(label: String): Boolean {
+    val normalized = label.lowercase(Locale.ROOT)
+    return "awake" !in normalized && "out of bed" !in normalized
 }
 
 internal fun sleepTimelineDateLabel(date: LocalDate): String =
@@ -312,8 +365,10 @@ internal fun sleepClockPeriods(
 }
 
 private val timelineTicks = listOf("00:00", "06:00", "12:00", "18:00", "24:00")
+private val TimelineTickFractions = listOf(0f, 0.25f, 0.5f, 0.75f, 1f)
 private val TimelineDateFormatter = DateTimeFormatter.ofPattern("M/d\nEEE", Locale.US)
 private val TimelineRailHeight = 288.dp
+private val TimelineHeaderHeight = 44.dp
 private val TimelineAxisWidth = 44.dp
 private val TimelineColumnSpacing = 4.dp
 private const val VisibleTimelineColumns = 5

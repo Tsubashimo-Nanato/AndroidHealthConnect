@@ -1,6 +1,5 @@
 package com.example.healthconnectandroid.ui.medicine
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -64,7 +63,7 @@ private fun MedicineSlotChip(
     Surface(
         modifier = Modifier
             .width(width)
-            .heightIn(min = 46.dp)
+            .heightIn(min = 42.dp)
             .selectable(
                 selected = selected,
                 role = Role.RadioButton,
@@ -72,27 +71,19 @@ private fun MedicineSlotChip(
             ),
         shape = MaterialTheme.shapes.small,
         color = if (selected) {
-            MaterialTheme.colorScheme.primary
+            MaterialTheme.colorScheme.primaryContainer
         } else {
             MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.54f)
         },
         contentColor = if (selected) {
-            MaterialTheme.colorScheme.onPrimary
+            MaterialTheme.colorScheme.onPrimaryContainer
         } else {
             MaterialTheme.colorScheme.onSurfaceVariant
-        },
-        border = BorderStroke(
-            1.dp,
-            if (selected) {
-                MaterialTheme.colorScheme.primary
-            } else {
-                MaterialTheme.colorScheme.outline.copy(alpha = 0.22f)
-            }
-        )
+        }
     ) {
         Text(
             text = slot.displayLabel(language),
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 9.dp),
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
             style = MaterialTheme.typography.labelMedium,
             textAlign = TextAlign.Center,
             maxLines = 2,

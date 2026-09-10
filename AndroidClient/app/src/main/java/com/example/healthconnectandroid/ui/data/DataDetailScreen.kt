@@ -64,6 +64,7 @@ import com.example.healthconnectandroid.ui.sleep.SleepVisualizationSection
 import com.example.healthconnectandroid.ui.sleep.defaultSleepSelection
 import com.example.healthconnectandroid.ui.sleep.filterSleepSessionsForSelection
 import com.example.healthconnectandroid.ui.sleep.sleepAnchorInsideQueryWindow
+import com.example.healthconnectandroid.ui.sleep.sleepCanPanForward
 import com.example.healthconnectandroid.ui.sleep.sleepDataQueryWindow
 import com.example.healthconnectandroid.ui.sleep.sleepMatrixCache
 import com.example.healthconnectandroid.ui.sleep.sleepMatrixForAnchor
@@ -96,8 +97,9 @@ fun HealthDataDetailScreen(
     diagnostics: DeviceSmokeDiagnostics,
     onExportType: (String) -> Unit,
     runSelectedTypeSync: suspend (String, Instant, Instant, ZoneId, (SyncProgress) -> Unit) -> HealthDataTypeSyncResult,
-    onLocalDataChanged: () -> Unit = {},
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    showDiagnostics: Boolean = false,
+    onLocalDataChanged: () -> Unit = {}
 ) {
     val descriptor = remember(dataTypeKey) {
         com.example.healthconnectandroid.hc.HealthDataTypeRegistry.require(dataTypeKey)
@@ -157,7 +159,13 @@ fun HealthDataDetailScreen(
         selectedSyncJob = scope.launch {
             syncInProgress = true
             val (start, end) = syncRange
-            selectedSyncProgress = null
+            selectedSyncProgress = SyncProgress.initial(
+                mode = SyncMode.SELECTED_TYPE,
+                totalTypes = 1,
+                isCancellable = true,
+                rangeStart = start,
+                rangeEnd = end
+            )
             status = "$label ${descriptor.displayName}..."
             val result = try {
                 runSelectedTypeSync(dataTypeKey, start, end, zoneId) { progress ->
@@ -368,10 +376,12 @@ fun HealthDataDetailScreen(
                         matrixCellCount = matrixModel.boxes.size
                     )
                 }
-                LaunchedEffect(matrixKey, matrixModel.boxes.size, matrixSessionCount) {
+                LaunchedEffect(matrixKey, matrixModel.boxes.size, matrixSessionCount, sleepModels.size) {
                     val validIds = matrixModel.boxes.mapTo(mutableSetOf()) { it.id }
                     val stillValid = selectedSleepBoxIds.filterTo(mutableSetOf()) { it in validIds }
-                    selectedSleepBoxIds = stillValid.ifEmpty { defaultSleepSelection(matrixModel) }
+                    selectedSleepBoxIds = stillValid.ifEmpty {
+                        defaultSleepSelection(matrixModel, sleepModels, zoneId)
+                    }
                 }
                 val selectedSleepModels = remember(sleepModels, matrixModel, selectedSleepBoxIds, zoneId) {
                     filterSleepSessionsForSelection(sleepModels, matrixModel, selectedSleepBoxIds, zoneId)
@@ -404,6 +414,11 @@ fun HealthDataDetailScreen(
                             }
                         }
                     },
+                    canPanForward = sleepCanPanForward(
+                        range = range,
+                        anchorDate = sleepWindowEndDate,
+                        today = LocalDate.now(zoneId)
+                    ),
                     zoneId = zoneId,
                     onGestureDiagnostic = { action, deltaSnap, selectedCount ->
                         diagnostics.recordMatrixGesture(
@@ -594,12 +609,14 @@ fun HealthDataDetailScreen(
                     }
                 )
             }
-            DetailRangeDebugFooter(
-                loaded = loaded,
-                zoneId = zoneId,
-                syncRange = selectedSyncRange(),
-                heartRateChartRange = heartRateVisibleRange
-            )
+            if (showDiagnostics) {
+                DetailRangeDebugFooter(
+                    loaded = loaded,
+                    zoneId = zoneId,
+                    syncRange = selectedSyncRange(),
+                    heartRateChartRange = heartRateVisibleRange
+                )
+            }
             if (isSleep) {
                 DetailSyncControlsSection(
                     descriptor = descriptor,

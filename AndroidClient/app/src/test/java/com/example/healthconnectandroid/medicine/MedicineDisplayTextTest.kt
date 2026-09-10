@@ -36,4 +36,27 @@ class MedicineDisplayTextTest {
             displayMedicineName("One-off sample", AppLanguagePreference.ENGLISH)
         )
     }
+
+    @Test
+    fun sentenceSeparatedBilingualSummaryUsesOnlyTheSelectedLanguage() {
+        val medicine = MedicineItem(
+            localId = 2,
+            name = "Sample Brand / sample ingredient / sample kana / 示例药",
+            notes = null,
+            doseText = null,
+            summary = "Scheduled medicine summary. 计划用药简介。",
+            details = null,
+            active = true,
+            slots = listOf(MedicineSlot.BEDTIME)
+        )
+
+        assertEquals(
+            "Scheduled medicine summary.",
+            medicine.displayText(AppLanguagePreference.ENGLISH).summary
+        )
+        assertEquals(
+            "计划用药简介。",
+            medicine.displayText(AppLanguagePreference.CHINESE_SIMPLIFIED).summary
+        )
+    }
 }

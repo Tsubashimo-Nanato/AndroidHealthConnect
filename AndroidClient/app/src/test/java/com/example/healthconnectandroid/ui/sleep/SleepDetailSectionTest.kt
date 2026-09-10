@@ -4,6 +4,7 @@ import com.example.healthconnectandroid.hc.SleepDaySummary
 import com.example.healthconnectandroid.hc.SleepQualityBand
 import com.example.healthconnectandroid.hc.SleepQualityMatrixBox
 import com.example.healthconnectandroid.hc.SleepQualityMatrixModel
+import com.example.healthconnectandroid.hc.sleepSessionDate
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
@@ -12,6 +13,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SleepDetailSectionTest {
@@ -114,6 +116,26 @@ class SleepDetailSectionTest {
         assertEquals(1440f, periods[0].endMinute)
         assertEquals(0f, periods[1].startMinute)
         assertEquals(75f, periods[1].endMinute)
+    }
+
+    @Test
+    fun overnightTimelineUsesWakeDate() {
+        val date = sleepSessionDate(
+            start = Instant.parse("2026-07-11T23:30:00Z"),
+            end = Instant.parse("2026-07-12T07:15:00Z"),
+            zoneId = ZoneOffset.UTC
+        )
+
+        assertEquals(LocalDate.of(2026, 7, 12), date)
+    }
+
+    @Test
+    fun timelineLeavesAwakeIntervalsAsGaps() {
+        assertFalse(isSleepTimelineStageVisible("Awake"))
+        assertFalse(isSleepTimelineStageVisible("Out of bed"))
+        assertTrue(isSleepTimelineStageVisible("REM"))
+        assertTrue(isSleepTimelineStageVisible("Light sleep"))
+        assertTrue(isSleepTimelineStageVisible("Deep sleep"))
     }
 
     @Test

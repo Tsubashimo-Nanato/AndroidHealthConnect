@@ -19,9 +19,9 @@ private fun translateDynamicChinese(text: String): String {
     exactChinese[text]?.let { return it }
     return when {
         text.startsWith("Last sync: ") ->
-            text.replaceFirst("Last sync: ", "上次同步：")
+            replaceCommonTokens(text.replaceFirst("Last sync: ", "上次同步："))
         text.startsWith("Last sync ") ->
-            text.replaceFirst("Last sync ", "上次同步 ")
+            replaceCommonTokens(text.replaceFirst("Last sync ", "上次同步 "))
         text.startsWith("Last synced data: ") ->
             text.replaceFirst("Last synced data: ", "上次同步数据：")
         text.startsWith("Range ") ->
@@ -62,6 +62,9 @@ private fun translateDynamicChinese(text: String): String {
                 .replace("never", "从未")
         text.startsWith("Periodic sync is ") ->
             text.replaceFirst("Periodic sync is ", "周期同步")
+                .replace("enabled and scheduled. Last run: ", "已启用并已计划。上次运行：")
+                .replace("enabled, waiting for background permission. Last run: ", "已启用，正在等待后台读取权限。上次运行：")
+                .replace("enabled, but background read is unavailable. Last run: ", "已启用，但此设备不支持后台读取。上次运行：")
                 .replace("enabled. Last run: ", "已启用。上次运行：")
                 .replace("disabled. Last run: ", "已关闭。上次运行：")
                 .replace("never", "从未")
@@ -119,6 +122,8 @@ private fun translateDynamicChinese(text: String): String {
                 .replace(" missing", " 个缺失")
         text.matches(Regex("\\d+/\\d+ access")) ->
             text.replace(" access", " 权限")
+        text.matches(Regex("\\d+ types · [\\d,]+ records")) ->
+            replaceCommonTokens(text)
         text.matches(Regex("\\d+ types")) ->
             text.replace(" types", " 个类型")
         text.matches(Regex("\\d+ records")) ->
@@ -164,6 +169,7 @@ private val commonChineseTokens = linkedMapOf(
     "failed" to "失败",
     "success" to "成功",
     "Never" to "从未",
+    "no sync yet" to "尚未同步",
     "Awake" to "清醒",
     "REM" to "快速眼动",
     "Light sleep" to "浅睡",
@@ -178,7 +184,14 @@ private val exactChinese = mapOf(
     "Medicine" to "用药",
     "Local Data" to "本地数据",
     "Data" to "数据",
+    "Data Sync" to "数据同步",
     "Settings" to "设置",
+    "General" to "通用",
+    "Health Connect" to "Health Connect",
+    "Storage & Tools" to "存储与工具",
+    "Latest result" to "最近结果",
+    "Expand" to "展开",
+    "Collapse" to "收起",
     "Profile" to "个人资料",
     "Preferences" to "偏好设置",
     "Permissions" to "权限",
@@ -191,6 +204,11 @@ private val exactChinese = mapOf(
     "Data Flow" to "数据流程",
     "Advanced" to "高级",
     "Profile, language, theme" to "个人资料、语言、主题",
+    "Language, display, profile" to "语言、显示、个人资料",
+    "Permissions, sync, upload" to "权限、同步、上传",
+    "Permissions and upload" to "权限和上传",
+    "Exports, local storage, diagnostics" to "导出、本地存储、诊断",
+    "Exports and local storage" to "导出和本地存储",
     "Access, sync, upload" to "权限、同步、上传",
     "Access, upload, exports" to "权限、上传、导出",
     "Schedule and dose checks" to "用药计划和确认",
@@ -231,18 +249,26 @@ private val exactChinese = mapOf(
     "Actions" to "操作",
     "Scheduled" to "已计划",
     "Off" to "关闭",
+    "Permission needed" to "需要权限",
+    "Unavailable" to "不可用",
     "Background ready" to "后台就绪",
     "Manual only" to "仅手动",
-    "not available on this device" to "此设备不可用",
-    "available and granted" to "可用且已授权",
-    "available, permission missing" to "可用，但缺少权限",
+    "Auto sync on" to "自动同步已开启",
+    "Auto sync off" to "自动同步已关闭",
+    "Auto sync waiting" to "自动同步等待授权",
+    "Auto sync unavailable" to "自动同步不可用",
+    "Background access unavailable" to "此设备不支持后台读取",
+    "Background access ready" to "后台读取已授权",
+    "Background access missing" to "缺少后台读取权限",
     "Working..." to "处理中...",
     "Disable Periodic" to "关闭周期同步",
     "Enable Periodic" to "开启周期同步",
     "Run Now" to "立即运行",
     "Cancel Full Resync" to "取消完整重同步",
-    "Full resync reads from the full historical floor to now and can be slow. Periodic sync uses WorkManager smart sync; Android may delay it, so it is not real-time." to "完整重同步会从历史起点读取到现在，可能较慢。周期同步使用 WorkManager 的智能同步；Android 可能延后执行，因此不是实时同步。",
+    "Full resync reads from the full historical floor to now and can be slow. Periodic sync checks Health Connect changes about hourly; Android may delay it, so it is not real-time." to "完整重同步会从历史起点读取到现在，可能较慢。周期同步约每小时检查 Health Connect 增量变化；Android 可能延后执行，因此不是实时同步。",
     "Smart Sync" to "智能同步",
+    "Sync New Data" to "同步新数据",
+    "Incremental changes from Health Connect" to "从 Health Connect 获取增量变化",
     "Syncing..." to "同步中...",
     "Full Resync" to "完整重同步",
     "Full history" to "完整历史",
@@ -270,6 +296,8 @@ private val exactChinese = mapOf(
     "Loading local data..." to "正在加载本地数据...",
     "Loading local cache" to "正在加载本地缓存",
     "Local cache" to "本地缓存",
+    "Sleep history" to "睡眠历史",
+    "No recent sleep" to "近期无睡眠数据",
     "Refresh local data" to "刷新本地数据",
     "Back" to "返回",
     "No data" to "无数据",
@@ -286,6 +314,8 @@ private val exactChinese = mapOf(
     "Needs access" to "需要授权",
     "Grant in Settings" to "在设置中授权",
     "Ready" to "就绪",
+    "Implemented" to "已支持",
+    "Access ready" to "权限已就绪",
     "Planned" to "计划中",
     "Granted" to "已授权",
     "Missing" to "缺失",
@@ -350,7 +380,7 @@ private val exactChinese = mapOf(
     "Hide API key" to "隐藏 API 密钥",
     "Scan Pairing QR" to "扫描配对 QR",
     "Emulator: use 10.0.2.2. Physical phone: start the website in LAN mode and use the PC LAN IP. Do not use localhost, 127.0.0.1, or PC-LAN-IP." to "模拟器使用 10.0.2.2。实体手机需要先用 LAN 模式启动网站，再使用电脑的局域网 IP。不要使用 localhost、127.0.0.1 或 PC-LAN-IP。",
-    "The website Pairing QR carries the server mode, API base URL, and current API key. Local HTTP pairing still requires a Debug APK." to "网站配对 QR 会包含服务器模式、API 基础 URL 和当前 API 密钥。本地 HTTP 配对仍需要 Debug APK。",
+    "Scan the website Pairing QR to authorize this profile. Legacy QR codes with an API key remain supported." to "扫描网站的配对 QR，为此档案授权。仍兼容包含 API 密钥的旧版 QR。",
     "Auto upload" to "自动上传",
     "Queue upload after periodic sync and when these settings are saved." to "周期同步后以及保存这些设置时排队上传。",
     "Upload Status" to "上传状态",
@@ -366,6 +396,8 @@ private val exactChinese = mapOf(
     "Uploading..." to "上传中...",
     "Testing..." to "测试中...",
     "Mode" to "模式",
+    "Light" to "浅色",
+    "Dark" to "深色",
     "Palette" to "配色",
     "Paper" to "纸面",
     "Rain" to "雨幕",
@@ -414,6 +446,7 @@ private val exactChinese = mapOf(
     "English" to "English",
     "Simplified Chinese" to "简体中文",
     "Display only" to "仅影响显示",
+    "Preferences change display grouping and units only. Stored data and CSV export remain canonical." to "偏好设置只改变显示分组和单位。已存数据和 CSV 导出保持原始格式。",
     "Week starts on" to "每周开始于",
     "Units" to "单位",
     "Timezone" to "时区",
@@ -430,6 +463,7 @@ private val exactChinese = mapOf(
     "Profile saved" to "个人资料已保存",
     "DOB not set" to "未设置出生日期",
     "No upload yet" to "尚未上传",
+    "API key or Pairing QR is required" to "需要 API 密钥或配对 QR",
     "Preparing" to "准备中",
     "Fetching" to "读取中",
     "Storing" to "写入中",
@@ -495,5 +529,16 @@ private val exactChinese = mapOf(
     "Cleaning related data" to "正在清理关联数据",
     "Finalizing local storage" to "正在整理本地存储",
     "Local data removal complete" to "本地数据删除完成",
-    "Deletion continues after this window is closed." to "关闭此窗口后，删除仍会继续。"
+    "Deletion continues after this window is closed." to "关闭此窗口后，删除仍会继续。",
+    "Profiles" to "用户资料",
+    "Local profiles" to "本地用户资料",
+    "Local profile" to "本地用户资料",
+    "Health Connect profile" to "Health Connect 用户资料",
+    "Add profile" to "添加用户资料",
+    "Profile name" to "用户资料名称",
+    "Create" to "创建",
+    "This profile name is already in use." to "该用户资料名称已被使用。",
+    "Health Connect belongs to one local profile. Other profiles keep medicine and local records separate." to "Health Connect 仅归属于一个本地用户资料。其他用户资料的用药和本地记录会保持独立。",
+    "Health Connect is not linked" to "未连接 Health Connect",
+    "Health Connect and server upload belong to another profile. Medicine and local records remain separate." to "Health Connect 和服务器上传归属于另一个用户资料。用药和本地记录仍会保持独立。"
 )

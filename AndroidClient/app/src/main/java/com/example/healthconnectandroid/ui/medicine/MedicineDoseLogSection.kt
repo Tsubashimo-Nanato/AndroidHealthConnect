@@ -1,6 +1,7 @@
 package com.example.healthconnectandroid.ui.medicine
 
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -9,10 +10,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -73,6 +76,7 @@ private fun MedicineDoseEventRow(
 ) {
     val language = LocalAppLanguage.current
     var expanded by remember(event.logIds) { mutableStateOf(false) }
+    var showDeleteConfirmation by remember(event.logIds) { mutableStateOf(false) }
     val time = Instant.ofEpochMilli(event.recordedEpochMillis)
         .atZone(zoneId)
         .format(TimeFormatter)
@@ -87,7 +91,7 @@ private fun MedicineDoseEventRow(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .animateContentSize()
+            .animateContentSize(animationSpec = tween(180))
             .clickable(role = Role.Button) { expanded = !expanded },
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
@@ -124,9 +128,37 @@ private fun MedicineDoseEventRow(
             }
             SecondaryActionButton(
                 label = medicineUiText("Delete log"),
-                onClick = { onDeleteDoseLogs(event.logIds.toSet()) }
+                onClick = { showDeleteConfirmation = true }
             )
         }
+    }
+
+    if (showDeleteConfirmation) {
+        val deleteMessage = if (language == AppLanguagePreference.CHINESE_SIMPLIFIED) {
+            "将删除这次用药中的 $medicineCount 条本地记录。此操作无法撤销。"
+        } else {
+            "Delete $medicineCount local medicine records from this dose? This cannot be undone."
+        }
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirmation = false },
+            title = { Text(medicineUiText("Delete this dose log?")) },
+            text = { Text(deleteMessage) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showDeleteConfirmation = false
+                        onDeleteDoseLogs(event.logIds.toSet())
+                    }
+                ) {
+                    Text(medicineUiText("Delete"))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirmation = false }) {
+                    Text(medicineUiText("Cancel"))
+                }
+            }
+        )
     }
 }
 

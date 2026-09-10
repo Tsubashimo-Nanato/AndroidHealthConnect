@@ -16,29 +16,27 @@ object ChartDrawDownsampler {
         val sorted = if (points.isSortedByEpoch()) points else points.sortedBy { it.epochMillis }
         if (sorted.size <= 2) return sorted
 
-        val interior = sorted.subList(1, sorted.lastIndex)
+        val interiorSize = sorted.size - 2
         val bucketCount = ((targetCount - 2) / 2).coerceAtLeast(1)
-        val bucketSize = interior.size.toDouble() / bucketCount.toDouble()
+        val bucketSize = interiorSize.toDouble() / bucketCount.toDouble()
         val result = ArrayList<InspectorChartPoint>(targetCount)
 
         result.add(sorted.first())
         for (bucketIndex in 0 until bucketCount) {
-            val start = floor(bucketIndex * bucketSize).toInt().coerceIn(0, interior.size)
-            if (start >= interior.size) continue
-            val end = if (bucketIndex == bucketCount - 1) {
-                interior.size
+            val startOffset = floor(bucketIndex * bucketSize).toInt().coerceIn(0, interiorSize)
+            if (startOffset >= interiorSize) continue
+            val endOffset = if (bucketIndex == bucketCount - 1) {
+                interiorSize
             } else {
-                floor((bucketIndex + 1) * bucketSize).toInt().coerceIn(start + 1, interior.size)
+                floor((bucketIndex + 1) * bucketSize).toInt()
+                    .coerceIn(startOffset + 1, interiorSize)
             }
-            if (start >= end) continue
-
-            val bucket = interior.subList(start, end)
-            val lowPoint = bucket.minByOrNull { it.lowValueForDownsampling() } ?: continue
-            val highPoint = bucket.maxByOrNull { it.highValueForDownsampling() } ?: lowPoint
-            listOf(lowPoint, highPoint)
-                .distinctBy { DownsampleIdentity(it.epochMillis, it.value, it.value2) }
-                .sortedBy { it.epochMillis }
-                .forEach { result.addIfNew(it) }
+            appendBucketExtrema(
+                points = sorted,
+                startIndex = startOffset + 1,
+                endIndexExclusive = endOffset + 1,
+                destination = result
+            )
         }
         result.addIfNew(sorted.last())
 
@@ -49,10 +47,47 @@ object ChartDrawDownsampler {
         }
     }
 
-    private fun List<InspectorChartPoint>.isSortedByEpoch(): Boolean =
-        asSequence()
-            .zipWithNext()
-            .all { (previous, next) -> previous.epochMillis <= next.epochMillis }
+    private fun appendBucketExtrema(
+        points: List<InspectorChartPoint>,
+        startIndex: Int,
+        endIndexExclusive: Int,
+        destination: MutableList<InspectorChartPoint>
+    ) {
+        var lowIndex = startIndex
+        var highIndex = startIndex
+        var lowValue = points[startIndex].lowValueForDownsampling()
+        var highValue = points[startIndex].highValueForDownsampling()
+        for (index in startIndex + 1 until endIndexExclusive) {
+            val point = points[index]
+            val candidateLow = point.lowValueForDownsampling()
+            if (candidateLow < lowValue) {
+                lowValue = candidateLow
+                lowIndex = index
+            }
+            val candidateHigh = point.highValueForDownsampling()
+            if (candidateHigh > highValue) {
+                highValue = candidateHigh
+                highIndex = index
+            }
+        }
+
+        val lowPoint = points[lowIndex]
+        val highPoint = points[highIndex]
+        if (lowPoint.epochMillis <= highPoint.epochMillis) {
+            destination.addIfNew(lowPoint)
+            destination.addIfNew(highPoint)
+        } else {
+            destination.addIfNew(highPoint)
+            destination.addIfNew(lowPoint)
+        }
+    }
+
+    private fun List<InspectorChartPoint>.isSortedByEpoch(): Boolean {
+        for (index in 1 until size) {
+            if (this[index - 1].epochMillis > this[index].epochMillis) return false
+        }
+        return true
+    }
 
     private fun InspectorChartPoint.lowValueForDownsampling(): Double =
         minOf(value, value2 ?: value)
@@ -70,10 +105,4 @@ object ChartDrawDownsampler {
             add(point)
         }
     }
-
-    private data class DownsampleIdentity(
-        val epochMillis: Long,
-        val value: Double,
-        val value2: Double?
-    )
 }

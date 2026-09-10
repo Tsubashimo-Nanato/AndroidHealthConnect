@@ -57,4 +57,26 @@ class SleepWindowLabelTest {
         assertEquals(LocalDate.of(2026, 4, 27), sleepVisibleStartDate(InspectorTimeRange.WEEKLY, shifted))
         assertEquals(LocalDate.of(2026, 5, 3), sleepVisibleEndDate(InspectorTimeRange.WEEKLY, shifted))
     }
+
+    @Test
+    fun forwardNavigationStopsAtTheCurrentWindow() {
+        val today = LocalDate.of(2026, 5, 11)
+
+        assertEquals(
+            false,
+            sleepCanPanForward(InspectorTimeRange.WEEKLY, anchorDate = today, today = today)
+        )
+        assertEquals(
+            true,
+            sleepCanPanForward(InspectorTimeRange.WEEKLY, anchorDate = today.minusWeeks(1), today = today)
+        )
+        assertEquals(
+            false,
+            sleepCanPanForward(InspectorTimeRange.MONTHLY, anchorDate = today, today = today)
+        )
+        assertEquals(
+            true,
+            sleepCanPanForward(InspectorTimeRange.MONTHLY, anchorDate = today.minusMonths(1), today = today)
+        )
+    }
 }

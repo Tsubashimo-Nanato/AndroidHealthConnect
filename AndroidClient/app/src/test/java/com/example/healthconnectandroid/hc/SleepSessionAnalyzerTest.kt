@@ -29,7 +29,7 @@ class SleepSessionAnalyzerTest {
     private val today: LocalDate = LocalDate.of(2026, 5, 10)
 
     @Test
-    fun addsTodayAndYesterdayTags() {
+    fun overnightSessionUsesWakeDateForTag() {
         val todayAnalysis = SleepSessionAnalyzer.analyze(
             start = Instant.parse("2026-05-10T01:00:00Z"),
             end = Instant.parse("2026-05-10T08:00:00Z"),
@@ -37,7 +37,7 @@ class SleepSessionAnalyzerTest {
             now = today,
             zoneId = zoneId
         )
-        val yesterdayAnalysis = SleepSessionAnalyzer.analyze(
+        val overnightAnalysis = SleepSessionAnalyzer.analyze(
             start = Instant.parse("2026-05-09T22:00:00Z"),
             end = Instant.parse("2026-05-10T06:00:00Z"),
             stageCount = 3,
@@ -46,7 +46,27 @@ class SleepSessionAnalyzerTest {
         )
 
         assertTrue(todayAnalysis.tags.any { it.label == "Today" })
-        assertTrue(yesterdayAnalysis.tags.any { it.label == "Yesterday" })
+        assertTrue(overnightAnalysis.tags.any { it.label == "Today" })
+    }
+
+    @Test
+    fun overnightSessionContributesToWakeDateSummary() {
+        val summaries = SleepSessionAnalyzer.dailySummaries(
+            sessions = listOf(
+                SleepSessionInput(
+                    start = Instant.parse("2026-05-09T22:00:00Z"),
+                    end = Instant.parse("2026-05-10T06:00:00Z"),
+                    stageCount = 3
+                )
+            ),
+            startDate = LocalDate.of(2026, 5, 9),
+            endDate = LocalDate.of(2026, 5, 10),
+            zoneId = zoneId
+        )
+
+        assertEquals(0, summaries.first().sessionCount)
+        assertEquals(1, summaries.last().sessionCount)
+        assertEquals(Duration.ofHours(8), summaries.last().totalDuration)
     }
 
     @Test

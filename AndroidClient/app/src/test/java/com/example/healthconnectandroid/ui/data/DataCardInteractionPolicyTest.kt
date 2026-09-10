@@ -19,6 +19,7 @@ class DataCardInteractionPolicyTest {
         )
 
         assertTrue(DataCardInteractionPolicy.isClickable(summary))
+        assertEquals("", cardSecondaryText(summary))
     }
 
     @Test

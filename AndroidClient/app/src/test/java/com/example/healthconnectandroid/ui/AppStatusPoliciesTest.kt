@@ -41,4 +41,30 @@ class AppStatusPoliciesTest {
         assertEquals("Network unavailable. Retry Past month manually.", status.message)
         assertEquals(UploadRetryAction.RETRY_SCOPED_MANUALLY, status.retryAction)
     }
+
+    @Test
+    fun zeroErrorCompletionUsesSuccessTone() {
+        assertEquals(
+            StatusTone.Success,
+            statusToneForMessage("Sync new data complete: types 18, errors 0")
+        )
+    }
+
+    @Test
+    fun zeroSkippedPeriodicSummaryUsesSuccessTone() {
+        assertEquals(
+            StatusTone.Success,
+            statusToneForMessage(
+                "Periodic sync is enabled and scheduled. Last run: 2026-09-10T19:49:21Z (success). " +
+                    "types=13, read=0, skipped=0, errors=0"
+            )
+        )
+    }
+
+    @Test
+    fun backgroundReadStatusNamesTheMissingCapability() {
+        assertEquals("Background access unavailable", backgroundReadStatusText(false, false))
+        assertEquals("Background access missing", backgroundReadStatusText(true, false))
+        assertEquals("Background access ready", backgroundReadStatusText(true, true))
+    }
 }

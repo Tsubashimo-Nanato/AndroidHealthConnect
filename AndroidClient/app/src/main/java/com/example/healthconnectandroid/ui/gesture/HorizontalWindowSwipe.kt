@@ -5,20 +5,19 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import androidx.compose.foundation.layout.offset
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.unit.IntOffset
 import com.example.healthconnectandroid.ui.matrix.MatrixGesturePolicy
-import kotlin.math.roundToInt
 
 fun Modifier.horizontalWindowSwipe(
     enabled: Boolean = true,
@@ -30,20 +29,25 @@ fun Modifier.horizontalWindowSwipe(
     var viewportWidthPx by remember { mutableFloatStateOf(0f) }
     var dragTotalPx by remember { mutableFloatStateOf(0f) }
     var dragging by remember { mutableStateOf(false) }
+    val currentOnSettled by rememberUpdatedState(onSettled)
+    val currentOnSwipe by rememberUpdatedState(onSwipe)
     val visualOffsetPx by animateFloatAsState(
         targetValue = dragTotalPx,
         animationSpec = if (dragging) {
             snap()
         } else {
-            spring(stiffness = Spring.StiffnessMediumLow)
+            spring(
+                dampingRatio = Spring.DampingRatioNoBouncy,
+                stiffness = Spring.StiffnessMedium
+            )
         },
         label = "window-drag-offset"
     )
 
     onSizeChanged { viewportWidthPx = it.width.toFloat() }
         .clipToBounds()
-        .offset { IntOffset(visualOffsetPx.roundToInt(), 0) }
-        .pointerInput(viewportWidthPx, onSettled, onSwipe) {
+        .graphicsLayer { translationX = visualOffsetPx }
+        .pointerInput(viewportWidthPx) {
         detectHorizontalDragGestures(
             onDragStart = {
                 dragTotalPx = 0f
@@ -63,13 +67,13 @@ fun Modifier.horizontalWindowSwipe(
                 val delta = MatrixGesturePolicy.snappedWindowDelta(dragTotalPx, viewportWidthPx)
                 dragging = false
                 dragTotalPx = 0f
-                onSettled(delta)
-                if (delta != 0) onSwipe(delta)
+                currentOnSettled(delta)
+                if (delta != 0) currentOnSwipe(delta)
             },
             onDragCancel = {
                 dragging = false
                 dragTotalPx = 0f
-                onSettled(0)
+                currentOnSettled(0)
             }
         )
     }

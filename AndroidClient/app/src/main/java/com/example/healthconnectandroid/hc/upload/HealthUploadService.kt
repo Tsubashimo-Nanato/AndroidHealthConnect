@@ -28,7 +28,9 @@ class HealthUploadService(
         settings: UploadSettings,
         range: UploadTimeRange = UploadTimeRange.ALL
     ): UploadPendingCounts = withContext(Dispatchers.IO) {
-        val endpoint = when (val validation = UploadEndpointPolicy.validate(settings, requireApiKey = false)) {
+        val endpoint = when (
+            val validation = UploadEndpointPolicy.validate(settings, requireAuthentication = false)
+        ) {
             is UploadEndpointValidation.Valid -> validation.endpoint
             is UploadEndpointValidation.Invalid -> return@withContext UploadPendingCounts.Empty
         }
@@ -51,7 +53,7 @@ class HealthUploadService(
 
         val request = Request.Builder()
             .url(endpoint.statusUrl)
-            .addHeader(API_KEY_HEADER, settings.apiKey.trim())
+            .applyAuthorization(endpoint.authorization)
             .get()
             .build()
 
@@ -61,10 +63,15 @@ class HealthUploadService(
                 onSuccess = { response ->
                     response.use {
                         if (response.isSuccessful) {
+                            val message = if (endpoint.profileIdentity == null) {
+                                "Server reachable (${response.code}). API key is checked when uploading data."
+                            } else {
+                                "Paired profile reachable (${response.code})."
+                            }
                             UploadConnectionResult(
                                 success = true,
                                 retryable = false,
-                                message = "Server reachable (${response.code}). API key is checked when uploading data.",
+                                message = message,
                                 serverMode = settings.serverMode
                             )
                         } else {
@@ -120,11 +127,16 @@ class HealthUploadService(
         val startEpochMillis = range.startEpochMillis()
         var pending = pendingCountsForServer(endpoint.serverKey, startEpochMillis)
         if (pending.total == 0) {
+            val allPending = if (startEpochMillis == null) {
+                pending
+            } else {
+                pendingCountsForServer(endpoint.serverKey, startEpochMillis = null)
+            }
             return@withContext UploadRunResult(
                 success = true,
                 retryable = false,
                 message = uploadMessage("No pending upload rows", range),
-                pendingCounts = pendingCountsForServer(endpoint.serverKey, startEpochMillis = null),
+                pendingCounts = allPending,
                 serverMode = settings.serverMode
             )
         }
@@ -134,7 +146,10 @@ class HealthUploadService(
         var uploadedRecords = 0
         var uploadedValues = 0
         var uploadedAggregates = 0
+        var requestBodyBytesSent = 0L
+        var responseBodyBytesReceived = 0L
         var readCursor = UploadReadCursor()
+        var stoppedBecauseBatchWasEmpty = false
         val totalAtStart = pending.total
         onProgress(
             UploadProgress(
@@ -149,10 +164,13 @@ class HealthUploadService(
             coroutineContext.ensureActive()
             batchNumber += 1
             val rows = loadPendingBatch(endpoint.serverKey, startEpochMillis, batchProfile, readCursor)
-            if (rows.isEmpty) break
+            if (rows.isEmpty) {
+                stoppedBecauseBatchWasEmpty = true
+                break
+            }
             val batch = UploadBatch.fromRows(
                 schemaVersion = SCHEMA_VERSION,
-                deviceId = settings.deviceId,
+                deviceId = endpoint.profileIdentity?.clientDeviceId ?: settings.deviceId,
                 batchId = UUID.randomUUID().toString(),
                 createdAtEpochMillis = Instant.now().toEpochMilli(),
                 rows = rows
@@ -168,8 +186,10 @@ class HealthUploadService(
                 )
             )
 
-            when (val postResult = postBatch(endpoint, settings.apiKey, batch, batchProfile.requestCompression)) {
+            when (val postResult = postBatch(endpoint, batch, batchProfile.requestCompression)) {
                 is PostBatchResult.Success -> {
+                    requestBodyBytesSent += postResult.requestBodyBytes
+                    responseBodyBytesReceived += postResult.responseBodyBytes
                     markUploaded(endpoint.serverKey, rows.ackItems, batch.batchId)
                     uploadedRecords += rows.records.size
                     uploadedValues += rows.values.size
@@ -191,6 +211,8 @@ class HealthUploadService(
                     )
                 }
                 is PostBatchResult.Failure -> {
+                    requestBodyBytesSent += postResult.requestBodyBytes
+                    responseBodyBytesReceived += postResult.responseBodyBytes
                     val remaining = pendingCountsForServer(endpoint.serverKey, startEpochMillis = null)
                     return@withContext UploadRunResult(
                         success = false,
@@ -200,6 +222,8 @@ class HealthUploadService(
                         uploadedRecords = uploadedRecords,
                         uploadedValues = uploadedValues,
                         uploadedAggregates = uploadedAggregates,
+                        requestBodyBytesSent = requestBodyBytesSent,
+                        responseBodyBytesReceived = responseBodyBytesReceived,
                         errors = 1,
                         lastUploadTime = Instant.now(),
                         pendingCounts = remaining,
@@ -211,20 +235,28 @@ class HealthUploadService(
 
         val finishedAt = Instant.now()
         val scopedRemaining = pendingCountsForServer(endpoint.serverKey, startEpochMillis)
-        val remaining = pendingCountsForServer(endpoint.serverKey, startEpochMillis = null)
+        val remaining = if (startEpochMillis == null) {
+            scopedRemaining
+        } else {
+            pendingCountsForServer(endpoint.serverKey, startEpochMillis = null)
+        }
+        val completion = UploadRunCompletionPolicy.resolve(
+            pendingRows = scopedRemaining.total,
+            uploadedRows = uploadedRecords + uploadedValues + uploadedAggregates,
+            stoppedBecauseBatchWasEmpty = stoppedBecauseBatchWasEmpty,
+            reachedBatchLimit = maxBatches != null && batchNumber >= maxBatches
+        )
         UploadRunResult(
-            success = scopedRemaining.total == 0,
-            retryable = scopedRemaining.total > 0,
-            failureKind = if (scopedRemaining.total == 0) UploadFailureKind.NONE else UploadFailureKind.SERVER,
-            message = if (scopedRemaining.total == 0) {
-                uploadMessage("Upload complete: ${uploadedRecords + uploadedValues + uploadedAggregates} rows", range)
-            } else {
-                uploadMessage("Upload paused with ${scopedRemaining.total} rows pending", range)
-            },
+            success = completion.success,
+            retryable = completion.retryable,
+            failureKind = completion.failureKind,
+            message = uploadMessage(completion.message, range),
             uploadedRecords = uploadedRecords,
             uploadedValues = uploadedValues,
             uploadedAggregates = uploadedAggregates,
-            errors = if (scopedRemaining.total == 0) 0 else 1,
+            requestBodyBytesSent = requestBodyBytesSent,
+            responseBodyBytesReceived = responseBodyBytesReceived,
+            errors = completion.errors,
             lastUploadTime = finishedAt,
             pendingCounts = remaining,
             serverMode = settings.serverMode
@@ -354,6 +386,7 @@ class HealthUploadService(
         if (range == UploadTimeRange.ALL) message else "$message (${range.label})"
 
     private fun resolveUploadProfile(endpoint: UploadEndpoint): UploadBatchProfile {
+        if (endpoint.profileIdentity != null) return UploadCapabilityPolicy.Legacy
         val request = Request.Builder()
             .url(endpoint.statusUrl)
             .get()
@@ -371,39 +404,45 @@ class HealthUploadService(
 
     private fun postBatch(
         endpoint: UploadEndpoint,
-        apiKey: String,
         batch: UploadBatch,
         compression: UploadRequestCompression
     ): PostBatchResult {
-        val jsonBody = batch.toJson().toString().toRequestBody(JSON_MEDIA_TYPE)
+        val jsonBody = batch.toJson(endpoint.profileIdentity).toString().toRequestBody(JSON_MEDIA_TYPE)
         val requestBody = when (compression) {
             UploadRequestCompression.NONE -> jsonBody
             UploadRequestCompression.GZIP -> GzipRequestBody(jsonBody)
         }
         val requestBuilder = Request.Builder()
             .url(endpoint.ingestBatchesUrl)
-            .addHeader(API_KEY_HEADER, apiKey.trim())
+            .applyAuthorization(endpoint.authorization)
             .post(requestBody)
         if (compression == UploadRequestCompression.GZIP) {
             requestBuilder.addHeader("Content-Encoding", "gzip")
         }
         val request = requestBuilder.build()
+        val requestBodyBytes = requestBody.contentLength().coerceAtLeast(0L)
 
         return try {
             client.newCall(request).execute().use { response ->
+                val responseBytes = response.body?.bytes() ?: byteArrayOf()
                 if (response.isSuccessful) {
-                    PostBatchResult.Success
+                    PostBatchResult.Success(
+                        requestBodyBytes = requestBodyBytes,
+                        responseBodyBytes = responseBytes.size.toLong()
+                    )
                 } else {
                     val failure = UploadHttpFailurePolicy.fromResponse(
                         action = UploadHttpAction.INGEST,
                         url = endpoint.ingestBatchesUrl,
                         code = response.code,
-                        responseBody = response.readText()
+                        responseBody = responseBytes.toString(Charsets.UTF_8)
                     )
                     PostBatchResult.Failure(
                         retryable = failure.retryable,
                         failureKind = failure.failureKind,
-                        message = failure.message
+                        message = failure.message,
+                        requestBodyBytes = requestBodyBytes,
+                        responseBodyBytes = responseBytes.size.toLong()
                     )
                 }
             }
@@ -411,8 +450,19 @@ class HealthUploadService(
             PostBatchResult.Failure(
                 retryable = true,
                 failureKind = UploadFailureKind.NETWORK,
-                message = "Network unavailable: ${exception.shortName()}"
+                message = "Network unavailable: ${exception.shortName()}",
+                requestBodyBytes = 0,
+                responseBodyBytes = 0
             )
+        }
+    }
+
+    private fun Request.Builder.applyAuthorization(
+        authorization: UploadAuthorization
+    ): Request.Builder = apply {
+        when (authorization) {
+            is UploadAuthorization.ApiKey -> addHeader(API_KEY_HEADER, authorization.value)
+            is UploadAuthorization.Bearer -> addHeader("Authorization", "Bearer ${authorization.token}")
         }
     }
 
@@ -456,11 +506,16 @@ class HealthUploadService(
         )
 
     private sealed interface PostBatchResult {
-        data object Success : PostBatchResult
+        data class Success(
+            val requestBodyBytes: Long,
+            val responseBodyBytes: Long
+        ) : PostBatchResult
         data class Failure(
             val retryable: Boolean,
             val failureKind: UploadFailureKind,
-            val message: String
+            val message: String,
+            val requestBodyBytes: Long,
+            val responseBodyBytes: Long
         ) : PostBatchResult
     }
 

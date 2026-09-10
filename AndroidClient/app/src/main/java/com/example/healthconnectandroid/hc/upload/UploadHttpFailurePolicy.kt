@@ -45,8 +45,15 @@ internal object UploadHttpFailurePolicy {
         code: Int,
         responseBody: String?
     ): String {
-        val detail = serverDetail(responseBody)
+        val serverError = parseServerError(responseBody)
+        val detail = serverError.message
         val reason = when {
+            serverError.code == "installation_token_expired" ->
+                "The saved pairing expired. Scan a new Pairing QR."
+            serverError.code == "installation_revoked" ->
+                "This device pairing was revoked. Scan a new Pairing QR."
+            serverError.code == "installation_token_invalid" ->
+                "The saved pairing is invalid. Scan a new Pairing QR."
             detail?.contains("Invalid HealthConnect API key", ignoreCase = true) == true ->
                 "The server rejected this HealthConnect API key."
             detail?.contains("session", ignoreCase = true) == true ->
@@ -71,19 +78,30 @@ internal object UploadHttpFailurePolicy {
     private fun detailSuffix(responseBody: String?): String =
         serverDetail(responseBody)?.let { "\nServer response: $it" }.orEmpty()
 
-    private fun serverDetail(responseBody: String?): String? {
+    private fun serverDetail(responseBody: String?): String? =
+        parseServerError(responseBody).message
+
+    private fun parseServerError(responseBody: String?): ServerError {
         val body = responseBody
             ?.trim()
             ?.takeIf { it.isNotBlank() }
-            ?: return null
-        val jsonDetail = runCatching {
-            JSONObject(body).optString("detail")
-        }.getOrNull()
+            ?: return ServerError()
+        val detail = runCatching { JSONObject(body).opt("detail") }.getOrNull()
+        val code = (detail as? JSONObject)
+            ?.optString("code")
             ?.trim()
             ?.takeIf { it.isNotBlank() }
-        return (jsonDetail ?: body)
+        val message = when (detail) {
+            is JSONObject -> detail.optString("message")
+            is String -> detail
+            else -> body
+        }.trim().takeIf { it.isNotBlank() }
+        return ServerError(
+            code = code,
+            message = (message ?: body)
             .replace(Regex("""\s+"""), " ")
             .take(240)
+        )
     }
 
     private fun safeUrl(url: String): String {
@@ -95,4 +113,9 @@ internal object UploadHttpFailurePolicy {
             .build()
             .toString()
     }
+
+    private data class ServerError(
+        val code: String? = null,
+        val message: String? = null
+    )
 }

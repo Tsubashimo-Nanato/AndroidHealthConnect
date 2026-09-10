@@ -37,11 +37,12 @@ internal fun emptyReason(
         "0 records found for ${detail.range.label}. Try a wider range."
 }
 
-internal fun permissionStatusText(status: HealthDataPermissionStatus): String = status.label
+internal fun permissionStatusText(status: HealthDataPermissionStatus): String =
+    if (status == HealthDataPermissionStatus.GRANTED) "Access ready" else status.label
 
 internal fun implementationStatusText(status: HealthDataImplementationStatus): String =
     when (status) {
-        HealthDataImplementationStatus.IMPLEMENTED -> "Ready"
+        HealthDataImplementationStatus.IMPLEMENTED -> "Implemented"
         HealthDataImplementationStatus.PLANNED -> "Planned"
     }
 

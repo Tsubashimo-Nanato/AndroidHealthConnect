@@ -52,25 +52,6 @@ interface HealthAggregateDao {
     @Query(
         """
         SELECT
-            recordType AS recordType,
-            localDate AS localDate,
-            SUM(value) AS total,
-            MAX(unit) AS unit
-        FROM health_aggregate_summaries
-        WHERE source = :source
-          AND bucketPeriod = 'day'
-          AND localDate = :localDate
-        GROUP BY recordType, localDate
-        """
-    )
-    suspend fun dailyTotalsForTypesOnDate(
-        localDate: String,
-        source: String = SOURCE_HEALTH_CONNECT_AGGREGATE
-    ): List<HealthDailyAggregateByTypeRow>
-
-    @Query(
-        """
-        SELECT
             localDate AS localDate,
             SUM(value) AS total,
             MAX(unit) AS unit
@@ -90,30 +71,6 @@ interface HealthAggregateDao {
         endDate: String,
         source: String = SOURCE_HEALTH_CONNECT_AGGREGATE
     ): List<HealthDailyAggregateRow>
-
-    @Query(
-        """
-        SELECT
-            localId AS localId,
-            recordType AS recordType,
-            metric AS metric,
-            bucketPeriod AS bucketPeriod,
-            bucketStartEpochMillis AS bucketStartEpochMillis,
-            bucketEndEpochMillis AS bucketEndEpochMillis,
-            localDate AS localDate,
-            timezoneId AS timezoneId,
-            value AS value,
-            unit AS unit,
-            source AS source,
-            computedEpochMillis AS computedEpochMillis,
-            requestedStartEpochMillis AS requestedStartEpochMillis,
-            requestedEndEpochMillis AS requestedEndEpochMillis,
-            rawJson AS rawJson
-        FROM health_aggregate_summaries
-        ORDER BY recordType ASC, bucketStartEpochMillis ASC, metric ASC
-        """
-    )
-    suspend fun exportRows(): List<HealthAggregateCsvRow>
 
     @Query(
         """
@@ -148,31 +105,6 @@ interface HealthAggregateDao {
         """
     )
     suspend fun exportRowsPaged(limit: Int, offset: Int): List<HealthAggregateCsvRow>
-
-    @Query(
-        """
-        SELECT
-            localId AS localId,
-            recordType AS recordType,
-            metric AS metric,
-            bucketPeriod AS bucketPeriod,
-            bucketStartEpochMillis AS bucketStartEpochMillis,
-            bucketEndEpochMillis AS bucketEndEpochMillis,
-            localDate AS localDate,
-            timezoneId AS timezoneId,
-            value AS value,
-            unit AS unit,
-            source AS source,
-            computedEpochMillis AS computedEpochMillis,
-            requestedStartEpochMillis AS requestedStartEpochMillis,
-            requestedEndEpochMillis AS requestedEndEpochMillis,
-            rawJson AS rawJson
-        FROM health_aggregate_summaries
-        WHERE recordType = :recordType
-        ORDER BY bucketStartEpochMillis ASC, metric ASC
-        """
-    )
-    suspend fun exportRowsForType(recordType: String): List<HealthAggregateCsvRow>
 
     @Query(
         """

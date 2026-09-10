@@ -32,12 +32,12 @@ class SyncResultSeverityPolicyTest {
     }
 
     @Test
-    fun errorWhenNoUsefulRowsStored() {
+    fun successWhenSyncCompletesWithoutNewRows() {
         val severity = SyncResultSeverityPolicy.fromResults(
             listOf(HealthDataTypeSyncResult(key = "heart_rate", recordsSkippedDuplicate = 10))
         )
 
-        assertEquals(SyncResultSeverity.ERROR, severity)
+        assertEquals(SyncResultSeverity.SUCCESS, severity)
     }
 
     @Test

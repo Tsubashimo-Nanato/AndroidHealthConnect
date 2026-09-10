@@ -13,7 +13,7 @@ internal object SyncProgressPolicy {
         rangeStart: Instant?,
         rangeEnd: Instant?,
         isCancellable: Boolean,
-        phase: SyncProgressPhase = if (currentType != null) SyncProgressPhase.PREPARING else SyncProgressPhase.COMPLETE,
+        phase: SyncProgressPhase = SyncProgressPhase.PREPARING,
         message: String?
     ): SyncProgress {
         val totals = results.progressTotals()
@@ -98,6 +98,7 @@ internal object SyncProgressPolicy {
             recordsRead = results.sumOf { it.recordsRead },
             recordsInserted = results.sumOf { it.recordsInserted },
             recordsUpdated = results.sumOf { it.recordsUpdated },
+            recordsDeleted = results.sumOf { it.recordsDeleted },
             recordsSkippedDuplicate = results.sumOf { it.recordsSkippedDuplicate },
             valuesStored = results.sumOf { it.valuesStored },
             aggregateRowsRead = results.sumOf { it.aggregateRowsRead },
@@ -120,7 +121,8 @@ internal object SyncProgressPolicy {
             result.terminalStatus == SyncRunStatus.CANCELLED -> SyncProgressPhase.CANCELLED
             result.errorMessage != null || result.aggregateErrorMessage != null -> SyncProgressPhase.FAILED
             result.skippedReason != null -> SyncProgressPhase.SKIPPED
-            result.recordsInserted + result.recordsUpdated + result.aggregateRowsStored + result.valuesStored > 0 ->
+            result.recordsInserted + result.recordsUpdated + result.recordsDeleted +
+                result.aggregateRowsStored + result.valuesStored > 0 ->
                 SyncProgressPhase.INSERTED_DATA
             result.localDaysChecked > 0 && result.localDaysRequested == 0 -> SyncProgressPhase.NO_NEW_DATA
             result.recordsRead + result.aggregateRowsRead == 0 -> SyncProgressPhase.NO_SOURCE_DATA

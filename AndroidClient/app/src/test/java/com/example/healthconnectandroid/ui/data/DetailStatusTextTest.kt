@@ -1,5 +1,7 @@
 package com.example.healthconnectandroid.ui.data
 
+import com.example.healthconnectandroid.hc.HealthDataImplementationStatus
+import com.example.healthconnectandroid.hc.HealthDataPermissionStatus
 import com.example.healthconnectandroid.hc.HealthDataTypeSyncResult
 import com.example.healthconnectandroid.hc.sync.SyncRunStatus
 import java.time.ZoneOffset
@@ -7,6 +9,18 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class DetailStatusTextTest {
+    @Test
+    fun detailBadgesNameImplementationAndPermissionSeparately() {
+        assertEquals(
+            "Implemented",
+            implementationStatusText(HealthDataImplementationStatus.IMPLEMENTED)
+        )
+        assertEquals(
+            "Access ready",
+            permissionStatusText(HealthDataPermissionStatus.GRANTED)
+        )
+    }
+
     @Test
     fun syncStatusTextReportsTimeoutWithReason() {
         val result = HealthDataTypeSyncResult(

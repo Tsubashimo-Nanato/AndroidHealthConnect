@@ -1,12 +1,19 @@
 package com.example.healthconnectandroid.ui.theme
 
+import android.app.Activity
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Shapes
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.unit.dp
+import androidx.core.view.WindowCompat
 import com.example.healthconnectandroid.AppThemePalette
 
 private data class AppPaletteTokens(
@@ -26,15 +33,35 @@ private data class AppPaletteTokens(
     val info: Color
 )
 
+private val AppShapes = Shapes(
+    extraSmall = RoundedCornerShape(4.dp),
+    small = RoundedCornerShape(6.dp),
+    medium = RoundedCornerShape(8.dp),
+    large = RoundedCornerShape(12.dp),
+    extraLarge = RoundedCornerShape(16.dp)
+)
+
 @Composable
 fun HealthConnectAndroidTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     palette: AppThemePalette = AppThemePalette.PAPER,
     content: @Composable () -> Unit
 ) {
+    val view = LocalView.current
+    if (!view.isInEditMode) {
+        SideEffect {
+            val window = (view.context as? Activity)?.window ?: return@SideEffect
+            WindowCompat.getInsetsController(window, view).apply {
+                isAppearanceLightStatusBars = !darkTheme
+                isAppearanceLightNavigationBars = !darkTheme
+            }
+        }
+    }
+
     MaterialTheme(
         colorScheme = appColorScheme(palette = palette, darkTheme = darkTheme),
         typography = Typography,
+        shapes = AppShapes,
         content = content
     )
 }
@@ -118,14 +145,14 @@ private fun paletteTokens(
     AppThemePalette.PAPER -> if (darkTheme) {
         AppPaletteTokens(
             background = StudioPaperDark,
-            surface = Color(0xFF111A28),
-            surface2 = Color(0xFF1F2B3D),
-            surface3 = Color(0xFF121D2B),
+            surface = Color(0xFF15191C),
+            surface2 = Color(0xFF22282C),
+            surface3 = Color(0xFF2B3236),
             text = StudioInkDark,
-            muted = Color(0xFFA6B0C0),
-            border = Color(0xFF334154),
+            muted = Color(0xFFA9B0B4),
+            border = Color(0xFF3A4247),
             primary = StudioTealDark,
-            primary2 = StudioPurpleDark,
+            primary2 = Color(0xFF7BD3DA),
             accent = StudioWarmDark,
             azuki = Color(0xFFB9806B),
             danger = StudioDangerDark,
@@ -135,12 +162,12 @@ private fun paletteTokens(
     } else {
         AppPaletteTokens(
             background = StudioPaper,
-            surface = Color(0xFFFBFAF7),
-            surface2 = Color(0xFFE2EAEE),
-            surface3 = Color(0xFFEEF4F6),
+            surface = Color(0xFFFFFFFF),
+            surface2 = Color(0xFFE8EDF0),
+            surface3 = Color(0xFFF1F4F5),
             text = StudioInk,
-            muted = Color(0xFF667085),
-            border = Color(0xFFD3D8DE),
+            muted = Color(0xFF626A70),
+            border = Color(0xFFD5DADD),
             primary = StudioTeal,
             primary2 = StudioPurple,
             accent = StudioWarm,

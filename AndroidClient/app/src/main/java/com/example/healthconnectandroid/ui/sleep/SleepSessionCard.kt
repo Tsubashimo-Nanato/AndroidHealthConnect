@@ -1,6 +1,5 @@
 package com.example.healthconnectandroid.ui.sleep
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -9,7 +8,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
@@ -23,6 +21,7 @@ import com.example.healthconnectandroid.hc.ReadableHealthRecord
 import com.example.healthconnectandroid.hc.SleepQualityBand
 import com.example.healthconnectandroid.hc.SleepSessionAnalysis
 import com.example.healthconnectandroid.hc.SleepTagTone
+import com.example.healthconnectandroid.hc.sleepSessionDate
 import com.example.healthconnectandroid.ui.format.MetricDisplayFormatter
 import com.example.healthconnectandroid.ui.i18n.uiText
 import java.time.ZoneId
@@ -38,6 +37,7 @@ fun SleepSessionCard(
     val session = model.session
     val stages = model.stages
     val analysis = model.analysis
+    val supportingText = sleepSessionSupportingText(model, zoneId)
     Card(
         modifier = modifier
             .fillMaxWidth()
@@ -48,9 +48,9 @@ fun SleepSessionCard(
     ) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(uiText(session.primaryText), style = MaterialTheme.typography.titleSmall)
-            if (session.secondaryText.isNotBlank()) {
+            if (supportingText.isNotBlank()) {
                 Text(
-                    uiText(session.secondaryText),
+                    uiText(supportingText),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -66,21 +66,36 @@ fun SleepSessionCard(
     }
 }
 
+internal fun sleepSessionSupportingText(model: SleepSessionUiModel, zoneId: ZoneId): String {
+    val start = model.analysisStart ?: return model.session.secondaryText
+    val end = model.analysisEnd ?: return model.session.secondaryText
+    val duration = model.analysis.duration ?: return model.session.secondaryText
+    if (!end.isAfter(start)) return model.session.secondaryText
+
+    return listOfNotNull(
+        "${MetricDisplayFormatter.formatShortInstant(start, zoneId)} to " +
+            "${MetricDisplayFormatter.formatShortInstant(end, zoneId)} " +
+            "(${MetricDisplayFormatter.formatDurationCompact(duration)})",
+        sleepSessionDate(start, end, zoneId)?.let { "Local date $it" },
+        model.session.sourceText
+    ).joinToString(" | ")
+}
+
 @Composable
 private fun SleepStageCard(stage: ReadableHealthRecord) {
-    Card(Modifier.fillMaxWidth()) {
-        Column(
-            Modifier.padding(10.dp),
-            verticalArrangement = Arrangement.spacedBy(3.dp)
-        ) {
-            Text(uiText(stage.primaryText), style = MaterialTheme.typography.bodyMedium)
-            if (stage.secondaryText.isNotBlank()) {
-                Text(
-                    uiText(stage.secondaryText),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 4.dp, vertical = 5.dp),
+        verticalArrangement = Arrangement.spacedBy(3.dp)
+    ) {
+        Text(uiText(stage.primaryText), style = MaterialTheme.typography.bodyMedium)
+        if (stage.secondaryText.isNotBlank()) {
+            Text(
+                uiText(stage.secondaryText),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
@@ -115,47 +130,39 @@ private fun SleepTagBadge(
 ) {
     val scheme = MaterialTheme.colorScheme
     val colors = when (tone) {
-        SleepTagTone.DATE -> Triple(
+        SleepTagTone.DATE -> Pair(
             Color(0xFF1E3A5F).copy(alpha = 0.82f),
-            Color(0xFFD7E7FF),
-            Color(0xFF6F99C8)
+            Color(0xFFD7E7FF)
         )
-        SleepTagTone.NAP -> Triple(
+        SleepTagTone.NAP -> Pair(
             Color(0xFF30375F).copy(alpha = 0.82f),
-            Color(0xFFE2E5FA),
-            Color(0xFF7884BD)
+            Color(0xFFE2E5FA)
         )
-        SleepTagTone.SUCCESS -> Triple(
+        SleepTagTone.SUCCESS -> Pair(
             Color(0xFF183327),
-            Color(0xFFC5E7D2),
-            Color(0xFF3F7759)
+            Color(0xFFC5E7D2)
         )
-        SleepTagTone.WARNING -> Triple(
+        SleepTagTone.WARNING -> Pair(
             Color(0xFF3A2D14),
-            Color(0xFFF3D79A),
-            Color(0xFF8A6A2E)
+            Color(0xFFF3D79A)
         )
-        SleepTagTone.ERROR -> Triple(
+        SleepTagTone.ERROR -> Pair(
             Color(0xFF3E1F1C),
-            Color(0xFFF2C0B9),
-            Color(0xFF91554D)
+            Color(0xFFF2C0B9)
         )
-        SleepTagTone.INFO -> Triple(
+        SleepTagTone.INFO -> Pair(
             Color(0xFF173040),
-            Color(0xFFBFE0EE),
-            Color(0xFF49778C)
+            Color(0xFFBFE0EE)
         )
-        SleepTagTone.NEUTRAL -> Triple(
+        SleepTagTone.NEUTRAL -> Pair(
             scheme.surfaceVariant.copy(alpha = 0.42f),
-            scheme.onSurfaceVariant,
-            scheme.outline.copy(alpha = 0.24f)
+            scheme.onSurfaceVariant
         )
     }
     Surface(
         modifier = modifier,
-        shape = RoundedCornerShape(999.dp),
-        color = colors.first,
-        border = BorderStroke(1.dp, colors.third)
+        shape = MaterialTheme.shapes.small,
+        color = colors.first
     ) {
         Text(
             text = text,

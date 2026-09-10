@@ -16,19 +16,22 @@ import com.example.healthconnectandroid.debug.DeviceSmokeDiagnostics
 import com.example.healthconnectandroid.ui.AppActionRow
 import com.example.healthconnectandroid.ui.AppSection
 import com.example.healthconnectandroid.ui.StatusBadge
-import com.example.healthconnectandroid.ui.StatusMessageCard
 import com.example.healthconnectandroid.ui.StatusTone
 import com.example.healthconnectandroid.ui.animation.rowFadeIn
 import com.example.healthconnectandroid.ui.i18n.uiText
 import java.time.Instant
 
 @Composable
-fun SettingsAdvancedScreen(
+fun SettingsStorageToolsScreen(
     debugEnabled: Boolean,
     platformGranted: Boolean,
     hrHcGranted: Boolean,
     status: String,
     diagnostics: DeviceSmokeDiagnostics,
+    dataManagementBusy: Boolean,
+    onExportHrCsv: () -> Unit,
+    onExportAllCsv: () -> Unit,
+    onExportZip: () -> Unit,
     onToggleDebug: () -> Unit,
     onSyncHours: (Long) -> Unit,
     onQuery: (Instant) -> Unit,
@@ -42,10 +45,20 @@ fun SettingsAdvancedScreen(
             .padding(18.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
+        DataManagementSection(
+            status = status,
+            busy = dataManagementBusy,
+            onExportHrCsv = onExportHrCsv,
+            onExportAllCsv = onExportAllCsv,
+            onExportZip = onExportZip,
+            onRequestClear = onRequestClear,
+            modifier = Modifier.rowFadeIn(0)
+        )
+
         AppSection(
             title = "Debug Mode",
             subtitle = if (debugEnabled) "Debug tools and local upload are visible" else "Debug tools hidden",
-            modifier = Modifier.rowFadeIn(0)
+            modifier = Modifier.rowFadeIn(1)
         ) {
             AppActionRow {
                 Column(Modifier.weight(1f)) {
@@ -56,7 +69,10 @@ fun SettingsAdvancedScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                StatusBadge(if (debugEnabled) "On" else "Off", if (debugEnabled) StatusTone.Warning else StatusTone.Neutral)
+                StatusBadge(
+                    if (debugEnabled) "On" else "Off",
+                    if (debugEnabled) StatusTone.Warning else StatusTone.Neutral
+                )
                 Switch(checked = debugEnabled, onCheckedChange = { onToggleDebug() })
             }
         }
@@ -70,10 +86,8 @@ fun SettingsAdvancedScreen(
                 onSyncHours = onSyncHours,
                 onQuery = onQuery,
                 onRequestClear = onRequestClear,
-                firstRowIndex = 1
+                firstRowIndex = 2
             )
-        } else {
-            StatusMessageCard(status, modifier = Modifier.rowFadeIn(1))
         }
     }
 }

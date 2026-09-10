@@ -2,6 +2,7 @@ package com.example.healthconnectandroid
 
 import android.content.Context
 import com.example.healthconnectandroid.hc.upload.UploadEndpointPolicy
+import com.example.healthconnectandroid.hc.upload.ProfilePairingStore
 import com.example.healthconnectandroid.hc.upload.UploadResultSeverity
 import com.example.healthconnectandroid.hc.upload.UploadServerMode
 import com.example.healthconnectandroid.hc.upload.UploadSettings
@@ -117,6 +118,7 @@ object AppPreferences {
     private const val KEY_UPLOAD_STATUS_SERVER_MODE = "upload_status_server_mode"
     private const val KEY_UPLOAD_CONNECTION_RESULT = "upload_connection_result"
     private const val KEY_MEDICINE_OVERLAY_REMINDER_ENABLED = "medicine_overlay_reminder_enabled"
+    private const val KEY_MEDICINE_SEED_VERSION = "medicine_seed_version"
 
     fun themeMode(context: Context): AppThemeMode {
         val raw = prefs(context).getString(KEY_THEME_MODE, AppThemeMode.SYSTEM.name)
@@ -158,6 +160,15 @@ object AppPreferences {
         prefs(context).edit().putBoolean(KEY_MEDICINE_OVERLAY_REMINDER_ENABLED, enabled).apply()
     }
 
+    fun medicineSeedVersion(context: Context, profileId: String): Int =
+        prefs(context).getInt(profilePreferenceKey(KEY_MEDICINE_SEED_VERSION, profileId), 0)
+
+    fun setMedicineSeedVersion(context: Context, profileId: String, version: Int) {
+        prefs(context).edit()
+            .putInt(profilePreferenceKey(KEY_MEDICINE_SEED_VERSION, profileId), version)
+            .apply()
+    }
+
     fun userAge(context: Context): Int? {
         return userProfile(context).age
     }
@@ -169,6 +180,10 @@ object AppPreferences {
     }
 
     fun userProfile(context: Context): UserProfile {
+        return LocalProfileStore.activeProfile(context).userProfile
+    }
+
+    internal fun legacyUserProfile(context: Context): UserProfile {
         val prefs = prefs(context)
         val sex = prefs.getString(KEY_USER_SEX, null)
             ?.let { raw -> ProfileSex.values().firstOrNull { it.name == raw } }
@@ -185,17 +200,7 @@ object AppPreferences {
     }
 
     fun setUserProfile(context: Context, profile: UserProfile) {
-        prefs(context).edit().apply {
-            putString(KEY_USER_SEX, profile.sex.name)
-
-            val normalizedDob = profile.dateOfBirthIso
-                ?.takeIf { runCatching { LocalDate.parse(it) }.isSuccess }
-            if (normalizedDob == null) remove(KEY_USER_DOB) else putString(KEY_USER_DOB, normalizedDob)
-            remove(KEY_USER_AGE)
-
-            val normalizedWeight = profile.weightKg?.takeIf { it in 20.0..350.0 }
-            if (normalizedWeight == null) remove(KEY_USER_WEIGHT_KG) else putFloat(KEY_USER_WEIGHT_KG, normalizedWeight.toFloat())
-        }.apply()
+        LocalProfileStore.updateUserProfile(context, profile)
     }
 
     fun userPreferences(context: Context): UserPreferences {
@@ -235,83 +240,140 @@ object AppPreferences {
         }.apply()
     }
 
-    fun uploadSettings(context: Context): UploadSettings {
+    fun uploadSettings(
+        context: Context,
+        profileId: String = LocalProfileStore.activeProfile(context).id
+    ): UploadSettings {
         val prefs = prefs(context)
-        val mode = prefs.getString(KEY_UPLOAD_SERVER_MODE, UploadServerMode.PRODUCTION.name)
+        val profile = requireNotNull(LocalProfileStore.profile(context, profileId)) {
+            "Unknown local profile: $profileId"
+        }
+        val credential = ProfilePairingStore.load(context, profileId)
+        fun key(baseKey: String): String =
+            scopedUploadPreferenceKey(baseKey, profileId, profile.ownsHealthConnect)
+
+        val defaultMode = credential?.serverMode ?: UploadServerMode.PRODUCTION
+        val mode = prefs.getString(key(KEY_UPLOAD_SERVER_MODE), defaultMode.name)
             ?.let { raw -> UploadServerMode.values().firstOrNull { it.name == raw } }
-            ?: UploadServerMode.PRODUCTION
-        val localUrl = prefs.getString(KEY_UPLOAD_LOCAL_URL, UploadEndpointPolicy.DEFAULT_LOCAL_BASE_URL)
+            ?: defaultMode
+        val defaultLocalUrl = credential
+            ?.takeIf { it.serverMode == UploadServerMode.LOCAL_DEBUG }
+            ?.uploadBaseUrl
             ?: UploadEndpointPolicy.DEFAULT_LOCAL_BASE_URL
-        val productionUrl = prefs.getString(KEY_UPLOAD_PRODUCTION_URL, UploadEndpointPolicy.PRODUCTION_BASE_URL)
+        val defaultProductionUrl = credential
+            ?.takeIf { it.serverMode == UploadServerMode.PRODUCTION }
+            ?.uploadBaseUrl
             ?: UploadEndpointPolicy.PRODUCTION_BASE_URL
-        val apiKey = prefs.getString(KEY_UPLOAD_API_KEY, "") ?: ""
+        val localUrl = prefs.getString(key(KEY_UPLOAD_LOCAL_URL), defaultLocalUrl) ?: defaultLocalUrl
+        val productionUrl = prefs.getString(key(KEY_UPLOAD_PRODUCTION_URL), defaultProductionUrl)
+            ?: defaultProductionUrl
+        val apiKey = prefs.getString(key(KEY_UPLOAD_API_KEY), "") ?: ""
         return UploadSettings(
             serverMode = mode,
             productionBaseUrl = productionUrl,
             localBaseUrl = localUrl,
             apiKey = apiKey,
-            deviceId = uploadDeviceId(context),
-            autoUploadEnabled = prefs.getBoolean(KEY_UPLOAD_AUTO_ENABLED, false)
+            deviceId = uploadDeviceId(context, key(KEY_UPLOAD_DEVICE_ID)),
+            autoUploadEnabled = prefs.getBoolean(key(KEY_UPLOAD_AUTO_ENABLED), false),
+            profileCredential = credential
         )
     }
 
-    fun setUploadSettings(context: Context, settings: UploadSettings) {
+    fun setUploadSettings(
+        context: Context,
+        settings: UploadSettings,
+        profileId: String = LocalProfileStore.activeProfile(context).id
+    ) {
+        val profile = requireNotNull(LocalProfileStore.profile(context, profileId)) {
+            "Unknown local profile: $profileId"
+        }
+        fun key(baseKey: String): String =
+            scopedUploadPreferenceKey(baseKey, profileId, profile.ownsHealthConnect)
+
         prefs(context).edit().apply {
-            putString(KEY_UPLOAD_SERVER_MODE, settings.serverMode.name)
-            putString(KEY_UPLOAD_PRODUCTION_URL, settings.productionBaseUrl.trim())
-            putString(KEY_UPLOAD_LOCAL_URL, settings.localBaseUrl.trim())
-            putString(KEY_UPLOAD_API_KEY, settings.apiKey.trim())
-            putString(KEY_UPLOAD_DEVICE_ID, settings.deviceId)
-            putBoolean(KEY_UPLOAD_AUTO_ENABLED, settings.autoUploadEnabled)
+            putString(key(KEY_UPLOAD_SERVER_MODE), settings.serverMode.name)
+            putString(key(KEY_UPLOAD_PRODUCTION_URL), settings.productionBaseUrl.trim())
+            putString(key(KEY_UPLOAD_LOCAL_URL), settings.localBaseUrl.trim())
+            putString(key(KEY_UPLOAD_API_KEY), settings.apiKey.trim())
+            putString(key(KEY_UPLOAD_DEVICE_ID), settings.deviceId)
+            putBoolean(key(KEY_UPLOAD_AUTO_ENABLED), settings.autoUploadEnabled)
         }.apply()
     }
 
-    fun uploadStatus(context: Context): UploadStatus {
+    fun uploadStatus(
+        context: Context,
+        profileId: String = LocalProfileStore.activeProfile(context).id
+    ): UploadStatus {
         val prefs = prefs(context)
-        val severity = prefs.getString(KEY_UPLOAD_LAST_SEVERITY, UploadResultSeverity.IDLE.name)
+        val profile = requireNotNull(LocalProfileStore.profile(context, profileId)) {
+            "Unknown local profile: $profileId"
+        }
+        fun key(baseKey: String): String =
+            scopedUploadPreferenceKey(baseKey, profileId, profile.ownsHealthConnect)
+
+        val severity = prefs.getString(key(KEY_UPLOAD_LAST_SEVERITY), UploadResultSeverity.IDLE.name)
             ?.let { raw -> UploadResultSeverity.values().firstOrNull { it.name == raw } }
             ?: UploadResultSeverity.IDLE
-        val mode = prefs.getString(KEY_UPLOAD_STATUS_SERVER_MODE, UploadServerMode.PRODUCTION.name)
+        val mode = prefs.getString(key(KEY_UPLOAD_STATUS_SERVER_MODE), UploadServerMode.PRODUCTION.name)
             ?.let { raw -> UploadServerMode.values().firstOrNull { it.name == raw } }
             ?: UploadServerMode.PRODUCTION
         return UploadStatus(
-            lastUploadEpochMillis = prefs.getLong(KEY_UPLOAD_LAST_TIME, 0L).takeIf { it > 0L },
-            lastResult = prefs.getString(KEY_UPLOAD_LAST_RESULT, "No upload yet") ?: "No upload yet",
+            lastUploadEpochMillis = prefs.getLong(key(KEY_UPLOAD_LAST_TIME), 0L).takeIf { it > 0L },
+            lastResult = prefs.getString(key(KEY_UPLOAD_LAST_RESULT), "No upload yet") ?: "No upload yet",
             severity = severity,
-            pendingCount = prefs.getInt(KEY_UPLOAD_PENDING_COUNT, 0),
+            pendingCount = prefs.getInt(key(KEY_UPLOAD_PENDING_COUNT), 0),
             serverMode = mode,
-            connectionResult = prefs.getString(KEY_UPLOAD_CONNECTION_RESULT, null)
+            connectionResult = prefs.getString(key(KEY_UPLOAD_CONNECTION_RESULT), null)
         )
     }
 
-    fun setUploadStatus(context: Context, status: UploadStatus) {
+    fun setUploadStatus(
+        context: Context,
+        status: UploadStatus,
+        profileId: String = LocalProfileStore.activeProfile(context).id
+    ) {
+        val profile = requireNotNull(LocalProfileStore.profile(context, profileId)) {
+            "Unknown local profile: $profileId"
+        }
+        fun key(baseKey: String): String =
+            scopedUploadPreferenceKey(baseKey, profileId, profile.ownsHealthConnect)
+
         prefs(context).edit().apply {
             if (status.lastUploadEpochMillis == null) {
-                remove(KEY_UPLOAD_LAST_TIME)
+                remove(key(KEY_UPLOAD_LAST_TIME))
             } else {
-                putLong(KEY_UPLOAD_LAST_TIME, status.lastUploadEpochMillis)
+                putLong(key(KEY_UPLOAD_LAST_TIME), status.lastUploadEpochMillis)
             }
-            putString(KEY_UPLOAD_LAST_RESULT, status.lastResult)
-            putString(KEY_UPLOAD_LAST_SEVERITY, status.severity.name)
-            putInt(KEY_UPLOAD_PENDING_COUNT, status.pendingCount)
-            putString(KEY_UPLOAD_STATUS_SERVER_MODE, status.serverMode.name)
+            putString(key(KEY_UPLOAD_LAST_RESULT), status.lastResult)
+            putString(key(KEY_UPLOAD_LAST_SEVERITY), status.severity.name)
+            putInt(key(KEY_UPLOAD_PENDING_COUNT), status.pendingCount)
+            putString(key(KEY_UPLOAD_STATUS_SERVER_MODE), status.serverMode.name)
             if (status.connectionResult == null) {
-                remove(KEY_UPLOAD_CONNECTION_RESULT)
+                remove(key(KEY_UPLOAD_CONNECTION_RESULT))
             } else {
-                putString(KEY_UPLOAD_CONNECTION_RESULT, status.connectionResult)
+                putString(key(KEY_UPLOAD_CONNECTION_RESULT), status.connectionResult)
             }
         }.apply()
     }
 
-    private fun uploadDeviceId(context: Context): String {
+    private fun uploadDeviceId(context: Context, storageKey: String): String {
         val prefs = prefs(context)
-        val existing = prefs.getString(KEY_UPLOAD_DEVICE_ID, null)
+        val existing = prefs.getString(storageKey, null)
             ?.takeIf { it.isNotBlank() }
         if (existing != null) return existing
         val generated = UUID.randomUUID().toString()
-        prefs.edit().putString(KEY_UPLOAD_DEVICE_ID, generated).apply()
+        prefs.edit().putString(storageKey, generated).apply()
         return generated
     }
+
+    internal fun scopedUploadPreferenceKey(
+        baseKey: String,
+        profileId: String,
+        ownsHealthConnect: Boolean
+    ): String = if (ownsHealthConnect) baseKey else profilePreferenceKey(baseKey, profileId)
+
+    private fun profilePreferenceKey(key: String, profileId: String): String =
+        "$key:$profileId"
 
     private fun prefs(context: Context) =
         context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)

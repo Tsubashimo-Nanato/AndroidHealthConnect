@@ -10,6 +10,19 @@ import java.time.Instant
 
 class SyncModelsTest {
     @Test
+    fun initialProgressIsDeterminateZero() {
+        val progress = SyncProgress.initial(
+            mode = SyncMode.SMART,
+            totalTypes = 13,
+            isCancellable = false
+        )
+
+        assertEquals(0, progress.progressPercent)
+        assertEquals(SyncProgressPhase.PREPARING, progress.phase)
+        assertFalse(progress.isIndeterminate)
+    }
+
+    @Test
     fun cancelledAndTimeoutAreNotSuccessStatuses() {
         assertNotEquals(SyncRunStatus.SUCCESS.id, SyncRunStatus.CANCELLED.id)
         assertNotEquals(SyncRunStatus.SUCCESS.id, SyncRunStatus.TIMEOUT.id)
@@ -75,6 +88,7 @@ class SyncModelsTest {
         )
 
         assertEquals(1f, progress.progressFraction ?: -1f, 0.0001f)
+        assertEquals(100, progress.progressPercent)
     }
 
     @Test

@@ -4,6 +4,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.util.Log
+import com.example.healthconnectandroid.LocalProfileStore
 import com.example.healthconnectandroid.data.AppDb
 import java.time.Instant
 import java.time.ZoneId
@@ -18,6 +19,8 @@ class MedicineReminderAlarmReceiver : BroadcastReceiver() {
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 handleAlarm(appContext, intent)
+            } catch (error: Throwable) {
+                Log.e(TAG, "Medicine alarm handling failed", error)
             } finally {
                 pending.finish()
             }
@@ -30,16 +33,23 @@ class MedicineReminderAlarmReceiver : BroadcastReceiver() {
             ?.let(MedicineSlot::fromId)
             ?.takeIf { it.supportsReminder }
             ?: return
-        val repository = MedicineRepository(AppDb.get(context))
+        val profileId = intent.getStringExtra(MedicineReminderIntents.EXTRA_PROFILE_ID)
+            ?.takeIf { LocalProfileStore.profile(context, it) != null }
+            ?: return
+        val repository = MedicineRepository(AppDb.get(context, profileId))
         val medicines = repository.activeScheduledMedicines(slot)
         if (medicines.isNotEmpty()) {
-            MedicineReminderNotifier.showReminder(context, slot, medicines)
-            Log.i(TAG, "Medicine alarm reminder shown slot=${slot.id} count=${medicines.size}")
+            MedicineReminderNotifier.showReminder(context, slot, medicines, profileId)
+            Log.i(
+                TAG,
+                "Medicine alarm reminder shown profile=$profileId slot=${slot.id} count=${medicines.size}"
+            )
         }
         MedicineReminderScheduler.scheduleSlot(
             context = context,
             repository = repository,
             slot = slot,
+            profileId = profileId,
             zoneId = ZoneId.systemDefault(),
             now = Instant.now()
         )

@@ -48,4 +48,20 @@ class UploadHttpFailurePolicyTest {
         assertEquals(UploadFailureKind.SERVER_VALIDATION, failure.failureKind)
         assertTrue(failure.message.contains("Server response: schemaVersion is required"))
     }
+
+    @Test
+    fun expiredProfileTokenRequestsAnotherPairing() {
+        val failure = UploadHttpFailurePolicy.fromResponse(
+            action = UploadHttpAction.STATUS,
+            url = "https://tsubashimonanato.com/health/api/v2/profile",
+            code = 401,
+            responseBody = """
+                {"detail":{"code":"installation_token_expired","message":"Bearer token has expired."}}
+            """.trimIndent()
+        )
+
+        assertFalse(failure.retryable)
+        assertTrue(failure.message.contains("saved pairing expired"))
+        assertTrue(failure.message.contains("Server response: Bearer token has expired."))
+    }
 }

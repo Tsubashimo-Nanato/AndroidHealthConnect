@@ -40,6 +40,16 @@ class UploadScanPolicyTest {
     }
 
     @Test
+    fun explicitVersionOnePairingRemainsCompatible() {
+        val result = UploadScanPolicy.applyScannedText(
+            current,
+            "nanato-hc://pair?v=1&m=production&u=https%3A%2F%2Ftsubashimonanato.com%2Fhealth%2Fapi%2Fv1%2F&k=GNEngwPSgt3cvma1POYU-phqvth9ctZn"
+        )
+
+        assertTrue(result is UploadScanApplyResult.Success)
+    }
+
+    @Test
     fun pairingDecodesEncodedApiKey() {
         val result = UploadScanPolicy.applyScannedText(
             current,
@@ -118,5 +128,57 @@ class UploadScanPolicyTest {
         )
 
         assertTrue(result is UploadScanApplyResult.Invalid)
+    }
+
+    @Test
+    fun versionTwoProductionPairingMatchesCurrentServerPayload() {
+        val result = UploadScanPolicy.applyScannedText(
+            current,
+            "nanato-hc://pair?v=2&m=production&u=https%3A%2F%2Ftsubashimonanato.com%2Fhealth%2Fapi%2Fv2&c=one-time-code-1234"
+        )
+
+        assertTrue(result is UploadScanApplyResult.Redeem)
+        val pairing = (result as UploadScanApplyResult.Redeem).pairing
+        assertEquals(UploadServerMode.PRODUCTION, pairing.serverMode)
+        assertEquals("https://tsubashimonanato.com/health/api/v2/", pairing.apiBaseUrl)
+        assertEquals("one-time-code-1234", pairing.code)
+    }
+
+    @Test
+    fun versionTwoLocalPairingMatchesCurrentServerPayload() {
+        val result = UploadScanPolicy.applyScannedText(
+            current,
+            "nanato-hc://pair?v=2&m=local&u=http%3A%2F%2F192.168.0.96%3A8000%2Fhealth%2Fapi%2Fv2&c=one-time-code-1234"
+        )
+
+        assertTrue(result is UploadScanApplyResult.Redeem)
+        val pairing = (result as UploadScanApplyResult.Redeem).pairing
+        assertEquals(UploadServerMode.LOCAL_DEBUG, pairing.serverMode)
+        assertEquals("http://192.168.0.96:8000/health/api/v2/", pairing.apiBaseUrl)
+        assertEquals("one-time-code-1234", pairing.code)
+    }
+
+    @Test
+    fun versionTwoPairingRejectsMissingCode() {
+        val result = UploadScanPolicy.applyScannedText(
+            current,
+            "nanato-hc://pair?v=2&m=production&u=https%3A%2F%2Ftsubashimonanato.com%2Fhealth%2Fapi%2Fv2%2F"
+        )
+
+        assertTrue(result is UploadScanApplyResult.Invalid)
+    }
+
+    @Test
+    fun pairingRejectsUnsupportedVersion() {
+        val result = UploadScanPolicy.applyScannedText(
+            current,
+            "nanato-hc://pair?v=3&m=production&u=https%3A%2F%2Ftsubashimonanato.com%2Fhealth%2Fapi%2Fv3%2F&c=one-time-code-1234"
+        )
+
+        assertTrue(result is UploadScanApplyResult.Invalid)
+        assertEquals(
+            "QR code pairing version is not supported",
+            (result as UploadScanApplyResult.Invalid).message
+        )
     }
 }

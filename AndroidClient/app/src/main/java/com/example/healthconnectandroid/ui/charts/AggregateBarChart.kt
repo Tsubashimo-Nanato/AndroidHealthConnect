@@ -73,9 +73,11 @@ fun DailyBarChart(
     val visibleRows = remember(sorted, visibleStartIndex, visibleEndIndex) {
         sorted.subList(visibleStartIndex, visibleEndIndex)
     }
-    val yBounds = expandedYBounds(visibleRows.map { it.total }, forceZeroMinimum = true)
-    val xTicks = dailyTicks(visibleRows)
-    val yTicks = numericTicks(yBounds)
+    val yBounds = remember(visibleRows) {
+        expandedYBounds(visibleRows.map { it.total }, forceZeroMinimum = true)
+    }
+    val xTicks = remember(visibleRows) { dailyTicks(visibleRows) }
+    val yTicks = remember(yBounds) { numericTicks(yBounds) }
     val plotLeftPx = with(density) { 56.dp.toPx() }
     val plotTopPx = with(density) { 18.dp.toPx() }
     val plotRightInsetPx = with(density) { 16.dp.toPx() }

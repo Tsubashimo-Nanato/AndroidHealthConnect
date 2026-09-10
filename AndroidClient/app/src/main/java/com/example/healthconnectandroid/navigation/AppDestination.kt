@@ -17,16 +17,16 @@ sealed interface AppDestination {
 
 enum class AppTab(val label: String) {
     Dashboard("Dashboard"),
-    Medicine("Medicine"),
     Data("Data"),
+    Medicine("Medicine"),
     Settings("Settings")
 }
 
 enum class SettingsDestination(val title: String) {
-    Preferences("Preferences"),
-    DataFlow("Data Flow"),
+    General("General"),
+    HealthConnect("Health Connect"),
     Medicine("Medicine"),
-    Advanced("Advanced")
+    StorageAndTools("Storage & Tools")
 }
 
 @Stable
@@ -42,8 +42,8 @@ class AppNavigationState(
     val selectedTab: AppTab
         get() = when (destination) {
             AppDestination.Medicine -> AppTab.Medicine
-            AppDestination.Data,
-            is AppDestination.DataDetail -> AppTab.Data
+            AppDestination.Data -> AppTab.Data
+            is AppDestination.DataDetail -> AppTab.Dashboard
             AppDestination.Settings,
             is AppDestination.SettingsSection -> AppTab.Settings
             AppDestination.Dashboard -> AppTab.Dashboard
@@ -51,6 +51,9 @@ class AppNavigationState(
 
     val showBottomBar: Boolean
         get() = true
+
+    val canNavigateBack: Boolean
+        get() = destination is AppDestination.DataDetail || destination is AppDestination.SettingsSection
 
     fun selectTab(tab: AppTab) {
         destination = when (tab) {
@@ -72,7 +75,7 @@ class AppNavigationState(
 
     fun goBack(): Boolean {
         destination = when (destination) {
-            is AppDestination.DataDetail -> AppDestination.Data
+            is AppDestination.DataDetail -> AppDestination.Dashboard
             is AppDestination.SettingsSection -> AppDestination.Settings
             AppDestination.Data,
             AppDestination.Medicine,
@@ -86,7 +89,7 @@ class AppNavigationState(
         when (val current = destination) {
             AppDestination.Dashboard -> "Dashboard"
             AppDestination.Medicine -> "Medicine"
-            AppDestination.Data -> "Local Data"
+            AppDestination.Data -> "Data Sync"
             is AppDestination.DataDetail -> HealthDataTypeRegistry.require(current.dataTypeKey).displayName
             AppDestination.Settings -> "Settings"
             is AppDestination.SettingsSection -> current.section.title

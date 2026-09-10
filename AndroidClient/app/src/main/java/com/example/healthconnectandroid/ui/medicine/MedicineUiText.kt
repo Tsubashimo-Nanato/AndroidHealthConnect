@@ -30,6 +30,13 @@ private fun translateMedicineStatusText(text: String): String =
         text == "Overlay popup enabled" -> "悬浮弹窗已开启"
         text == "Overlay popup off" -> "悬浮弹窗已关闭"
         text == "Overlay permission is needed for direct popups." -> "直接弹窗需要悬浮窗权限。"
+        text == "Exact alarm access enabled" -> "精确闹钟权限已开启"
+        text == "Exact alarm access is needed for Alarm mode." -> "闹钟模式需要精确闹钟权限。"
+        text == "Exact alarm settings are unavailable" -> "无法打开精确闹钟设置"
+        text.matches(Regex("\\d+ active")) ->
+            text.replace(" active", " 个启用")
+        text.matches(Regex("\\d+ logs today")) ->
+            text.replace(" logs today", " 条今日记录")
         text.startsWith("Logged ") -> text
             .replaceFirst("Logged ", "已记录 ")
             .replace("Morning", "早上")
@@ -81,11 +88,14 @@ private val MedicineChineseText = mapOf(
     "No logs" to "没有记录",
     "No medicine log entries for this day." to "这一天没有用药记录。",
     "Delete log" to "删除记录",
+    "Delete this dose log?" to "删除这次用药记录？",
+    "Delete" to "删除",
     "Hide selected medicines" to "收起已选药物",
     "Adjust selected medicines" to "调整已选药物",
     "No scheduled medicine" to "没有计划药物",
     "Add a medicine in Settings, or enter a one-off medicine below." to "请在设置里添加药物，或在下方输入临时药物。",
     "Notification permission is needed for medicine checks." to "用药确认需要通知权限。",
+    "Enable" to "启用",
     "Enable notifications" to "开启通知",
     "Show medicine details" to "显示药物详情",
     "Hide medicine details" to "隐藏药物详情",
@@ -102,6 +112,9 @@ private val MedicineChineseText = mapOf(
     "Reminder off" to "提醒已关闭",
     "Alarm mode" to "闹钟模式",
     "Uses a system alarm for this slot" to "这个时段使用系统闹钟提醒",
+    "Uses a standard reminder until exact alarms are allowed" to "允许精确闹钟前将使用普通提醒",
+    "Exact alarm access is needed for Alarm mode." to "闹钟模式需要精确闹钟权限。",
+    "Allow exact alarms" to "允许精确闹钟",
     "Strong popup" to "强弹窗",
     "Overlay popup enabled" to "悬浮弹窗已开启",
     "Overlay popup off" to "悬浮弹窗已关闭",
@@ -111,6 +124,7 @@ private val MedicineChineseText = mapOf(
     "Loading scheduled medicines" to "正在加载计划药物",
     "No scheduled medicine for this reminder." to "这个提醒没有计划药物。",
     "Review medicines" to "查看药物",
+    "Hide medicines" to "收起药物",
     "Archive" to "归档",
     "Archived" to "已归档",
     "Taken" to "已服用",

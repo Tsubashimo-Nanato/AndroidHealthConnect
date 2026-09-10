@@ -3,6 +3,7 @@ package com.example.healthconnectandroid.hc.sync
 import com.example.healthconnectandroid.hc.HealthDataTypeSyncResult
 import java.time.Instant
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Test
 
 class SyncProgressPolicyTest {
@@ -111,5 +112,45 @@ class SyncProgressPolicyTest {
         assertEquals(300, progress.sourceBytesRead)
         assertEquals(130, progress.localBytesWritten)
         assertEquals("Day 1/2: Saving rows", progress.message)
+    }
+
+    @Test
+    fun fetchingUsesOverallTypeProgressWhenPageCountIsUnknown() {
+        val progress = SyncProgressPolicy.progressForTypeStep(
+            mode = SyncMode.SMART,
+            typeName = "Heart Rate",
+            completedTypes = 0,
+            totalTypes = 18,
+            previousResults = emptyList(),
+            typeProgress = SyncTypeProgress(SyncProgressPhase.FETCHING),
+            rangeStart = null,
+            rangeEnd = null,
+            isCancellable = false
+        )
+
+        assertFalse(progress.isIndeterminate)
+        assertEquals(
+            SyncProgressPhase.FETCHING.fraction / 18f,
+            progress.progressFraction ?: -1f,
+            0.0001f
+        )
+    }
+
+    @Test
+    fun storingReturnsToOverallTypeProgress() {
+        val progress = SyncProgressPolicy.progressForTypeStep(
+            mode = SyncMode.SMART,
+            typeName = "Heart Rate",
+            completedTypes = 1,
+            totalTypes = 4,
+            previousResults = emptyList(),
+            typeProgress = SyncTypeProgress(SyncProgressPhase.STORING),
+            rangeStart = null,
+            rangeEnd = null,
+            isCancellable = false
+        )
+
+        assertFalse(progress.isIndeterminate)
+        assertEquals((1f + SyncProgressPhase.STORING.fraction) / 4f, progress.progressFraction)
     }
 }

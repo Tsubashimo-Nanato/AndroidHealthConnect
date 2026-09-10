@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -17,10 +18,14 @@ import com.example.healthconnectandroid.hc.upload.UploadSettings
 import com.example.healthconnectandroid.hc.upload.UploadStatus
 import com.example.healthconnectandroid.hc.upload.UploadTimeRange
 import com.example.healthconnectandroid.ui.animation.rowFadeIn
+import com.example.healthconnectandroid.ui.AppSection
+import com.example.healthconnectandroid.ui.i18n.uiText
 import java.time.Instant
 
 @Composable
-fun SettingsDataFlowScreen(
+fun SettingsHealthConnectScreen(
+    profileOwnsHealthConnect: Boolean,
+    healthConnectOwnerName: String?,
     declaredReadHr: Boolean,
     platformGranted: Boolean,
     hcGranted: Boolean,
@@ -32,7 +37,8 @@ fun SettingsDataFlowScreen(
     lastPeriodicSync: Instant?,
     lastPeriodicStatus: String?,
     lastPeriodicSummary: String?,
-    settingsStatus: String,
+    syncStatus: String,
+    uploadActionStatus: String,
     syncBusy: Boolean,
     syncProgress: SyncProgress?,
     uploadSettings: UploadSettings,
@@ -41,7 +47,6 @@ fun SettingsDataFlowScreen(
     debugEnabled: Boolean,
     uploadBusy: Boolean,
     uploadProgress: UploadProgress?,
-    exportBusy: Boolean,
     onRequestPlatform: () -> Unit,
     onRequestDataPermissions: () -> Unit,
     onRequestBackgroundRead: () -> Unit,
@@ -55,10 +60,6 @@ fun SettingsDataFlowScreen(
     onTestUploadConnection: (UploadSettings) -> Unit,
     onUploadNow: (UploadSettings, UploadTimeRange) -> Unit,
     onScanPairingQr: () -> Unit,
-    onExportHrCsv: () -> Unit,
-    onExportAllCsv: () -> Unit,
-    onExportZip: () -> Unit,
-    onRequestClear: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -68,59 +69,65 @@ fun SettingsDataFlowScreen(
             .padding(18.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        PermissionsSettingsSection(
-            declaredReadHr = declaredReadHr,
-            platformGranted = platformGranted,
-            hcGranted = hcGranted,
-            backgroundReadStatus = backgroundReadStatus,
-            dataPermissionSummary = dataPermissionSummary,
-            backgroundReadAvailable = backgroundReadAvailable,
-            onRequestPlatform = onRequestPlatform,
-            onRequestDataPermissions = onRequestDataPermissions,
-            onRequestBackgroundRead = onRequestBackgroundRead,
-            openAppSettings = openAppSettings,
-            packageName = packageName,
-            modifier = Modifier.rowFadeIn(0)
-        )
-        SyncSettingsSection(
-            periodicEnabled = periodicEnabled,
-            backgroundReadAvailable = backgroundReadAvailable,
-            backgroundReadGranted = backgroundReadGranted,
-            lastPeriodicSync = lastPeriodicSync,
-            lastPeriodicStatus = lastPeriodicStatus,
-            lastPeriodicSummary = lastPeriodicSummary,
-            status = settingsStatus,
-            busy = syncBusy,
-            syncProgress = syncProgress,
-            onTogglePeriodic = onTogglePeriodic,
-            onFullResync = onFullResync,
-            onCancelFullResync = onCancelFullResync,
-            onRunBackgroundNow = onRunBackgroundNow,
-            modifier = Modifier.rowFadeIn(1)
-        )
+        if (!profileOwnsHealthConnect) {
+            AppSection(
+                title = "Local profile",
+                subtitle = healthConnectOwnerName?.let { "Health Connect: $it" }
+                    ?: "Health Connect is not linked"
+            ) {
+                Text(
+                    uiText(
+                        "Health Connect belongs to another profile. This profile can still pair for medicine and local-record upload."
+                    )
+                )
+            }
+        } else {
+            PermissionsSettingsSection(
+                declaredReadHr = declaredReadHr,
+                platformGranted = platformGranted,
+                hcGranted = hcGranted,
+                backgroundReadStatus = backgroundReadStatus,
+                backgroundReadGranted = backgroundReadGranted,
+                dataPermissionSummary = dataPermissionSummary,
+                backgroundReadAvailable = backgroundReadAvailable,
+                onRequestPlatform = onRequestPlatform,
+                onRequestDataPermissions = onRequestDataPermissions,
+                onRequestBackgroundRead = onRequestBackgroundRead,
+                openAppSettings = openAppSettings,
+                packageName = packageName,
+                modifier = Modifier.rowFadeIn(0)
+            )
+            SyncSettingsSection(
+                periodicEnabled = periodicEnabled,
+                backgroundReadAvailable = backgroundReadAvailable,
+                backgroundReadGranted = backgroundReadGranted,
+                lastPeriodicSync = lastPeriodicSync,
+                lastPeriodicStatus = lastPeriodicStatus,
+                lastPeriodicSummary = lastPeriodicSummary,
+                status = syncStatus,
+                busy = syncBusy,
+                syncProgress = syncProgress,
+                onTogglePeriodic = onTogglePeriodic,
+                onFullResync = onFullResync,
+                onCancelFullResync = onCancelFullResync,
+                onRunBackgroundNow = onRunBackgroundNow,
+                modifier = Modifier.rowFadeIn(1)
+            )
+        }
         UploadSettingsSections(
             settings = uploadSettings,
             uploadStatus = uploadStatus,
             pendingCounts = uploadPendingCounts,
             debugEnabled = debugEnabled,
-            status = settingsStatus,
+            status = uploadActionStatus,
             busy = uploadBusy,
             progress = uploadProgress,
             onSaveSettings = onSaveUploadSettings,
             onTestConnection = onTestUploadConnection,
             onUploadNow = onUploadNow,
             onScanPairingQr = onScanPairingQr,
-            destinationModifier = Modifier.rowFadeIn(2),
-            statusModifier = Modifier.rowFadeIn(3)
-        )
-        DataManagementSection(
-            status = settingsStatus,
-            busy = exportBusy,
-            onExportHrCsv = onExportHrCsv,
-            onExportAllCsv = onExportAllCsv,
-            onExportZip = onExportZip,
-            onRequestClear = onRequestClear,
-            modifier = Modifier.rowFadeIn(4)
+            modifier = Modifier.rowFadeIn(if (profileOwnsHealthConnect) 2 else 1),
+            statusModifier = Modifier.rowFadeIn(if (profileOwnsHealthConnect) 3 else 2)
         )
     }
 }

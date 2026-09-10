@@ -2,20 +2,17 @@ package com.example.healthconnectandroid.ui
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.CubicBezierEasing
-import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.selection.selectable
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -24,9 +21,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.example.healthconnectandroid.ui.i18n.uiText
 
@@ -42,12 +40,12 @@ fun <T> SegmentedSwitch(
 ) {
     if (options.isEmpty()) return
     val selectedIndex = options.indexOf(selected).takeIf { it >= 0 } ?: 0
+    val density = LocalDensity.current
 
     Surface(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(topStart = 26.dp, topEnd = 32.dp, bottomEnd = 22.dp, bottomStart = 28.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.48f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.16f))
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.48f)
     ) {
         BoxWithConstraints(
             modifier = Modifier
@@ -56,17 +54,17 @@ fun <T> SegmentedSwitch(
                 .padding(4.dp)
         ) {
             val segmentWidth = maxWidth / options.size
-            val selectedOffset by animateDpAsState(
-                targetValue = segmentWidth * selectedIndex,
-                animationSpec = tween(durationMillis = 260, easing = StudioEase),
+            val selectedOffsetPx by animateFloatAsState(
+                targetValue = with(density) { (segmentWidth * selectedIndex).toPx() },
+                animationSpec = tween(durationMillis = 180, easing = StudioEase),
                 label = "segmented-switch-offset"
             )
             Surface(
                 modifier = Modifier
-                    .offset { IntOffset(x = selectedOffset.roundToPx(), y = 0) }
                     .width(segmentWidth)
-                    .fillMaxHeight(),
-                shape = RoundedCornerShape(topStart = 20.dp, topEnd = 26.dp, bottomEnd = 18.dp, bottomStart = 22.dp),
+                    .fillMaxHeight()
+                    .graphicsLayer { translationX = selectedOffsetPx },
+                shape = MaterialTheme.shapes.small,
                 color = MaterialTheme.colorScheme.primaryContainer
             ) {}
             Row(Modifier.fillMaxWidth()) {
@@ -78,7 +76,7 @@ fun <T> SegmentedSwitch(
                         } else {
                             MaterialTheme.colorScheme.onSurfaceVariant
                         },
-                        animationSpec = tween(durationMillis = 180, easing = StudioEase),
+                        animationSpec = tween(durationMillis = 140, easing = StudioEase),
                         label = "segmented-switch-text"
                     )
                     Box(

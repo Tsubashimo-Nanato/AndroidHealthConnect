@@ -203,7 +203,79 @@ class UploadEndpointPolicyTest {
 
         assertTrue(UploadEndpointPolicy.validate(settings) is UploadEndpointValidation.Invalid)
         assertTrue(
-            UploadEndpointPolicy.validate(settings, requireApiKey = false) is UploadEndpointValidation.Valid
+            UploadEndpointPolicy.validate(
+                settings,
+                requireAuthentication = false
+            ) is UploadEndpointValidation.Valid
         )
     }
+
+    @Test
+    fun activeProfilePairingUsesBearerEndpointsWithoutApiKey() {
+        val credential = profileCredential()
+        val result = UploadEndpointPolicy.validate(
+            UploadSettings(
+                serverMode = UploadServerMode.PRODUCTION,
+                apiKey = "",
+                deviceId = credential.clientDeviceId,
+                profileCredential = credential
+            )
+        )
+
+        assertTrue(result is UploadEndpointValidation.Valid)
+        val endpoint = (result as UploadEndpointValidation.Valid).endpoint
+        assertEquals("https://tsubashimonanato.com/health/api/v2/profile", endpoint.statusUrl)
+        assertEquals(
+            "https://tsubashimonanato.com/health/api/v2/ingest/batches",
+            endpoint.ingestBatchesUrl
+        )
+        assertTrue(endpoint.authorization is UploadAuthorization.Bearer)
+        assertEquals("server-profile", endpoint.profileIdentity?.profileId)
+        assertEquals("installation", endpoint.profileIdentity?.installationId)
+    }
+
+    @Test
+    fun pairingForAnotherModeDoesNotAuthorizeCurrentEndpoint() {
+        val result = UploadEndpointPolicy.validate(
+            UploadSettings(
+                serverMode = UploadServerMode.LOCAL_DEBUG,
+                localBaseUrl = "http://10.0.2.2:8000/health/api/v2/",
+                apiKey = "",
+                deviceId = "device",
+                profileCredential = profileCredential()
+            )
+        )
+
+        assertTrue(result is UploadEndpointValidation.Invalid)
+    }
+
+    @Test
+    fun expiredPairingRequiresAnotherScan() {
+        val result = UploadEndpointPolicy.validate(
+            UploadSettings(
+                serverMode = UploadServerMode.PRODUCTION,
+                apiKey = "",
+                deviceId = "device",
+                profileCredential = profileCredential().copy(expiresAtEpochMillis = 1L)
+            )
+        )
+
+        assertTrue(result is UploadEndpointValidation.Invalid)
+        assertEquals(
+            "Pairing expired. Scan a new Pairing QR",
+            (result as UploadEndpointValidation.Invalid).reason
+        )
+    }
+
+    private fun profileCredential(): ProfileUploadCredential =
+        ProfileUploadCredential(
+            serverMode = UploadServerMode.PRODUCTION,
+            serverProfileId = "server-profile",
+            serverProfileName = "My server profile",
+            installationId = "installation",
+            clientDeviceId = "device",
+            accessToken = "token",
+            expiresAtEpochMillis = Long.MAX_VALUE,
+            uploadBaseUrl = "https://tsubashimonanato.com/health/api/v2/"
+        )
 }

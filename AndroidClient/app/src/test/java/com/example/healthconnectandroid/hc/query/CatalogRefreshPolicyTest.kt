@@ -52,12 +52,13 @@ class CatalogRefreshPolicyTest {
         val results = listOf(
             HealthDataTypeSyncResult(key = "heart_rate", recordsInserted = 2),
             HealthDataTypeSyncResult(key = "sleep_session", aggregateRowsStored = 1),
+            HealthDataTypeSyncResult(key = "weight", recordsDeleted = 1),
             HealthDataTypeSyncResult(key = "steps", recordsRead = 10),
-            HealthDataTypeSyncResult(key = "weight", errorMessage = "unavailable")
+            HealthDataTypeSyncResult(key = "distance", errorMessage = "unavailable")
         )
 
         assertEquals(
-            setOf("heart_rate", "sleep_session"),
+            setOf("heart_rate", "sleep_session", "weight"),
             CatalogRefreshPolicy.changedRecordTypes(results)
         )
     }

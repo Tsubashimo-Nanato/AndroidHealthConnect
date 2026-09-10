@@ -1,4 +1,4 @@
-package com.example.healthconnectandroid.ui.dashboard
+package com.example.healthconnectandroid.ui.data
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -11,9 +11,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import com.example.healthconnectandroid.hc.LocalHealthStatus
 import com.example.healthconnectandroid.hc.HealthDataTypeRegistry
+import com.example.healthconnectandroid.hc.LocalHealthStatus
 import com.example.healthconnectandroid.hc.sync.SyncProgress
+import com.example.healthconnectandroid.AppLanguagePreference
 import com.example.healthconnectandroid.ui.AppActionRow
 import com.example.healthconnectandroid.ui.AppSection
 import com.example.healthconnectandroid.ui.MetricCard
@@ -26,9 +27,10 @@ import com.example.healthconnectandroid.ui.animation.rowFadeIn
 import com.example.healthconnectandroid.ui.format.DisplayPreferences
 import com.example.healthconnectandroid.ui.format.MetricDisplayFormatter
 import com.example.healthconnectandroid.ui.i18n.uiText
+import com.example.healthconnectandroid.ui.i18n.LocalAppLanguage
 
 @Composable
-fun DashboardScreen(
+fun DataSyncScreen(
     modifier: Modifier,
     localHealthStatus: LocalHealthStatus?,
     grantedPermissions: Set<String>,
@@ -42,26 +44,21 @@ fun DashboardScreen(
     displayPreferences: DisplayPreferences,
     onSyncAll: () -> Unit,
 ) {
+    val backgroundSyncActive = periodicEnabled && backgroundReadGranted
+    val backgroundSyncLabel = when {
+        !periodicEnabled -> "Auto sync off"
+        backgroundSyncActive -> "Auto sync on"
+        backgroundReadAvailable -> "Auto sync waiting"
+        else -> "Auto sync unavailable"
+    }
     Column(
         modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(18.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(18.dp)
     ) {
-        Column(
-            modifier = Modifier.rowFadeIn(0),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            Text(uiText("Health Connect Data Sync"), style = MaterialTheme.typography.headlineSmall)
-            Text(
-                uiText("Local health data viewer, CSV exporter, and sync tool."),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-
-        AppActionRow(modifier = Modifier.rowFadeIn(1)) {
+        AppActionRow(modifier = Modifier.rowFadeIn(0)) {
             MetricCard(
                 modifier = Modifier.weight(1f),
                 label = "Records",
@@ -77,15 +74,15 @@ fun DashboardScreen(
         }
 
         AppSection(
-            modifier = Modifier.rowFadeIn(2),
+            modifier = Modifier.rowFadeIn(1),
             title = "Current Status",
             subtitle = "Last sync and access health"
         ) {
             AppActionRow {
                 StatusBadge(permissionSummaryBadge(grantedPermissions), permissionSummaryTone(grantedPermissions))
                 StatusBadge(
-                    if (periodicEnabled) "Auto sync on" else "Auto sync off",
-                    if (periodicEnabled) StatusTone.Success else StatusTone.Neutral
+                    backgroundSyncLabel,
+                    if (backgroundSyncActive) StatusTone.Success else if (periodicEnabled) StatusTone.Warning else StatusTone.Neutral
                 )
             }
             Text(
@@ -102,30 +99,38 @@ fun DashboardScreen(
                 uiText(localHealthStatusText(localHealthStatus, displayPreferences)),
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            StatusMessageCard(status, tone = statusTone)
+            if (status != "Ready") {
+                StatusMessageCard(status, tone = statusTone)
+            }
         }
 
         AppSection(
-            modifier = Modifier.rowFadeIn(3),
+            modifier = Modifier.rowFadeIn(2),
             title = "Actions",
-            subtitle = "Smart sync reads a recent per-type window with a safety overlap"
+            subtitle = "Incremental changes from Health Connect"
         ) {
             PrimaryActionButton(
-                if (syncing) "Syncing..." else "Smart Sync",
+                if (syncing) {
+                    syncButtonText(syncProgress?.progressPercent ?: 0, LocalAppLanguage.current)
+                } else {
+                    "Sync New Data"
+                },
                 enabled = !syncing,
                 onClick = onSyncAll
             )
             if (syncing || syncProgress != null) {
                 SyncProgressCard(syncProgress)
             }
-            Text(
-                uiText("Use the bottom tabs for Data and Settings. Full resync and exports live in Settings."),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
         }
     }
 }
+
+private fun syncButtonText(percent: Int, language: AppLanguagePreference): String =
+    if (language == AppLanguagePreference.CHINESE_SIMPLIFIED) {
+        "同步中 $percent%"
+    } else {
+        "Syncing $percent%"
+    }
 
 private fun localHealthStatusText(
     localHealthStatus: LocalHealthStatus?,
@@ -138,13 +143,12 @@ private fun localHealthStatusText(
 }
 
 private fun permissionSummaryBadge(grantedPermissions: Set<String>): String {
-    val total = HealthDataTypeRegistry.implementedReadPermissions.size
-    val granted = HealthDataTypeRegistry.implementedReadPermissions.count { it in grantedPermissions }
-    return if (granted == total) "Data access ready" else "$granted/$total access"
+    val permissions = HealthDataTypeRegistry.implementedReadPermissions
+    val granted = permissions.count(grantedPermissions::contains)
+    return if (granted == permissions.size) "Data access ready" else "$granted/${permissions.size} access"
 }
 
 private fun permissionSummaryTone(grantedPermissions: Set<String>): StatusTone {
-    val total = HealthDataTypeRegistry.implementedReadPermissions.size
-    val granted = HealthDataTypeRegistry.implementedReadPermissions.count { it in grantedPermissions }
-    return if (granted == total) StatusTone.Success else StatusTone.Warning
+    val permissions = HealthDataTypeRegistry.implementedReadPermissions
+    return if (permissions.all(grantedPermissions::contains)) StatusTone.Success else StatusTone.Warning
 }

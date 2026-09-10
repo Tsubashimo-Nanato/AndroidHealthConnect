@@ -8,6 +8,7 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
+import com.example.healthconnectandroid.LocalProfileStore
 import com.example.healthconnectandroid.data.AppDb
 import com.example.healthconnectandroid.hc.HealthDataTypeRegistry
 import java.time.Instant
@@ -20,10 +21,13 @@ class CatalogRefreshWorker(
 ) : CoroutineWorker(appContext, params) {
 
     override suspend fun doWork(): Result {
+        val profileId = inputData.getString(KEY_PROFILE_ID)
+            ?.takeIf { LocalProfileStore.profile(applicationContext, it) != null }
+            ?: return Result.failure()
         val zoneId = inputData.getString(KEY_ZONE_ID)
             ?.let { runCatching { ZoneId.of(it) }.getOrNull() }
             ?: ZoneId.systemDefault()
-        val db = AppDb.get(applicationContext)
+        val db = AppDb.get(applicationContext, profileId)
         val snapshots = db.healthCatalogSnapshotDao().all()
         val recordTypes = CatalogRefreshPolicy.recordTypesToRefresh(
             snapshots = snapshots,
@@ -41,10 +45,20 @@ class CatalogRefreshWorker(
     companion object {
         const val WORK_NAME = "health_catalog_progressive_refresh"
         private const val KEY_ZONE_ID = "zone_id"
+        private const val KEY_PROFILE_ID = "profile_id"
 
-        fun enqueue(context: Context, zoneId: ZoneId = ZoneId.systemDefault()) {
+        fun enqueue(
+            context: Context,
+            zoneId: ZoneId = ZoneId.systemDefault(),
+            profileId: String = LocalProfileStore.activeProfile(context).id
+        ) {
             val request = OneTimeWorkRequestBuilder<CatalogRefreshWorker>()
-                .setInputData(workDataOf(KEY_ZONE_ID to zoneId.id))
+                .setInputData(
+                    workDataOf(
+                        KEY_ZONE_ID to zoneId.id,
+                        KEY_PROFILE_ID to profileId
+                    )
+                )
                 .setConstraints(
                     Constraints.Builder()
                         .setRequiresBatteryNotLow(true)
@@ -53,7 +67,7 @@ class CatalogRefreshWorker(
                 .addTag(WORK_NAME)
                 .build()
             WorkManager.getInstance(context.applicationContext).enqueueUniqueWork(
-                WORK_NAME,
+                "$WORK_NAME:$profileId",
                 ExistingWorkPolicy.APPEND_OR_REPLACE,
                 request
             )

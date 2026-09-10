@@ -13,6 +13,7 @@ data class HealthDataTypeSyncResult(
     val recordsRead: Int = 0,
     val recordsInserted: Int = 0,
     val recordsUpdated: Int = 0,
+    val recordsDeleted: Int = 0,
     val recordsSkippedDuplicate: Int = 0,
     val recordsStored: Int = recordsInserted + recordsUpdated,
     val valuesStored: Int = 0,

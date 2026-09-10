@@ -2,6 +2,8 @@ package com.example.healthconnectandroid.ui.medicine
 
 import android.os.Build
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -16,11 +18,14 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -28,6 +33,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -39,6 +45,7 @@ import com.example.healthconnectandroid.medicine.MedicineSlot
 import com.example.healthconnectandroid.medicine.MedicineSnapshot
 import com.example.healthconnectandroid.medicine.displayLabel
 import com.example.healthconnectandroid.medicine.displayText
+import com.example.healthconnectandroid.medicine.toDoseEvents
 import com.example.healthconnectandroid.ui.AppActionRow
 import com.example.healthconnectandroid.ui.AppSection
 import com.example.healthconnectandroid.ui.EmptyState
@@ -75,6 +82,7 @@ fun MedicineScreen(
     var selectionExpanded by remember(selectedSlot) { mutableStateOf(false) }
     val scheduledForSlot = snapshot.schedules[selectedSlot].orEmpty()
     val canLog = selectedMedicineIds.isNotEmpty() || extraMedicineName.isNotBlank()
+    val todayDoseCount = remember(snapshot.todayLogs) { snapshot.todayLogs.toDoseEvents().size }
 
     LaunchedEffect(snapshot, selectedSlot) {
         selectedMedicineIds = if (selectedSlot == MedicineSlot.AS_NEEDED) {
@@ -88,33 +96,27 @@ fun MedicineScreen(
         modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(18.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(18.dp)
     ) {
-        Text(medicineUiText("Medicine"), modifier = Modifier.rowFadeIn(0), style = MaterialTheme.typography.headlineSmall)
-
         AppSection(
             title = medicineUiText("Today"),
             subtitle = medicineUiText("Medicine schedule and quick log"),
-            modifier = Modifier.rowFadeIn(1)
+            modifier = Modifier.rowFadeIn(0)
         ) {
             AppActionRow {
                 StatusBadge("${snapshot.medicines.count { it.active }} active", StatusTone.Info)
-                StatusBadge("${snapshot.todayLogs.size} logs today", StatusTone.Neutral)
+                StatusBadge("$todayDoseCount logs today", StatusTone.Neutral)
             }
             if (!notificationPermissionGranted && Build.VERSION.SDK_INT >= 33) {
-                StatusMessageCard(
-                    medicineUiText("Notification permission is needed for medicine checks."),
-                    tone = StatusTone.Warning
-                )
-                SecondaryActionButton(medicineUiText("Enable notifications"), onClick = onRequestNotificationPermission)
+                NotificationPermissionPrompt(onEnable = onRequestNotificationPermission)
             }
         }
 
         AppSection(
             title = medicineUiText("Quick Log"),
             subtitle = medicineUiText("Records the actual time you answer"),
-            modifier = Modifier.rowFadeIn(2)
+            modifier = Modifier.rowFadeIn(1)
         ) {
             MedicineSlotSelector(
                 selected = selectedSlot,
@@ -183,22 +185,25 @@ fun MedicineScreen(
                         extraMedicineName = ""
                     }
                 )
+                SecondaryActionButton(
+                    label = medicineUiText("Skipped"),
+                    modifier = Modifier.weight(1f),
+                    enabled = canLog,
+                    onClick = {
+                        onLogDose(selectedSlot, MedicineDoseStatus.SKIPPED, selectedMedicineIds, extraMedicineName)
+                        extraMedicineName = ""
+                    }
+                )
             }
-            SecondaryActionButton(
-                label = medicineUiText("Skipped"),
-                enabled = canLog,
-                onClick = {
-                    onLogDose(selectedSlot, MedicineDoseStatus.SKIPPED, selectedMedicineIds, extraMedicineName)
-                    extraMedicineName = ""
-                }
-            )
-            StatusMessageCard(translateMedicineUiText(status, language), tone = statusToneForMessage(status))
+            if (status != "Medicine ready") {
+                StatusMessageCard(translateMedicineUiText(status, language), tone = statusToneForMessage(status))
+            }
         }
 
         AppSection(
             title = medicineUiText("Current Medicines"),
             subtitle = medicineUiText("Active schedule"),
-            modifier = Modifier.rowFadeIn(3)
+            modifier = Modifier.rowFadeIn(2)
         ) {
             val active = snapshot.medicines.filter { it.active }
             if (active.isEmpty()) {
@@ -223,10 +228,35 @@ fun MedicineScreen(
             daySummaries = snapshot.recentDaySummaries,
             today = LocalDate.now(zoneId),
             weekStart = weekStart,
-            modifier = Modifier.rowFadeIn(4)
+            modifier = Modifier.rowFadeIn(3)
         )
-        DoseLogSection(medicineUiText("Today Log"), snapshot.todayLogs, zoneId, onDeleteDoseLogs, Modifier.rowFadeIn(5))
-        DoseLogSection(medicineUiText("Yesterday Log"), snapshot.yesterdayLogs, zoneId, onDeleteDoseLogs, Modifier.rowFadeIn(6))
+        DoseLogSection(medicineUiText("Today Log"), snapshot.todayLogs, zoneId, onDeleteDoseLogs, Modifier.rowFadeIn(4))
+        DoseLogSection(medicineUiText("Yesterday Log"), snapshot.yesterdayLogs, zoneId, onDeleteDoseLogs, Modifier.rowFadeIn(5))
+    }
+}
+
+@Composable
+private fun NotificationPermissionPrompt(onEnable: () -> Unit) {
+    Surface(
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.58f),
+        contentColor = MaterialTheme.colorScheme.onTertiaryContainer
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(Icons.Default.Notifications, contentDescription = null)
+            Text(
+                medicineUiText("Notification permission is needed for medicine checks."),
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.bodySmall
+            )
+            TextButton(onClick = onEnable) {
+                Text(medicineUiText("Enable"))
+            }
+        }
     }
 }
 
@@ -281,7 +311,7 @@ private fun SelectableMedicineRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .animateContentSize()
+            .animateContentSize(animationSpec = tween(180, easing = MedicineEase))
             .combinedClickable(
                 role = Role.Checkbox,
                 onClick = {
@@ -322,7 +352,7 @@ private fun MedicineGroup(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .animateContentSize(),
+            .animateContentSize(animationSpec = tween(180, easing = MedicineEase)),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Row(
@@ -368,7 +398,7 @@ private fun MedicineInfoRow(medicine: MedicineItem) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .animateContentSize()
+            .animateContentSize(animationSpec = tween(180, easing = MedicineEase))
             .combinedClickable(
                 role = Role.Button,
                 onClick = { if (expanded) expanded = false },
@@ -387,6 +417,8 @@ private fun MedicineInfoRow(medicine: MedicineItem) {
         }
     }
 }
+
+private val MedicineEase = CubicBezierEasing(0.16f, 1f, 0.3f, 1f)
 
 @Composable
 private fun MedicineExpandedDetails(

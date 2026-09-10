@@ -4,10 +4,14 @@ import android.content.Context
 import android.util.Log
 import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.HealthConnectFeatures
+import androidx.health.connect.client.changes.DeletionChange
+import androidx.health.connect.client.changes.UpsertionChange
+import androidx.health.connect.client.request.ChangesTokenRequest
 import androidx.room.withTransaction
 import com.example.healthconnectandroid.data.AppDb
 import com.example.healthconnectandroid.data.HealthAggregateDao
 import com.example.healthconnectandroid.data.HealthAggregateEntity
+import com.example.healthconnectandroid.data.HealthChangeTokenEntity
 import com.example.healthconnectandroid.data.HealthRecordEntity
 import com.example.healthconnectandroid.data.HealthSyncRunEntity
 import com.example.healthconnectandroid.data.HealthValueEntity
@@ -22,6 +26,7 @@ import com.example.healthconnectandroid.hc.NormalizedHealthRecord
 import com.example.healthconnectandroid.hc.NormalizedHealthValue
 import com.example.healthconnectandroid.hc.dedupeKey
 import com.example.healthconnectandroid.hc.localDateString
+import com.example.healthconnectandroid.hc.normalizeHealthConnectRecord
 import com.example.healthconnectandroid.hc.toHeartRateEntities
 import com.example.healthconnectandroid.hc.toNormalizedHeartRate
 import com.example.healthconnectandroid.hc.valueKey
@@ -41,6 +46,27 @@ private data class StoreNormalizedResult(
     val valuesStored: Int,
     val localBytesWritten: Long
 )
+
+private enum class ExistingRecordPolicy {
+    KEEP,
+    REPLACE_IF_CHANGED
+}
+
+private data class StoreChangePageResult(
+    val inserted: Int,
+    val updated: Int,
+    val deleted: Int,
+    val skippedDuplicate: Int,
+    val valuesStored: Int,
+    val localBytesWritten: Long,
+    val changedStart: Instant?,
+    val changedEnd: Instant?
+)
+
+internal sealed interface HealthChangeSyncOutcome {
+    data class Applied(val result: HealthDataTypeSyncResult) : HealthChangeSyncOutcome
+    data object TokenExpired : HealthChangeSyncOutcome
+}
 
 private data class StoreAggregateResult(
     val rowsStored: Int,
@@ -65,6 +91,7 @@ class HealthDataTypeSyncer(
     private val syncDao = db.healthSyncRunDao()
     private val aggregateDao = db.healthAggregateDao()
     private val retentionDao = db.healthRetentionDao()
+    private val changeTokenDao = db.healthChangeTokenDao()
 
     private fun ensureAvailable(): String? = try {
         val status = HealthConnectClient.getSdkStatus(appContext)
@@ -83,6 +110,26 @@ class HealthDataTypeSyncer(
     } catch (t: Throwable) {
         Log.e(TAG, "Background read feature check failed", t)
         false
+    }
+
+    private suspend fun readAccessIssue(
+        descriptor: HealthDataTypeDescriptor,
+        requireBackgroundReadPermission: Boolean
+    ): String? {
+        ensureAvailable()?.let { return it }
+        val grantedPermissions = client.permissionController.getGrantedPermissions()
+        if (requireBackgroundReadPermission) {
+            if (!backgroundReadFeatureAvailable()) {
+                return "Health Connect background reads are not available on this device"
+            }
+            if (HealthDataTypeRegistry.backgroundReadPermission !in grantedPermissions) {
+                return "Missing permission ${HealthDataTypeRegistry.backgroundReadPermission}"
+            }
+        }
+
+        val readPermission = descriptor.requiredReadPermission
+            ?: return "No Health Connect read permission is available for this data type"
+        return if (readPermission in grantedPermissions) null else "Missing permission $readPermission"
     }
 
     /** Legacy heart-rate sync path kept for single-type tools; multi-type sync uses [syncDataType]. */
@@ -126,13 +173,15 @@ class HealthDataTypeSyncer(
         start: Instant,
         end: Instant,
         requireBackgroundReadPermission: Boolean = false,
+        replaceChangedRecords: Boolean = false,
         zoneId: ZoneId = ZoneId.systemDefault(),
         onProgress: (SyncTypeProgress) -> Unit = {}
     ): HealthDataTypeSyncResult {
         val startedAt = Instant.now()
 
         val result = try {
-            ensureAvailable()?.let {
+            val descriptor = HealthDataTypeRegistry.require(key)
+            readAccessIssue(descriptor, requireBackgroundReadPermission)?.let {
                 return syncResultAndLog(
                     result = HealthDataTypeSyncResult(
                         key = key,
@@ -143,8 +192,6 @@ class HealthDataTypeSyncer(
                     startedAt = startedAt
                 )
             }
-
-            val descriptor = HealthDataTypeRegistry.require(key)
             val reader = descriptor.reader ?: return syncResultAndLog(
                 result = HealthDataTypeSyncResult(
                     key = key,
@@ -166,55 +213,6 @@ class HealthDataTypeSyncer(
                         requestedStart = start,
                         requestedEnd = end,
                         skippedReason = "Requested raw range is already archived locally"
-                    ),
-                    startedAt = startedAt
-                )
-            }
-
-            val grantedPermissions = client.permissionController.getGrantedPermissions()
-            if (requireBackgroundReadPermission) {
-                if (!backgroundReadFeatureAvailable()) {
-                    return syncResultAndLog(
-                        result = HealthDataTypeSyncResult(
-                            key = key,
-                            requestedStart = start,
-                            requestedEnd = end,
-                            skippedReason = "Health Connect background reads are not available on this device"
-                        ),
-                        startedAt = startedAt
-                    )
-                }
-                if (HealthDataTypeRegistry.backgroundReadPermission !in grantedPermissions) {
-                    return syncResultAndLog(
-                        result = HealthDataTypeSyncResult(
-                            key = key,
-                            requestedStart = start,
-                            requestedEnd = end,
-                            skippedReason = "Missing permission ${HealthDataTypeRegistry.backgroundReadPermission}"
-                        ),
-                        startedAt = startedAt
-                    )
-                }
-            }
-            val requiredReadPermission = descriptor.requiredReadPermission
-            if (requiredReadPermission == null) {
-                return syncResultAndLog(
-                    result = HealthDataTypeSyncResult(
-                        key = key,
-                        requestedStart = start,
-                        requestedEnd = end,
-                        skippedReason = "No Health Connect read permission is available for this data type"
-                    ),
-                    startedAt = startedAt
-                )
-            }
-            if (requiredReadPermission !in grantedPermissions) {
-                return syncResultAndLog(
-                    result = HealthDataTypeSyncResult(
-                        key = key,
-                        requestedStart = start,
-                        requestedEnd = end,
-                        skippedReason = "Missing permission $requiredReadPermission"
                     ),
                     startedAt = startedAt
                 )
@@ -259,7 +257,12 @@ class HealthDataTypeSyncer(
                 )
                 val pageStoreResult = storeNormalizedRecords(
                     typeKey = key,
-                    records = page
+                    records = page,
+                    existingRecordPolicy = if (replaceChangedRecords) {
+                        ExistingRecordPolicy.REPLACE_IF_CHANGED
+                    } else {
+                        ExistingRecordPolicy.KEEP
+                    }
                 )
                 inserted += pageStoreResult.inserted
                 updated += pageStoreResult.updated
@@ -340,6 +343,182 @@ class HealthDataTypeSyncer(
         return syncResultAndLog(result, startedAt)
     }
 
+    internal suspend fun createChangesToken(descriptor: HealthDataTypeDescriptor): String {
+        readAccessIssue(descriptor, requireBackgroundReadPermission = false)?.let {
+            throw IllegalStateException(it)
+        }
+        return client.getChangesToken(
+            ChangesTokenRequest(recordTypes = setOf(descriptor.recordClass))
+        )
+    }
+
+    internal suspend fun syncChanges(
+        descriptor: HealthDataTypeDescriptor,
+        initialToken: String,
+        requireBackgroundReadPermission: Boolean,
+        onProgress: (SyncTypeProgress) -> Unit = {}
+    ): HealthChangeSyncOutcome {
+        val startedAt = Instant.now()
+        val accessIssue = readAccessIssue(descriptor, requireBackgroundReadPermission)
+        if (accessIssue != null) {
+            return HealthChangeSyncOutcome.Applied(
+                syncResultAndLog(
+                    result = HealthDataTypeSyncResult(
+                        key = descriptor.key,
+                        skippedReason = accessIssue
+                    ),
+                    startedAt = startedAt
+                )
+            )
+        }
+
+        return try {
+            var token = initialToken
+            var inserted = 0
+            var updated = 0
+            var deleted = 0
+            var duplicates = 0
+            var valuesStored = 0
+            var recordsRead = 0
+            var sourceBytesRead = 0L
+            var localBytesWritten = 0L
+            var changedStart: Instant? = null
+            var changedEnd: Instant? = null
+
+            do {
+                onProgress(
+                    SyncTypeProgress(
+                        phase = SyncProgressPhase.FETCHING,
+                        recordsRead = recordsRead,
+                        inserted = inserted,
+                        updated = updated,
+                        duplicates = duplicates,
+                        sourceBytesRead = sourceBytesRead,
+                        localBytesWritten = localBytesWritten,
+                        message = if (recordsRead == 0) {
+                            "Checking Health Connect changes"
+                        } else {
+                            "Fetching the next changes page"
+                        }
+                    )
+                )
+                val response = client.getChanges(token)
+                if (response.changesTokenExpired) {
+                    changeTokenDao.delete(descriptor.key)
+                    return HealthChangeSyncOutcome.TokenExpired
+                }
+
+                val upsertions = response.changes.filterIsInstance<UpsertionChange>()
+                    .map { change ->
+                        normalizeHealthConnectRecord(change.record)
+                            ?.takeIf { it.typeKey == descriptor.key }
+                            ?: error("Unsupported changed record for type=${descriptor.key}")
+                    }
+                val deletions = response.changes.filterIsInstance<DeletionChange>()
+                    .map { it.recordId }
+                val pageSourceBytes = upsertions.sumOf { it.approxBytes() }
+                onProgress(
+                    SyncTypeProgress(
+                        phase = SyncProgressPhase.STORING,
+                        recordsRead = recordsRead + response.changes.size,
+                        inserted = inserted,
+                        updated = updated,
+                        duplicates = duplicates,
+                        sourceBytesRead = sourceBytesRead + pageSourceBytes,
+                        localBytesWritten = localBytesWritten,
+                        message = "Applying ${response.changes.size} changes"
+                    )
+                )
+                val page = storeChangePage(
+                    typeKey = descriptor.key,
+                    records = upsertions,
+                    deletedRecordUids = deletions,
+                    nextToken = response.nextChangesToken
+                )
+
+                recordsRead += response.changes.size
+                sourceBytesRead += pageSourceBytes
+                inserted += page.inserted
+                updated += page.updated
+                deleted += page.deleted
+                duplicates += page.skippedDuplicate
+                valuesStored += page.valuesStored
+                localBytesWritten += page.localBytesWritten
+                changedStart = minInstantOrNull(changedStart, page.changedStart)
+                changedEnd = maxInstantOrNull(changedEnd, page.changedEnd)
+                token = response.nextChangesToken
+                onProgress(
+                    SyncTypeProgress(
+                        phase = SyncProgressPhase.STORING,
+                        recordsRead = recordsRead,
+                        inserted = inserted,
+                        updated = updated,
+                        duplicates = duplicates,
+                        sourceBytesRead = sourceBytesRead,
+                        localBytesWritten = localBytesWritten,
+                        message = "Applied $recordsRead changes"
+                    )
+                )
+            } while (response.hasMore)
+
+            val aggregateResult = if (changedStart != null && changedEnd != null) {
+                onProgress(
+                    SyncTypeProgress(
+                        phase = SyncProgressPhase.AGGREGATING,
+                        recordsRead = recordsRead,
+                        inserted = inserted,
+                        updated = updated,
+                        duplicates = duplicates,
+                        sourceBytesRead = sourceBytesRead,
+                        localBytesWritten = localBytesWritten,
+                        message = "Updating changed-day summaries"
+                    )
+                )
+                syncDailyAggregatesIfAvailable(
+                    descriptor = descriptor,
+                    start = changedStart,
+                    end = changedEnd.plusMillis(1),
+                    zoneId = ZoneId.systemDefault()
+                )
+            } else {
+                SyncAggregateResult()
+            }
+            val result = HealthDataTypeSyncResult(
+                key = descriptor.key,
+                requestedStart = changedStart,
+                requestedEnd = changedEnd,
+                recordsRead = recordsRead,
+                recordsInserted = inserted,
+                recordsUpdated = updated,
+                recordsDeleted = deleted,
+                recordsSkippedDuplicate = duplicates,
+                valuesStored = valuesStored,
+                aggregateRowsRead = aggregateResult.rowsRead,
+                aggregateRowsStored = aggregateResult.rowsStored,
+                sourceBytesRead = sourceBytesRead,
+                localBytesWritten = localBytesWritten + aggregateResult.localBytesWritten,
+                sourceStart = changedStart,
+                sourceEnd = changedEnd,
+                aggregateErrorMessage = aggregateResult.errorMessage
+            )
+            HealthChangeSyncOutcome.Applied(syncResultAndLog(result, startedAt))
+        } catch (t: CancellationException) {
+            Log.i(TAG, "Change sync cancelled for type=${descriptor.key}")
+            throw t
+        } catch (t: Throwable) {
+            Log.e(TAG, "Change sync failed for type=${descriptor.key}", t)
+            HealthChangeSyncOutcome.Applied(
+                syncResultAndLog(
+                    result = HealthDataTypeSyncResult(
+                        key = descriptor.key,
+                        errorMessage = t.message ?: t.javaClass.simpleName
+                    ),
+                    startedAt = startedAt
+                )
+            )
+        }
+    }
+
     suspend fun recordSyntheticSyncResult(
         result: HealthDataTypeSyncResult,
         startedAt: Instant
@@ -376,31 +555,171 @@ class HealthDataTypeSyncer(
 
     private suspend fun storeNormalizedRecords(
         typeKey: String,
-        records: List<NormalizedHealthRecord>
+        records: List<NormalizedHealthRecord>,
+        existingRecordPolicy: ExistingRecordPolicy = ExistingRecordPolicy.KEEP
+    ): StoreNormalizedResult = db.withTransaction {
+        storeNormalizedRecordsInTransaction(typeKey, records, existingRecordPolicy)
+    }
+
+    private suspend fun storeChangePage(
+        typeKey: String,
+        records: List<NormalizedHealthRecord>,
+        deletedRecordUids: List<String>,
+        nextToken: String
+    ): StoreChangePageResult = db.withTransaction {
+        val stored = storeNormalizedRecordsInTransaction(
+            typeKey = typeKey,
+            records = records,
+            existingRecordPolicy = ExistingRecordPolicy.REPLACE_IF_CHANGED
+        )
+        var deleted = 0
+        var changedStart = if (stored.inserted + stored.updated > 0) {
+            records.minOfOrNull { it.startTime }
+        } else {
+            null
+        }
+        var changedEnd = if (stored.inserted + stored.updated > 0) {
+            records.mapNotNull { it.endTime ?: it.startTime }.maxOrNull()
+        } else {
+            null
+        }
+
+        for (recordUid in deletedRecordUids.distinct()) {
+            val existing = healthDao.findByRecordUid(typeKey, recordUid) ?: continue
+            changedStart = minInstantOrNull(changedStart, Instant.ofEpochMilli(existing.startEpochMillis))
+            changedEnd = maxInstantOrNull(
+                changedEnd,
+                Instant.ofEpochMilli(existing.endEpochMillis ?: existing.startEpochMillis)
+            )
+            val localIds = listOf(existing.localId)
+            retentionDao.deleteValueAcks(localIds)
+            retentionDao.deleteRecordAcks(localIds)
+            healthDao.deleteValuesForRecord(existing.localId)
+            healthDao.deleteRecord(existing.localId)
+            deleted++
+        }
+
+        changeTokenDao.upsert(
+            HealthChangeTokenEntity(
+                recordType = typeKey,
+                token = nextToken,
+                updatedAtEpochMillis = Instant.now().toEpochMilli()
+            )
+        )
+        StoreChangePageResult(
+            inserted = stored.inserted,
+            updated = stored.updated,
+            deleted = deleted,
+            skippedDuplicate = stored.skippedDuplicate,
+            valuesStored = stored.valuesStored,
+            localBytesWritten = stored.localBytesWritten,
+            changedStart = changedStart,
+            changedEnd = changedEnd
+        )
+    }
+
+    private suspend fun storeNormalizedRecordsInTransaction(
+        typeKey: String,
+        records: List<NormalizedHealthRecord>,
+        existingRecordPolicy: ExistingRecordPolicy
     ): StoreNormalizedResult {
         val now = Instant.now().toEpochMilli()
+        val incomingRecords = records.map { it.toEntity(now) }
+        val existingByDedupe = healthDao.findByDedupeKeys(
+            recordType = typeKey,
+            dedupeKeys = incomingRecords.map { it.dedupeKey }
+        ).associateByTo(HashMap()) { it.dedupeKey }
+        val recordUids = incomingRecords.mapNotNull { it.recordUid }.distinct()
+        val existingByUid = if (
+            existingRecordPolicy == ExistingRecordPolicy.REPLACE_IF_CHANGED && recordUids.isNotEmpty()
+        ) {
+            healthDao.findByRecordUids(
+                recordType = typeKey,
+                recordUids = recordUids
+            ).associateByTo(HashMap()) { it.recordUid.orEmpty() }
+        } else {
+            HashMap()
+        }
+        val existingIds = (existingByDedupe.values + existingByUid.values)
+            .map { it.localId }
+            .distinct()
+        val valueKeysByRecordId = if (
+            existingRecordPolicy == ExistingRecordPolicy.REPLACE_IF_CHANGED && existingIds.isNotEmpty()
+        ) {
+            healthDao.valuesForRecords(existingIds)
+                .groupBy({ it.recordLocalId }, { it.valueKey })
+                .toMutableMap()
+        } else {
+            HashMap()
+        }
         var valuesStored = 0
         var inserted = 0
         var updated = 0
         var skippedDuplicate = 0
         var localBytesWritten = 0L
-        db.withTransaction {
-            for (record in records) {
-                val incoming = record.toEntity(now)
-                val existing = healthDao.findByDedupeKey(typeKey, incoming.dedupeKey)
-                if (existing == null) {
-                    val localId = healthDao.insertRecord(incoming)
-                    val values = record.values.map { it.toEntity(localId, record) }
-                    if (values.isNotEmpty()) {
-                        healthDao.insertValues(values)
-                        valuesStored += values.size
-                    }
-                    localBytesWritten += record.approxBytes()
-                    inserted++
-                } else {
-                    skippedDuplicate++
+        for (index in records.indices) {
+            val record = records[index]
+            val incoming = incomingRecords[index]
+            val incomingValueKeys = record.values.map { it.valueKey() }
+            val existing = incoming.recordUid?.let(existingByUid::get)
+                ?: existingByDedupe[incoming.dedupeKey]
+            if (existing == null) {
+                val localId = healthDao.insertRecord(incoming)
+                val values = record.values.map { it.toEntity(localId, record) }
+                if (values.isNotEmpty()) {
+                    healthDao.insertValues(values)
+                    valuesStored += values.size
                 }
+                val insertedRecord = incoming.copy(localId = localId)
+                existingByDedupe[incoming.dedupeKey] = insertedRecord
+                incoming.recordUid?.let { existingByUid[it] = insertedRecord }
+                valueKeysByRecordId[localId] = incomingValueKeys
+                localBytesWritten += record.approxBytes()
+                inserted++
+                continue
             }
+
+            if (
+                existingRecordPolicy == ExistingRecordPolicy.KEEP ||
+                storedRecordMatches(
+                    existing = existing,
+                    incoming = incoming,
+                    incomingValueKeys = incomingValueKeys,
+                    storedValueKeys = valueKeysByRecordId[existing.localId].orEmpty()
+                )
+            ) {
+                skippedDuplicate++
+                continue
+            }
+
+            val localIds = listOf(existing.localId)
+            retentionDao.deleteValueAcks(localIds)
+            retentionDao.deleteRecordAcks(localIds)
+            healthDao.deleteValuesForRecord(existing.localId)
+            healthDao.updateRecord(
+                incoming.copy(
+                    localId = existing.localId,
+                    createdEpochMillis = existing.createdEpochMillis,
+                    syncStatus = "local",
+                    exportStatus = "pending",
+                    syncedEpochMillis = null,
+                    exportedEpochMillis = null
+                )
+            )
+            val values = record.values.map { it.toEntity(existing.localId, record) }
+            if (values.isNotEmpty()) {
+                healthDao.insertValues(values)
+                valuesStored += values.size
+            }
+            val updatedRecord = incoming.copy(
+                localId = existing.localId,
+                createdEpochMillis = existing.createdEpochMillis
+            )
+            existingByDedupe[incoming.dedupeKey] = updatedRecord
+            incoming.recordUid?.let { existingByUid[it] = updatedRecord }
+            valueKeysByRecordId[existing.localId] = incomingValueKeys
+            localBytesWritten += record.approxBytes()
+            updated++
         }
         return StoreNormalizedResult(
             inserted = inserted,
@@ -410,6 +729,31 @@ class HealthDataTypeSyncer(
             localBytesWritten = localBytesWritten
         )
     }
+
+    private fun storedRecordMatches(
+        existing: HealthRecordEntity,
+        incoming: HealthRecordEntity,
+        incomingValueKeys: List<String>,
+        storedValueKeys: List<String>
+    ): Boolean {
+        if (!existing.sameHealthPayload(incoming)) return false
+        if (storedValueKeys.size != incomingValueKeys.size) return false
+        return storedValueKeys.toHashSet() == incomingValueKeys.toHashSet()
+    }
+
+    private fun HealthRecordEntity.sameHealthPayload(other: HealthRecordEntity): Boolean =
+        recordUid == other.recordUid &&
+            dedupeKey == other.dedupeKey &&
+            recordType == other.recordType &&
+            recordKind == other.recordKind &&
+            startEpochMillis == other.startEpochMillis &&
+            endEpochMillis == other.endEpochMillis &&
+            localDate == other.localDate &&
+            startZoneOffsetSeconds == other.startZoneOffsetSeconds &&
+            endZoneOffsetSeconds == other.endZoneOffsetSeconds &&
+            sourcePackage == other.sourcePackage &&
+            metadataJson == other.metadataJson &&
+            rawJson == other.rawJson
 
     private suspend fun syncDailyAggregatesIfAvailable(
         descriptor: HealthDataTypeDescriptor,
@@ -601,7 +945,8 @@ class HealthDataTypeSyncer(
             "Sync result type=${result.key} status=$status " +
                 "start=${result.requestedStart} end=${result.requestedEnd} " +
                 "read=${result.recordsRead} inserted=${result.recordsInserted} " +
-                "updated=${result.recordsUpdated} duplicates=${result.recordsSkippedDuplicate} " +
+                "updated=${result.recordsUpdated} deleted=${result.recordsDeleted} " +
+                "duplicates=${result.recordsSkippedDuplicate} " +
                 "values=${result.valuesStored} aggregateRead=${result.aggregateRowsRead} " +
                 "aggregateStored=${result.aggregateRowsStored} " +
                 "sourceBytes=${result.sourceBytesRead} localBytes=${result.localBytesWritten} " +
@@ -627,6 +972,7 @@ class HealthDataTypeSyncer(
                 recordsRead = result.recordsRead,
                 recordsInserted = result.recordsInserted,
                 recordsUpdated = result.recordsUpdated,
+                recordsDeleted = result.recordsDeleted,
                 recordsSkippedDuplicate = result.recordsSkippedDuplicate,
                 valuesStored = result.valuesStored,
                 errorMessage = result.errorMessage ?: result.aggregateErrorMessage ?: result.skippedReason

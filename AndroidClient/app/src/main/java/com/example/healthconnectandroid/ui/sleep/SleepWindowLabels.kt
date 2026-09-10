@@ -4,6 +4,7 @@ import com.example.healthconnectandroid.hc.InspectorTimeRange
 import com.example.healthconnectandroid.hc.SleepQualityMatrixModel
 import com.example.healthconnectandroid.hc.SleepSessionAnalyzer
 import com.example.healthconnectandroid.hc.SleepSessionInput
+import com.example.healthconnectandroid.hc.sleepSessionDate
 import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
@@ -171,6 +172,17 @@ fun sleepShiftWindowDate(
     }
 }
 
+fun sleepCanPanForward(
+    range: InspectorTimeRange,
+    anchorDate: LocalDate,
+    today: LocalDate
+): Boolean =
+    if (range == InspectorTimeRange.MONTHLY) {
+        anchorDate.withDayOfMonth(1).isBefore(today.withDayOfMonth(1))
+    } else {
+        anchorDate.isBefore(today)
+    }
+
 fun sleepAnchorInsideQueryWindow(
     range: InspectorTimeRange,
     anchorDate: LocalDate,
@@ -201,6 +213,22 @@ fun defaultSleepSelection(model: SleepQualityMatrixModel): Set<String> =
         ?.let { setOf(it.id) }
         ?: emptySet()
 
+fun defaultSleepSelection(
+    model: SleepQualityMatrixModel,
+    sessions: List<SleepSessionUiModel>,
+    zoneId: ZoneId = ZoneId.systemDefault()
+): Set<String> {
+    val sessionDates = sessions.mapNotNullTo(mutableSetOf()) { session ->
+        sleepSessionDate(session.analysisStart, session.analysisEnd, zoneId)
+    }
+    return model.boxes
+        .lastOrNull { box ->
+            sessionDates.any { date -> !date.isBefore(box.startDate) && !date.isAfter(box.endDate) }
+        }
+        ?.let { setOf(it.id) }
+        ?: defaultSleepSelection(model)
+}
+
 fun filterSleepSessionsForSelection(
     sessions: List<SleepSessionUiModel>,
     model: SleepQualityMatrixModel,
@@ -210,7 +238,7 @@ fun filterSleepSessionsForSelection(
     val selectedBoxes = model.boxes.filter { it.id in selectedBoxIds }
     if (selectedBoxes.isEmpty()) return emptyList()
     return sessions.filter { session ->
-        val date = session.analysisStart?.atZone(zoneId)?.toLocalDate() ?: return@filter false
+        val date = sleepSessionDate(session.analysisStart, session.analysisEnd, zoneId) ?: return@filter false
         selectedBoxes.any { box -> !date.isBefore(box.startDate) && !date.isAfter(box.endDate) }
     }
 }

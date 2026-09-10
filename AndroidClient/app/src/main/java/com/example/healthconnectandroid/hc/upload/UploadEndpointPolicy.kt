@@ -6,19 +6,27 @@ object UploadEndpointPolicy {
     const val PRODUCTION_BASE_URL = "https://www.tsubashimonanato.com/health/api/v1/"
     const val DEFAULT_LOCAL_BASE_URL = "http://10.0.2.2:8000/health/api/v1/"
 
-    fun validate(settings: UploadSettings, requireApiKey: Boolean = true): UploadEndpointValidation {
-        if (requireApiKey && settings.apiKey.trim().isBlank()) {
-            return UploadEndpointValidation.Invalid("API key is required")
+    fun validate(
+        settings: UploadSettings,
+        requireAuthentication: Boolean = true
+    ): UploadEndpointValidation {
+        val credential = settings.profileCredential?.takeIf { it.serverMode == settings.serverMode }
+        if (credential != null && requireAuthentication && credential.isExpired()) {
+            return UploadEndpointValidation.Invalid("Pairing expired. Scan a new Pairing QR")
+        }
+        if (credential == null && requireAuthentication && settings.apiKey.trim().isBlank()) {
+            return UploadEndpointValidation.Invalid("API key or Pairing QR is required")
         }
 
-        val rawBaseUrl = when (settings.serverMode) {
-            UploadServerMode.PRODUCTION -> settings.productionBaseUrl.trim()
-            UploadServerMode.LOCAL_DEBUG -> settings.localBaseUrl.trim()
+        val rawBaseUrl = credential?.uploadBaseUrl ?: when (settings.serverMode) {
+            UploadServerMode.PRODUCTION -> settings.productionBaseUrl
+            UploadServerMode.LOCAL_DEBUG -> settings.localBaseUrl
         }
-        if (settings.serverMode == UploadServerMode.LOCAL_DEBUG && containsLanPlaceholder(rawBaseUrl)) {
+        val trimmedBaseUrl = rawBaseUrl.trim()
+        if (settings.serverMode == UploadServerMode.LOCAL_DEBUG && containsLanPlaceholder(trimmedBaseUrl)) {
             return UploadEndpointValidation.Invalid(LOCAL_DEBUG_HOST_MESSAGE)
         }
-        val normalized = normalizeBaseUrl(rawBaseUrl)
+        val normalized = normalizeBaseUrl(trimmedBaseUrl)
             ?: return UploadEndpointValidation.Invalid("Invalid server URL")
         val parsed = normalized.toHttpUrlOrNull()
             ?: return UploadEndpointValidation.Invalid("Invalid server URL")
@@ -36,18 +44,33 @@ object UploadEndpointPolicy {
             return UploadEndpointValidation.Invalid("HTTP local debug upload must use a local/private host")
         }
 
-        val statusUrl = parsed.resolve("status")?.toString()
-            ?: return UploadEndpointValidation.Invalid("Cannot build status endpoint")
+        val statusPath = if (credential == null) "status" else "profile"
+        val statusUrl = parsed.resolve(statusPath)?.toString()
+            ?: return UploadEndpointValidation.Invalid("Cannot build server check endpoint")
         val ingestUrl = parsed.resolve("ingest/batches")?.toString()
             ?: return UploadEndpointValidation.Invalid("Cannot build ingest endpoint")
         val baseUrl = parsed.toString()
+        val authorization = credential?.let { UploadAuthorization.Bearer(it.accessToken) }
+            ?: UploadAuthorization.ApiKey(settings.apiKey.trim())
+        val profileIdentity = credential?.let {
+            UploadProfileIdentity(
+                profileId = it.serverProfileId,
+                installationId = it.installationId,
+                clientDeviceId = it.clientDeviceId
+            )
+        }
+        val serverKey = credential?.let {
+            "${settings.serverMode.name}:v2:${it.serverProfileId}:${it.installationId}:$baseUrl"
+        } ?: "${settings.serverMode.name}:$baseUrl"
         return UploadEndpointValidation.Valid(
             UploadEndpoint(
                 mode = settings.serverMode,
                 baseUrl = baseUrl,
                 statusUrl = statusUrl,
                 ingestBatchesUrl = ingestUrl,
-                serverKey = "${settings.serverMode.name}:$baseUrl"
+                serverKey = serverKey,
+                authorization = authorization,
+                profileIdentity = profileIdentity
             )
         )
     }

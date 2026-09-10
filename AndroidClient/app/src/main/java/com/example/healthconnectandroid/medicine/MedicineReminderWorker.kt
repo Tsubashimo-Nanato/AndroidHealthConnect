@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
+import com.example.healthconnectandroid.LocalProfileStore
 import com.example.healthconnectandroid.data.AppDb
 import java.time.Instant
 import java.time.ZoneId
@@ -18,16 +19,28 @@ class MedicineReminderWorker(
             ?.let(MedicineSlot::fromId)
             ?.takeIf { it.supportsReminder }
             ?: return Result.failure()
-        val repository = MedicineRepository(AppDb.get(applicationContext))
+        val profileId = inputData.getString(KEY_PROFILE_ID)
+            ?.takeIf { LocalProfileStore.profile(applicationContext, it) != null }
+            ?: return Result.failure()
+        val repository = MedicineRepository(AppDb.get(applicationContext, profileId))
         val medicines = repository.activeScheduledMedicines(slot)
         if (medicines.isNotEmpty()) {
-            MedicineReminderNotifier.showReminder(applicationContext, slot, medicines)
-            Log.i(TAG, "Medicine reminder shown slot=${slot.id} count=${medicines.size}")
+            MedicineReminderNotifier.showReminder(
+                applicationContext,
+                slot,
+                medicines,
+                profileId
+            )
+            Log.i(
+                TAG,
+                "Medicine reminder shown profile=$profileId slot=${slot.id} count=${medicines.size}"
+            )
         }
         MedicineReminderScheduler.scheduleSlot(
             context = applicationContext,
             repository = repository,
             slot = slot,
+            profileId = profileId,
             zoneId = ZoneId.systemDefault(),
             now = Instant.now()
         )
@@ -36,6 +49,7 @@ class MedicineReminderWorker(
 
     companion object {
         const val KEY_SLOT = "slot"
+        const val KEY_PROFILE_ID = "profile_id"
         private const val TAG = "MedicineReminder"
     }
 }

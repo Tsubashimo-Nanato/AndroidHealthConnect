@@ -29,8 +29,23 @@ data class UploadSettings(
     val localBaseUrl: String = UploadEndpointPolicy.DEFAULT_LOCAL_BASE_URL,
     val apiKey: String = "",
     val deviceId: String,
-    val autoUploadEnabled: Boolean = false
+    val autoUploadEnabled: Boolean = false,
+    val profileCredential: ProfileUploadCredential? = null
 )
+
+data class ProfileUploadCredential(
+    val serverMode: UploadServerMode,
+    val serverProfileId: String,
+    val serverProfileName: String,
+    val installationId: String,
+    val clientDeviceId: String,
+    val accessToken: String,
+    val expiresAtEpochMillis: Long,
+    val uploadBaseUrl: String
+) {
+    fun isExpired(nowEpochMillis: Long = System.currentTimeMillis()): Boolean =
+        expiresAtEpochMillis <= nowEpochMillis
+}
 
 data class UploadPendingCounts(
     val records: Int = 0,
@@ -95,7 +110,20 @@ data class UploadEndpoint(
     val baseUrl: String,
     val statusUrl: String,
     val ingestBatchesUrl: String,
-    val serverKey: String
+    val serverKey: String,
+    val authorization: UploadAuthorization,
+    val profileIdentity: UploadProfileIdentity? = null
+)
+
+sealed interface UploadAuthorization {
+    data class ApiKey(val value: String) : UploadAuthorization
+    data class Bearer(val token: String) : UploadAuthorization
+}
+
+data class UploadProfileIdentity(
+    val profileId: String,
+    val installationId: String,
+    val clientDeviceId: String
 )
 
 sealed interface UploadEndpointValidation {
@@ -121,6 +149,8 @@ data class UploadRunResult(
     val uploadedRecords: Int = 0,
     val uploadedValues: Int = 0,
     val uploadedAggregates: Int = 0,
+    val requestBodyBytesSent: Long = 0,
+    val responseBodyBytesReceived: Long = 0,
     val errors: Int = 0,
     val lastUploadTime: Instant? = null,
     val pendingCounts: UploadPendingCounts = UploadPendingCounts.Empty,

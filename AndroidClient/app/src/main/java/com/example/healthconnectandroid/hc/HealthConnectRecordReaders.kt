@@ -21,6 +21,7 @@ import com.example.healthconnectandroid.data.HeartRateEntity
 import java.time.Instant
 
 private const val DEFAULT_PAGE_SIZE = 500
+private const val HEART_RATE_STORAGE_BUCKET_MILLIS = 60_000L
 
 internal suspend inline fun <reified T : Record> HealthConnectClient.readPagedRecords(
     start: Instant,
@@ -82,6 +83,24 @@ private suspend inline fun <reified T : Record> HealthConnectClient.readNormaliz
         if (normalized.isNotEmpty()) onPage(normalized)
     }
 }
+
+internal fun normalizeHealthConnectRecord(record: Record): NormalizedHealthRecord? =
+    when (record) {
+        is HeartRateRecord -> record.toNormalizedHeartRate()
+        is WeightRecord -> record.toNormalizedWeight()
+        is BodyFatRecord -> record.toNormalizedBodyFat()
+        is OxygenSaturationRecord -> record.toNormalizedOxygenSaturation()
+        is SleepSessionRecord -> record.toNormalizedSleepSession()
+        is StepsRecord -> record.toNormalizedSteps()
+        is ActiveCaloriesBurnedRecord -> record.toNormalizedActiveCalories()
+        is TotalCaloriesBurnedRecord -> record.toNormalizedTotalCalories()
+        is DistanceRecord -> record.toNormalizedDistance()
+        is BloodPressureRecord -> record.toNormalizedBloodPressure()
+        is BodyTemperatureRecord -> record.toNormalizedBodyTemperature()
+        is RespiratoryRateRecord -> record.toNormalizedRespiratoryRate()
+        is RestingHeartRateRecord -> record.toNormalizedRestingHeartRate()
+        else -> null
+    }
 
 object WeightRecordReader : HealthConnectRecordReader {
     override val dataTypeKey: String = HealthDataTypeKeys.WEIGHT
@@ -336,7 +355,7 @@ object RestingHeartRateRecordReader : HealthConnectRecordReader {
 }
 
 internal fun HeartRateRecord.toNormalizedHeartRate(): NormalizedHealthRecord {
-    val values = samples.mapIndexed { index, sample ->
+    val values = retainedHeartRateSamples(samples).mapIndexed { index, sample ->
         NormalizedHealthValue.integer(
             metric = "heart_rate",
             value = sample.beatsPerMinute,
@@ -363,13 +382,52 @@ internal fun HeartRateRecord.toNormalizedHeartRate(): NormalizedHealthRecord {
 
 internal fun List<HeartRateRecord>.toHeartRateEntities(): List<HeartRateEntity> =
     flatMap { record ->
-        record.samples.map { sample ->
+        retainedHeartRateSamples(record.samples).map { sample ->
             HeartRateEntity(
                 epochSecond = sample.time.epochSecond,
                 bpm = sample.beatsPerMinute.toFloat()
             )
         }
     }
+
+internal fun <T> retainedHeartRateSamples(
+    samples: List<T>,
+    epochMillis: (T) -> Long
+): List<T> {
+    if (samples.size < 2) return samples
+
+    var ordered = true
+    var previousTime = epochMillis(samples.first())
+    for (index in 1 until samples.size) {
+        val currentTime = epochMillis(samples[index])
+        if (currentTime < previousTime) {
+            ordered = false
+            break
+        }
+        previousTime = currentTime
+    }
+
+    val chronological = if (ordered) samples else samples.sortedBy(epochMillis)
+    val retained = ArrayList<T>()
+    var currentBucket = Long.MIN_VALUE
+    for (sample in chronological) {
+        val bucket = Math.floorDiv(epochMillis(sample), HEART_RATE_STORAGE_BUCKET_MILLIS)
+        if (bucket != currentBucket) {
+            retained += sample
+            currentBucket = bucket
+            continue
+        }
+
+        // The last real reading keeps the latest value accurate without storing watch-rate samples.
+        retained[retained.lastIndex] = sample
+    }
+    return retained
+}
+
+private fun retainedHeartRateSamples(
+    samples: List<HeartRateRecord.Sample>
+): List<HeartRateRecord.Sample> =
+    retainedHeartRateSamples(samples) { it.time.toEpochMilli() }
 
 private fun WeightRecord.toNormalizedWeight(): NormalizedHealthRecord =
     normalizedInstantRecord(

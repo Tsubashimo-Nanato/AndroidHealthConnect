@@ -1,6 +1,7 @@
 package com.example.healthconnectandroid.hc.query
 
 import android.content.Context
+import com.example.healthconnectandroid.LocalProfileStore
 import com.example.healthconnectandroid.data.AppDb
 import com.example.healthconnectandroid.data.HealthCatalogSnapshotEntity
 import com.example.healthconnectandroid.data.HealthDailyAggregateRow
@@ -28,8 +29,11 @@ class HealthDataCatalogQueryService(
     private val db: AppDb
 ) {
     private val appContext = context.applicationContext
+    private val profileId = LocalProfileStore.activeProfile(context).id
     private val snapshotDao = db.healthCatalogSnapshotDao()
     private val refresher = CatalogSnapshotRefresher(db)
+    private val descriptorsByKey = HealthDataTypeRegistry.descriptors.associateBy { it.key }
+    private val recordTypes = descriptorsByKey.keys.toList()
     @Volatile private var memorySnapshots: List<HealthCatalogSnapshotEntity> = emptyList()
 
     fun observeCategories(
@@ -66,12 +70,14 @@ class HealthDataCatalogQueryService(
         }
         val pendingTypes = CatalogRefreshPolicy.recordTypesToRefresh(
             snapshots = snapshots,
-            recordTypes = HealthDataTypeRegistry.descriptors.map { it.key },
+            recordTypes = recordTypes,
             localDate = LocalDate.now(zoneId).toString(),
             zoneId = zoneId.id,
             now = Instant.now()
         )
-        if (pendingTypes.isNotEmpty()) CatalogRefreshWorker.enqueue(appContext, zoneId)
+        if (pendingTypes.isNotEmpty()) {
+            CatalogRefreshWorker.enqueue(appContext, zoneId, profileId)
+        }
     }
 
     suspend fun invalidate(recordTypes: Set<String>? = null, zoneId: ZoneId = ZoneId.systemDefault()) {
@@ -81,7 +87,7 @@ class HealthDataCatalogQueryService(
         } else {
             snapshotDao.markDirty(recordTypes)
         }
-        CatalogRefreshWorker.enqueue(appContext, zoneId)
+        CatalogRefreshWorker.enqueue(appContext, zoneId, profileId)
     }
 
     private fun snapshotView(
@@ -89,18 +95,17 @@ class HealthDataCatalogQueryService(
         grantedPermissions: Set<String>,
         zoneId: ZoneId
     ): CatalogSnapshotView {
-        val allTypes = HealthDataTypeRegistry.descriptors.map { it.key }
         val today = LocalDate.now(zoneId).toString()
         val refreshTypes = CatalogRefreshPolicy.recordTypesToRefresh(
             snapshots = snapshots,
-            recordTypes = allTypes,
+            recordTypes = recordTypes,
             localDate = today,
             zoneId = zoneId.id,
             now = Instant.now()
         )
         return CatalogSnapshotView(
             categories = snapshots.mapNotNull { snapshot ->
-                val descriptor = HealthDataTypeRegistry.descriptors.firstOrNull { it.key == snapshot.recordType }
+                val descriptor = descriptorsByKey[snapshot.recordType]
                     ?: return@mapNotNull null
                 val permissionStatus = descriptor.permissionStatus(grantedPermissions)
                 InspectorCategorySummary(
@@ -121,7 +126,7 @@ class HealthDataCatalogQueryService(
             },
             refreshing = refreshTypes.isNotEmpty(),
             readyTypes = snapshots.size,
-            totalTypes = allTypes.size
+            totalTypes = recordTypes.size
         )
     }
 

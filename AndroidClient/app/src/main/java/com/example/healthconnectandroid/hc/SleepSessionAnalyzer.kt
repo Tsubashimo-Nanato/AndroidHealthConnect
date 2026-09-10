@@ -85,6 +85,11 @@ data class SleepQualityMatrixModel(
     val boxes: List<SleepQualityMatrixBox>
 )
 
+internal fun sleepSessionDate(start: Instant?, end: Instant?, zoneId: ZoneId): LocalDate? {
+    val wakeTime = end?.takeIf { start == null || it.isAfter(start) }
+    return (wakeTime ?: start)?.atZone(zoneId)?.toLocalDate()
+}
+
 object SleepSessionAnalyzer {
     private const val NAP_MIN_MINUTES = 10L
     private const val NAP_MAX_MINUTES = 60L
@@ -101,7 +106,7 @@ object SleepSessionAnalyzer {
         now: LocalDate = LocalDate.now(),
         zoneId: ZoneId = ZoneId.systemDefault()
     ): SleepSessionAnalysis {
-        val localDate = start?.atZone(zoneId)?.toLocalDate()
+        val localDate = sleepSessionDate(start, end, zoneId)
         val duration = if (start != null && end != null && end.isAfter(start)) {
             Duration.between(start, end)
         } else {
@@ -148,7 +153,7 @@ object SleepSessionAnalyzer {
         zoneId: ZoneId = ZoneId.systemDefault()
     ): SleepRangeSummary {
         val rangedSessions = sessions.filter { input ->
-            val date = input.start?.atZone(zoneId)?.toLocalDate() ?: return@filter false
+            val date = sleepSessionDate(input.start, input.end, zoneId) ?: return@filter false
             !date.isBefore(startDate) && !date.isAfter(endDate)
         }
         if (rangedSessions.isEmpty()) {
@@ -244,7 +249,7 @@ object SleepSessionAnalyzer {
         val days = generateSequence(startDate) { previous ->
             previous.plusDays(1).takeIf { !it.isAfter(endDate) }
         }.toList()
-        val sessionsByDate = sessions.groupBy { it.start?.atZone(zoneId)?.toLocalDate() }
+        val sessionsByDate = sessions.groupBy { sleepSessionDate(it.start, it.end, zoneId) }
         return days.map { date ->
             val daySessions = sessionsByDate[date].orEmpty()
             val durations = daySessions.mapNotNull(::durationOf)

@@ -11,6 +11,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.lifecycle.lifecycleScope
 import com.example.healthconnectandroid.AppLanguagePreference
 import com.example.healthconnectandroid.AppPreferences
+import com.example.healthconnectandroid.LocalProfileStore
 import com.example.healthconnectandroid.data.AppDb
 import com.example.healthconnectandroid.ui.i18n.LocalAppLanguage
 import com.example.healthconnectandroid.ui.medicine.MedicineReminderPrompt
@@ -22,14 +23,20 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 class MedicineReminderActivity : ComponentActivity() {
-    private val repository by lazy { MedicineRepository(AppDb.get(applicationContext)) }
+    private val profileId by lazy {
+        intent.getStringExtra(MedicineReminderIntents.EXTRA_PROFILE_ID)
+            ?.takeIf { LocalProfileStore.profile(applicationContext, it) != null }
+    }
+    private val repository by lazy {
+        MedicineRepository(AppDb.get(applicationContext, requireNotNull(profileId)))
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         showOverLockScreen()
 
         val slot = reminderSlot()
-        if (slot == null) {
+        if (slot == null || profileId == null) {
             finish()
             return
         }
@@ -52,7 +59,7 @@ class MedicineReminderActivity : ComponentActivity() {
                             )
                         },
                         onCancel = {
-                            MedicineReminderNotifier.cancel(this, slot)
+                            MedicineReminderNotifier.cancel(this, slot, requireNotNull(profileId))
                             finish()
                         }
                     )
@@ -85,11 +92,16 @@ class MedicineReminderActivity : ComponentActivity() {
                         context = this@MedicineReminderActivity,
                         repository = repository,
                         slot = slot,
+                        profileId = requireNotNull(profileId),
                         zoneId = zoneId
                     )
                 }
             }.onSuccess {
-                MedicineReminderNotifier.cancel(this@MedicineReminderActivity, slot)
+                MedicineReminderNotifier.cancel(
+                    this@MedicineReminderActivity,
+                    slot,
+                    requireNotNull(profileId)
+                )
                 finish()
             }.onFailure { throwable ->
                 val message = "Medicine check failed: ${throwable.message ?: throwable.javaClass.simpleName}"

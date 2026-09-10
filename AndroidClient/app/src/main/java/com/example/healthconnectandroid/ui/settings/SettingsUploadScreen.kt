@@ -85,7 +85,7 @@ fun SettingsUploadScreen(
             onTestConnection = onTestConnection,
             onUploadNow = onUploadNow,
             onScanPairingQr = onScanPairingQr,
-            destinationModifier = Modifier.rowFadeIn(0),
+            modifier = Modifier.rowFadeIn(0),
             statusModifier = Modifier.rowFadeIn(1)
         )
     }
@@ -104,7 +104,7 @@ fun UploadSettingsSections(
     onTestConnection: (UploadSettings) -> Unit,
     onUploadNow: (UploadSettings, UploadTimeRange) -> Unit,
     onScanPairingQr: () -> Unit,
-    destinationModifier: Modifier = Modifier,
+    modifier: Modifier = Modifier,
     statusModifier: Modifier = Modifier
 ) {
     var serverMode by rememberSaveable(settings, debugEnabled) {
@@ -115,16 +115,26 @@ fun UploadSettingsSections(
     var apiKey by rememberSaveable(settings) { mutableStateOf(settings.apiKey) }
     var autoUploadEnabled by rememberSaveable(settings) { mutableStateOf(settings.autoUploadEnabled) }
     var apiKeyVisible by rememberSaveable { mutableStateOf(false) }
-    val editedSettings = remember(serverMode, productionUrl, localUrl, apiKey, settings.deviceId, autoUploadEnabled) {
+    val editedSettings = remember(
+        serverMode,
+        productionUrl,
+        localUrl,
+        apiKey,
+        settings.deviceId,
+        autoUploadEnabled,
+        settings.profileCredential
+    ) {
         UploadSettings(
             serverMode = serverMode,
             productionBaseUrl = productionUrl,
             localBaseUrl = localUrl,
             apiKey = apiKey.trim(),
             deviceId = settings.deviceId,
-            autoUploadEnabled = autoUploadEnabled
+            autoUploadEnabled = autoUploadEnabled,
+            profileCredential = settings.profileCredential
         )
     }
+    val activePairing = settings.profileCredential?.takeIf { it.serverMode == serverMode }
     val validation = remember(editedSettings) { UploadEndpointPolicy.validate(editedSettings) }
     val validationMessage = when (validation) {
         is UploadEndpointValidation.Valid -> "Endpoint ready"
@@ -133,7 +143,7 @@ fun UploadSettingsSections(
     val canRun = validation is UploadEndpointValidation.Valid && !busy
     var uploadMenuExpanded by remember { mutableStateOf(false) }
 
-    AppSection(title = "Upload", subtitle = "Server destination", modifier = destinationModifier) {
+    AppSection(title = "Upload", subtitle = "Server destination", modifier = modifier) {
             if (debugEnabled) {
                 SegmentedSwitch(
                     options = UploadServerMode.values().toList(),
@@ -172,22 +182,42 @@ fun UploadSettingsSections(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            OutlinedTextField(
-                modifier = Modifier.fillMaxWidth(),
-                value = apiKey,
-                onValueChange = { apiKey = it.trim().take(256) },
-                label = { Text(uiText("API key")) },
-                visualTransformation = if (apiKeyVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                trailingIcon = {
-                    IconButton(onClick = { apiKeyVisible = !apiKeyVisible }) {
-                        Icon(
-                            imageVector = if (apiKeyVisible) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
-                            contentDescription = uiText(if (apiKeyVisible) "Hide API key" else "Show API key")
-                        )
-                    }
-                },
-                singleLine = true
-            )
+            if (activePairing == null) {
+                OutlinedTextField(
+                    modifier = Modifier.fillMaxWidth(),
+                    value = apiKey,
+                    onValueChange = { apiKey = it.trim().take(256) },
+                    label = { Text(uiText("API key")) },
+                    visualTransformation = if (apiKeyVisible) {
+                        VisualTransformation.None
+                    } else {
+                        PasswordVisualTransformation()
+                    },
+                    trailingIcon = {
+                        IconButton(onClick = { apiKeyVisible = !apiKeyVisible }) {
+                            Icon(
+                                imageVector = if (apiKeyVisible) {
+                                    Icons.Filled.VisibilityOff
+                                } else {
+                                    Icons.Filled.Visibility
+                                },
+                                contentDescription = uiText(
+                                    if (apiKeyVisible) "Hide API key" else "Show API key"
+                                )
+                            )
+                        }
+                    },
+                    singleLine = true
+                )
+            } else {
+                AppActionRow {
+                    StatusBadge("Paired", StatusTone.Success)
+                    Text(
+                        activePairing.serverProfileName,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+            }
             AppActionRow {
                 StatusBadge(serverMode.label, StatusTone.Info)
                 StatusBadge(validationMessage, if (validation is UploadEndpointValidation.Valid) StatusTone.Success else StatusTone.Warning)
@@ -220,7 +250,7 @@ fun UploadSettingsSections(
                 )
             }
             Text(
-                uiText("The website Pairing QR carries the server mode, API base URL, and current API key. Local HTTP pairing still requires a Debug APK."),
+                uiText("Scan the website Pairing QR to authorize this profile. Legacy QR codes with an API key remain supported."),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

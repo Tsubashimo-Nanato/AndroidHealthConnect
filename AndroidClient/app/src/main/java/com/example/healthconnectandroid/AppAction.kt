@@ -4,6 +4,7 @@ enum class AppAction {
     PERIODIC_TOGGLE,
     FULL_RESYNC,
     BACKGROUND_NOW,
+    UPLOAD_PAIRING,
     UPLOAD_TEST,
     UPLOAD,
     SMART_SYNC,
@@ -23,7 +24,8 @@ enum class AppAction {
         }
 
     val blocksUpload: Boolean
-        get() = this == UPLOAD || this == UPLOAD_TEST || this == CLEAR_LOCAL_DATA
+        get() = this == UPLOAD_PAIRING || this == UPLOAD || this == UPLOAD_TEST ||
+            this == CLEAR_LOCAL_DATA
 
     val isExport: Boolean
         get() = when (this) {

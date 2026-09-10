@@ -28,6 +28,8 @@ class UploadBatchJsonTest {
         assertEquals("device-1", json.getString("deviceId"))
         assertEquals("batch-1", json.getString("batchId"))
         assertEquals(1000, json.getLong("createdAtEpochMillis"))
+        assertTrue(!json.has("profileId"))
+        assertTrue(!json.has("installationId"))
 
         val record = json.getJSONArray("records").getJSONObject(0)
         assertEquals(11, record.getLong("localId"))
@@ -50,6 +52,29 @@ class UploadBatchJsonTest {
         assertEquals("steps", aggregate.getString("recordType"))
         assertEquals("daily", aggregate.getString("bucketPeriod"))
         assertEquals(1200.0, aggregate.getDouble("value"), 0.001)
+    }
+
+    @Test
+    fun profileBatchAddsServerIdentityWithoutChangingHealthRows() {
+        val batch = UploadBatch.fromRows(
+            schemaVersion = 1,
+            deviceId = "device-1",
+            batchId = "batch-1",
+            createdAtEpochMillis = 1000,
+            rows = PendingUploadRows(records = listOf(record()))
+        )
+
+        val json = batch.toJson(
+            UploadProfileIdentity(
+                profileId = "profile-1",
+                installationId = "installation-1",
+                clientDeviceId = "profile-device-1"
+            )
+        )
+
+        assertEquals("profile-1", json.getString("profileId"))
+        assertEquals("installation-1", json.getString("installationId"))
+        assertEquals(1, json.getJSONArray("records").length())
     }
 
     @Test

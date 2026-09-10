@@ -24,6 +24,7 @@ data class HealthSyncRunEntity(
     val recordsRead: Int,
     val recordsInserted: Int,
     val recordsUpdated: Int,
+    val recordsDeleted: Int,
     val recordsSkippedDuplicate: Int,
     val valuesStored: Int,
     val errorMessage: String?

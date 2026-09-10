@@ -59,7 +59,32 @@ private fun fallbackMedicineName(raw: String, language: AppLanguagePreference): 
 private fun fallbackLocalizedText(raw: String?, language: AppLanguagePreference): String? {
     val value = raw?.trim()?.takeIf { it.isNotBlank() } ?: return null
     val parts = value.split('/').map { it.trim() }.filter { it.isNotBlank() }
-    if (parts.size < 2) return value
+    if (parts.size >= 2) {
+        return if (language == AppLanguagePreference.CHINESE_SIMPLIFIED) parts.last() else parts.first()
+    }
 
-    return if (language == AppLanguagePreference.CHINESE_SIMPLIFIED) parts.last() else parts.first()
+    val bilingualParts = splitLocalizedSuffix(value) ?: return value
+    return if (language == AppLanguagePreference.CHINESE_SIMPLIFIED) {
+        bilingualParts.second
+    } else {
+        bilingualParts.first
+    }
 }
+
+private fun splitLocalizedSuffix(value: String): Pair<String, String>? {
+    val localizedStart = value.indexOfFirst(::isEastAsianLetter)
+    if (localizedStart <= 0) return null
+
+    val english = value.substring(0, localizedStart).trim()
+    val localized = value.substring(localizedStart).trim()
+    if (english.isEmpty() || localized.isEmpty()) return null
+    return english to localized
+}
+
+private fun isEastAsianLetter(char: Char): Boolean =
+    when (Character.UnicodeScript.of(char.code)) {
+        Character.UnicodeScript.HAN,
+        Character.UnicodeScript.HIRAGANA,
+        Character.UnicodeScript.KATAKANA -> true
+        else -> false
+    }

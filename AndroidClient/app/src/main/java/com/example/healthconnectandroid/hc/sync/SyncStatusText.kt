@@ -11,6 +11,7 @@ fun syncAllStatusText(
 ): String {
     val inserted = results.sumOf { it.recordsInserted }
     val updated = results.sumOf { it.recordsUpdated }
+    val deleted = results.sumOf { it.recordsDeleted }
     val duplicates = results.sumOf { it.recordsSkippedDuplicate }
     val summaries = results.sumOf { it.aggregateRowsStored }
     val skipped = results.count { it.skippedReason != null }
@@ -21,7 +22,7 @@ fun syncAllStatusText(
     }
     val range = syncRangeText(results)
 
-    return "$label complete: types ${results.size}, inserted $inserted, updated $updated, duplicates $duplicates, " +
+    return "$label complete: types ${results.size}, inserted $inserted, updated $updated, deleted $deleted, duplicates $duplicates, " +
         "summaries $summaries, skipped $skipped, timeouts $timeouts, cancelled $cancelled, errors $errors$range"
 }
 

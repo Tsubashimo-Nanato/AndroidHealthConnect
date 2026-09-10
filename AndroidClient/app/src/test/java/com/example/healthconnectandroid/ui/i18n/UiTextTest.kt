@@ -55,5 +55,13 @@ class UiTextTest {
             "已选择：Sun",
             translateUiText("Selected: Sun", AppLanguagePreference.CHINESE_SIMPLIFIED)
         )
+        assertEquals(
+            "18 个类型 · 0 条记录",
+            translateUiText("18 types · 0 records", AppLanguagePreference.CHINESE_SIMPLIFIED)
+        )
+        assertEquals(
+            "上次同步：从未 (尚未同步)",
+            translateUiText("Last sync: Never (no sync yet)", AppLanguagePreference.CHINESE_SIMPLIFIED)
+        )
     }
 }

@@ -10,10 +10,22 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import com.example.healthconnectandroid.hc.sync.SyncMode
@@ -34,56 +46,93 @@ import java.time.Instant
 fun SettingsScreen(
     periodicEnabled: Boolean,
     debugEnabled: Boolean,
-    status: String,
-    onOpenPreferences: () -> Unit,
+    onOpenGeneral: () -> Unit,
     onOpenMedicine: () -> Unit,
-    onOpenDataFlow: () -> Unit,
-    onOpenAdvanced: () -> Unit,
+    onOpenHealthConnect: () -> Unit,
+    onOpenStorageAndTools: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(
         modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(18.dp),
+            .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Text(uiText("Settings"), modifier = Modifier.rowFadeIn(0), style = MaterialTheme.typography.headlineSmall)
-        SettingsNavCard(
-            title = "Preferences",
-            subtitle = "Profile, language, theme",
-            onClick = onOpenPreferences,
-            modifier = Modifier.rowFadeIn(1)
-        )
-        SettingsNavCard(
-            title = "Data Flow",
-            subtitle = if (periodicEnabled) "Access, sync, upload" else "Access, upload, exports",
-            onClick = onOpenDataFlow,
-            modifier = Modifier.rowFadeIn(2)
-        )
-        SettingsNavCard(
-            title = "Medicine",
-            subtitle = "Schedule and dose checks",
-            onClick = onOpenMedicine,
-            modifier = Modifier.rowFadeIn(3)
-        )
-        SettingsNavCard(
-            title = "Advanced",
-            subtitle = if (debugEnabled) "Debug tools visible" else "Debug tools hidden",
-            onClick = onOpenAdvanced,
-            modifier = Modifier.rowFadeIn(4)
-        )
-        StatusMessageCard(status, modifier = Modifier.rowFadeIn(5))
+        Surface(
+            modifier = Modifier.rowFadeIn(0),
+            shape = MaterialTheme.shapes.medium,
+            color = MaterialTheme.colorScheme.surface
+        ) {
+            Column {
+                SettingsNavRow(
+                    icon = Icons.Default.Tune,
+                    title = "General",
+                    subtitle = "Language, display, profile",
+                    onClick = onOpenGeneral
+                )
+                SettingsDivider()
+                SettingsNavRow(
+                    icon = Icons.Default.Sync,
+                    title = "Health Connect",
+                    subtitle = if (periodicEnabled) "Permissions, sync, upload" else "Permissions and upload",
+                    onClick = onOpenHealthConnect
+                )
+                SettingsDivider()
+                SettingsNavRow(
+                    icon = Icons.Default.Notifications,
+                    title = "Medicine",
+                    subtitle = "Schedule and dose checks",
+                    onClick = onOpenMedicine
+                )
+                SettingsDivider()
+                SettingsNavRow(
+                    icon = Icons.Default.Storage,
+                    title = "Storage & Tools",
+                    subtitle = if (debugEnabled) {
+                        "Exports, local storage, diagnostics"
+                    } else {
+                        "Exports and local storage"
+                    },
+                    onClick = onOpenStorageAndTools
+                )
+            }
+        }
     }
 }
 
 @Composable
-private fun SettingsNavCard(title: String, subtitle: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    AppSection(
-        title = title,
-        subtitle = subtitle,
-        modifier = modifier.clickable(role = Role.Button, onClick = onClick)
-    ) {}
+private fun SettingsNavRow(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    ListItem(
+        modifier = modifier.clickable(role = Role.Button, onClick = onClick),
+        colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surface),
+        leadingContent = {
+            Icon(
+                icon,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary
+            )
+        },
+        headlineContent = { Text(uiText(title), style = MaterialTheme.typography.titleMedium) },
+        supportingContent = { Text(uiText(subtitle)) },
+        trailingContent = {
+            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null)
+        }
+    )
+}
+
+@Composable
+private fun SettingsDivider() {
+    HorizontalDivider(
+        modifier = Modifier.padding(start = 64.dp),
+        color = MaterialTheme.colorScheme.outlineVariant
+    )
 }
 
 @Composable
@@ -92,6 +141,7 @@ fun SettingsPermissionsScreen(
     platformGranted: Boolean,
     hcGranted: Boolean,
     backgroundReadStatus: String,
+    backgroundReadGranted: Boolean,
     dataPermissionSummary: String,
     backgroundReadAvailable: Boolean,
     onRequestPlatform: () -> Unit,
@@ -113,6 +163,7 @@ fun SettingsPermissionsScreen(
             platformGranted = platformGranted,
             hcGranted = hcGranted,
             backgroundReadStatus = backgroundReadStatus,
+            backgroundReadGranted = backgroundReadGranted,
             dataPermissionSummary = dataPermissionSummary,
             backgroundReadAvailable = backgroundReadAvailable,
             onRequestPlatform = onRequestPlatform,
@@ -131,6 +182,7 @@ fun PermissionsSettingsSection(
     platformGranted: Boolean,
     hcGranted: Boolean,
     backgroundReadStatus: String,
+    backgroundReadGranted: Boolean,
     dataPermissionSummary: String,
     backgroundReadAvailable: Boolean,
     onRequestPlatform: () -> Unit,
@@ -141,20 +193,37 @@ fun PermissionsSettingsSection(
     modifier: Modifier = Modifier
 ) {
     AppSection(title = "Permissions", subtitle = "Local read access", modifier = modifier) {
-        StatusBadge(if (hcGranted) "Ready" else "Needs access", if (hcGranted) StatusTone.Success else StatusTone.Warning)
-        Text(uiText(dataPermissionSummary), color = MaterialTheme.colorScheme.onSurfaceVariant)
+        AppActionRow {
+            StatusBadge(
+                if (hcGranted) "Ready" else "Needs access",
+                if (hcGranted) StatusTone.Success else StatusTone.Warning
+            )
+            StatusBadge(
+                backgroundReadStatus,
+                if (backgroundReadGranted) StatusTone.Success else StatusTone.Warning
+            )
+        }
+        Text(
+            uiText(dataPermissionSummary),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
         PrimaryActionButton(if (hcGranted) "Review Access" else "Grant Access", onClick = onRequestDataPermissions)
-        StatusBadge(
-            if (platformGranted) "Platform HR ready" else "Platform HR missing",
-            if (platformGranted) StatusTone.Success else StatusTone.Warning
-        )
-        SecondaryActionButton(
-            label = if (platformGranted) "Platform HR Ready" else "Request Platform HR",
-            enabled = declaredReadHr && !platformGranted,
-            onClick = onRequestPlatform
-        )
-        StatusBadge(backgroundReadStatus, if ("granted" in backgroundReadStatus) StatusTone.Success else StatusTone.Warning)
-        SecondaryActionButton("Grant Background", enabled = backgroundReadAvailable, onClick = onRequestBackgroundRead)
+        if (!platformGranted) {
+            StatusBadge("Platform HR missing", StatusTone.Warning)
+            SecondaryActionButton(
+                label = "Request Platform HR",
+                enabled = declaredReadHr,
+                onClick = onRequestPlatform
+            )
+        }
+        if (!backgroundReadGranted) {
+            SecondaryActionButton(
+                "Grant Background",
+                enabled = backgroundReadAvailable,
+                onClick = onRequestBackgroundRead
+            )
+        }
         SecondaryActionButton(
             label = "App Settings",
             onClick = {
@@ -227,22 +296,50 @@ fun SyncSettingsSection(
     onRunBackgroundNow: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val periodicScheduled = periodicEnabled && backgroundReadGranted
+    val periodicLabel = when {
+        !periodicEnabled -> "Off"
+        periodicScheduled -> "Scheduled"
+        backgroundReadAvailable -> "Permission needed"
+        else -> "Unavailable"
+    }
     AppSection(title = "Sync", subtitle = "Periodic, smart, and full", modifier = modifier) {
         AppActionRow {
-            StatusBadge(if (periodicEnabled) "Scheduled" else "Off", if (periodicEnabled) StatusTone.Success else StatusTone.Neutral)
+            StatusBadge(
+                periodicLabel,
+                if (periodicScheduled) StatusTone.Success else if (periodicEnabled) StatusTone.Warning else StatusTone.Neutral
+            )
             StatusBadge(if (backgroundReadGranted) "Background ready" else "Manual only", if (backgroundReadGranted) StatusTone.Success else StatusTone.Warning)
         }
-        Text(
-            uiText(periodicSyncStatusText(periodicEnabled, lastPeriodicSync, lastPeriodicStatus, lastPeriodicSummary)),
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+        StatusMessageCard(
+            periodicSyncStatusText(
+                enabled = periodicEnabled,
+                backgroundReadAvailable = backgroundReadAvailable,
+                backgroundReadGranted = backgroundReadGranted,
+                lastFinished = lastPeriodicSync,
+                lastStatus = lastPeriodicStatus,
+                lastSummary = lastPeriodicSummary
+            )
         )
         PrimaryActionButton(
             if (busy) "Working..." else if (periodicEnabled) "Disable Periodic" else "Enable Periodic",
             enabled = !busy,
             onClick = onTogglePeriodic
         )
-        SecondaryActionButton("Run Now", enabled = backgroundReadAvailable && !busy, onClick = onRunBackgroundNow)
-        SecondaryActionButton("Full Resync", enabled = !busy, onClick = onFullResync)
+        AppActionRow {
+            SecondaryActionButton(
+                "Run Now",
+                modifier = Modifier.weight(1f),
+                enabled = backgroundReadAvailable && !busy,
+                onClick = onRunBackgroundNow
+            )
+            SecondaryActionButton(
+                "Full Resync",
+                modifier = Modifier.weight(1f),
+                enabled = !busy,
+                onClick = onFullResync
+            )
+        }
         if (syncProgress != null) {
             SyncProgressCard(syncProgress)
         }
@@ -250,21 +347,30 @@ fun SyncSettingsSection(
             SecondaryActionButton("Cancel Full Resync", onClick = onCancelFullResync)
         }
         Text(
-            uiText("Full resync reads from the full historical floor to now and can be slow. Periodic sync uses WorkManager smart sync; Android may delay it, so it is not real-time."),
+            uiText("Full resync reads from the full historical floor to now and can be slow. Periodic sync checks Health Connect changes about hourly; Android may delay it, so it is not real-time."),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
-        StatusMessageCard(status)
+        if (status != "Ready") {
+            StatusMessageCard(status)
+        }
     }
 }
 
 private fun periodicSyncStatusText(
     enabled: Boolean,
+    backgroundReadAvailable: Boolean,
+    backgroundReadGranted: Boolean,
     lastFinished: Instant?,
     lastStatus: String?,
     lastSummary: String?
 ): String {
-    val enabledText = if (enabled) "enabled" else "disabled"
+    val enabledText = when {
+        !enabled -> "disabled"
+        backgroundReadGranted -> "enabled and scheduled"
+        backgroundReadAvailable -> "enabled, waiting for background permission"
+        else -> "enabled, but background read is unavailable"
+    }
     val finishedText = lastFinished?.toString() ?: "never"
     val statusText = lastStatus ?: "no run yet"
     return "Periodic sync is $enabledText. Last run: $finishedText ($statusText). " +

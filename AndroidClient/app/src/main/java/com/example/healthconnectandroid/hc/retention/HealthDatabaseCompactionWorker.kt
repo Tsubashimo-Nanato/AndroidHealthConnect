@@ -8,6 +8,8 @@ import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
+import androidx.work.workDataOf
+import com.example.healthconnectandroid.LocalProfileStore
 import com.example.healthconnectandroid.data.AppDb
 
 internal object DatabaseCompactionPolicy {
@@ -25,9 +27,13 @@ class HealthDatabaseCompactionWorker(
 ) : CoroutineWorker(appContext, params) {
 
     override suspend fun doWork(): Result {
-        val databaseFile = applicationContext.getDatabasePath(DATABASE_NAME)
+        val profileId = inputData.getString(KEY_PROFILE_ID)
+            ?.takeIf { LocalProfileStore.profile(applicationContext, it) != null }
+            ?: return Result.failure()
+        val databaseName = AppDb.databaseName(applicationContext, profileId)
+        val databaseFile = applicationContext.getDatabasePath(databaseName)
         if (!databaseFile.exists()) return Result.success()
-        val db = AppDb.get(applicationContext).openHelper.writableDatabase
+        val db = AppDb.get(applicationContext, profileId).openHelper.writableDatabase
         val pageSize = db.pragmaLong("page_size")
         val freePages = db.pragmaLong("freelist_count")
         val reclaimableBytes = pageSize * freePages
@@ -54,11 +60,15 @@ class HealthDatabaseCompactionWorker(
 
     companion object {
         const val WORK_NAME = "health_database_idle_compaction"
-        private const val DATABASE_NAME = "hc_demo.db"
+        private const val KEY_PROFILE_ID = "profile_id"
         private const val TAG = "HCDbCompaction"
 
-        fun enqueue(context: Context) {
+        fun enqueue(
+            context: Context,
+            profileId: String = LocalProfileStore.activeProfile(context).id
+        ) {
             val request = OneTimeWorkRequestBuilder<HealthDatabaseCompactionWorker>()
+                .setInputData(workDataOf(KEY_PROFILE_ID to profileId))
                 .setConstraints(
                     Constraints.Builder()
                         .setRequiresBatteryNotLow(true)
@@ -70,7 +80,7 @@ class HealthDatabaseCompactionWorker(
                 .addTag(WORK_NAME)
                 .build()
             WorkManager.getInstance(context.applicationContext).enqueueUniqueWork(
-                WORK_NAME,
+                "$WORK_NAME:$profileId",
                 ExistingWorkPolicy.KEEP,
                 request
             )

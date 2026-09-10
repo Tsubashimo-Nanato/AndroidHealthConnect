@@ -47,3 +47,9 @@ fun syncResultsStatusTone(results: List<HealthDataTypeSyncResult>): StatusTone =
         SyncResultSeverity.WARNING -> StatusTone.Warning
         SyncResultSeverity.ERROR -> StatusTone.Error
     }
+
+fun backgroundReadStatusText(available: Boolean, granted: Boolean): String = when {
+    !available -> "Background access unavailable"
+    granted -> "Background access ready"
+    else -> "Background access missing"
+}

@@ -58,11 +58,13 @@ fun Modifier.chartAxisPanOrLongPressSelection(
     viewportFraction: Float,
     viewportStartFraction: Float,
     onViewportChange: (startFraction: Float, viewportFraction: Float) -> Unit,
+    onViewportChangeFinished: (startFraction: Float, viewportFraction: Float) -> Unit = { _, _ -> },
     onSelectX: (Float) -> Unit
 ): Modifier {
     val currentViewportStartFraction by rememberUpdatedState(viewportStartFraction)
     val currentViewportFraction by rememberUpdatedState(viewportFraction)
     val currentOnViewportChange by rememberUpdatedState(onViewportChange)
+    val currentOnViewportChangeFinished by rememberUpdatedState(onViewportChangeFinished)
     val currentOnSelectX by rememberUpdatedState(onSelectX)
     return pointerInput(
         gestureKey,
@@ -80,6 +82,9 @@ fun Modifier.chartAxisPanOrLongPressSelection(
         val axisStartX = down.position.x
         val axisStartFraction = currentViewportStartFraction
         val axisStartViewportFraction = currentViewportFraction
+        var viewportChanged = false
+        var latestStartFraction = axisStartFraction
+        var latestViewportFraction = axisStartViewportFraction
         while (true) {
             val event = awaitPointerEvent()
             val pressed = event.changes.filter { it.pressed }
@@ -103,32 +108,35 @@ fun Modifier.chartAxisPanOrLongPressSelection(
                     val scale = (zoomDistance / initialDistance).coerceIn(0.25f, 4f)
                     val newViewportFraction =
                         (zoomStartViewportFraction / scale).coerceIn(minViewportFraction, 1f)
-                    currentOnViewportChange(
-                        viewportStartFractionForZoom(
-                            startFraction = zoomStartFraction,
-                            startViewportFraction = zoomStartViewportFraction,
-                            newViewportFraction = newViewportFraction,
-                            anchorFraction = anchorFraction
-                        ),
-                        newViewportFraction
+                    latestStartFraction = viewportStartFractionForZoom(
+                        startFraction = zoomStartFraction,
+                        startViewportFraction = zoomStartViewportFraction,
+                        newViewportFraction = newViewportFraction,
+                        anchorFraction = anchorFraction
                     )
+                    latestViewportFraction = newViewportFraction
+                    viewportChanged = true
+                    currentOnViewportChange(latestStartFraction, latestViewportFraction)
                     zoomPressed.forEach { it.consume() }
+                }
+                if (viewportChanged) {
+                    currentOnViewportChangeFinished(latestStartFraction, latestViewportFraction)
                 }
                 return@awaitEachGesture
             }
 
             val change = pressed.firstOrNull { it.id == down.id } ?: pressed.first()
             if (axisPanCandidate) {
-                currentOnViewportChange(
-                    axisStartFractionFromDrag(
-                        dragDeltaX = change.position.x - axisStartX,
-                        plotLeftPx = plotLeftPx,
-                        plotRightPx = plotRightPx,
-                        viewportFraction = axisStartViewportFraction,
-                        startFraction = axisStartFraction
-                    ),
-                    axisStartViewportFraction
+                latestStartFraction = axisStartFractionFromDrag(
+                    dragDeltaX = change.position.x - axisStartX,
+                    plotLeftPx = plotLeftPx,
+                    plotRightPx = plotRightPx,
+                    viewportFraction = axisStartViewportFraction,
+                    startFraction = axisStartFraction
                 )
+                latestViewportFraction = axisStartViewportFraction
+                viewportChanged = true
+                currentOnViewportChange(latestStartFraction, latestViewportFraction)
                 change.consume()
                 continue
             }
@@ -141,6 +149,9 @@ fun Modifier.chartAxisPanOrLongPressSelection(
                 currentOnSelectX(change.position.x)
                 change.consume()
             }
+        }
+        if (viewportChanged) {
+            currentOnViewportChangeFinished(latestStartFraction, latestViewportFraction)
         }
     }
     }

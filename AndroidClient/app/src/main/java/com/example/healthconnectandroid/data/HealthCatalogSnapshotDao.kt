@@ -14,6 +14,17 @@ interface HealthCatalogSnapshotDao {
     @Query("SELECT * FROM health_catalog_snapshot ORDER BY recordType ASC")
     suspend fun all(): List<HealthCatalogSnapshotEntity>
 
+    @Query(
+        """
+        SELECT
+            COALESCE(SUM(recordCount), 0) AS localRecordCount,
+            COALESCE(SUM(CASE WHEN recordCount > 0 THEN 1 ELSE 0 END), 0) AS localDataTypeCount,
+            MAX(lastSyncedEpochMillis) AS latestLocalReadEpochMillis
+        FROM health_catalog_snapshot
+        """
+    )
+    suspend fun dashboardSummary(): HealthDashboardSummaryRow
+
     @Query("SELECT recordType FROM health_catalog_snapshot WHERE dirty = 1 ORDER BY generatedAtEpochMillis ASC")
     suspend fun dirtyRecordTypes(): List<String>
 

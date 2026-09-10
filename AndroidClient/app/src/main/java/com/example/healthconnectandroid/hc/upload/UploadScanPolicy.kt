@@ -10,8 +10,16 @@ sealed interface UploadScanApplyResult {
         val message: String
     ) : UploadScanApplyResult
 
+    data class Redeem(val pairing: UploadPairingCode) : UploadScanApplyResult
+
     data class Invalid(val message: String) : UploadScanApplyResult
 }
+
+data class UploadPairingCode(
+    val serverMode: UploadServerMode,
+    val apiBaseUrl: String,
+    val code: String
+)
 
 object UploadScanPolicy {
     private val PlainApiKeyPattern = Regex("""^[A-Za-z0-9._~+/=-]{12,256}$""")
@@ -28,7 +36,8 @@ object UploadScanPolicy {
         }
 
         return when (val pairing = parsePairing(trimmed)) {
-            is PairingParseResult.Valid -> applyPairing(current, pairing.value)
+            is PairingParseResult.Legacy -> applyPairing(current, pairing.value)
+            is PairingParseResult.VersionTwo -> UploadScanApplyResult.Redeem(pairing.value)
             is PairingParseResult.Invalid -> UploadScanApplyResult.Invalid(pairing.message)
         }
     }
@@ -88,6 +97,13 @@ object UploadScanPolicy {
             ?: return PairingParseResult.Invalid("QR code contained invalid pairing text")
         val serverUrl = params["u"]?.takeIf { it.isNotBlank() }
             ?: return PairingParseResult.Invalid("QR code did not contain a server URL")
+        val version = params["v"]?.trim()
+        if (version == "2") {
+            return parseVersionTwoPairing(params, serverUrl)
+        }
+        if (!version.isNullOrBlank() && version != "1") {
+            return PairingParseResult.Invalid("QR code pairing version is not supported")
+        }
         val apiKey = params["k"]?.takeIf { it.isNotBlank() }
             ?: return PairingParseResult.Invalid("QR code did not contain an API key")
         val serverMode = if (params.containsKey("m")) {
@@ -97,11 +113,40 @@ object UploadScanPolicy {
         } else {
             null
         }
-        return PairingParseResult.Valid(
+        return PairingParseResult.Legacy(
             UploadPairing(
                 serverUrl = serverUrl,
                 apiKey = apiKey,
                 serverMode = serverMode
+            )
+        )
+    }
+
+    private fun parseVersionTwoPairing(
+        params: Map<String, String>,
+        rawServerUrl: String
+    ): PairingParseResult {
+        val mode = pairingMode(params["m"])
+            ?: return PairingParseResult.Invalid("QR code pairing mode is not supported")
+        val code = params["c"]?.trim()?.takeIf { it.length in 12..256 }
+            ?: return PairingParseResult.Invalid("QR code did not contain a valid pairing code")
+        val baseUrl = baseUrlFromPairingUrl(rawServerUrl)
+            ?: return PairingParseResult.Invalid("QR code did not contain a server URL")
+        val candidate = UploadSettings(
+            serverMode = mode,
+            productionBaseUrl = if (mode == UploadServerMode.PRODUCTION) baseUrl else UploadEndpointPolicy.PRODUCTION_BASE_URL,
+            localBaseUrl = if (mode == UploadServerMode.LOCAL_DEBUG) baseUrl else UploadEndpointPolicy.DEFAULT_LOCAL_BASE_URL,
+            deviceId = "pairing-validation"
+        )
+        val validation = UploadEndpointPolicy.validate(candidate, requireAuthentication = false)
+        if (validation is UploadEndpointValidation.Invalid) {
+            return PairingParseResult.Invalid(validation.reason)
+        }
+        return PairingParseResult.VersionTwo(
+            UploadPairingCode(
+                serverMode = mode,
+                apiBaseUrl = baseUrl,
+                code = code
             )
         )
     }
@@ -139,7 +184,8 @@ object UploadScanPolicy {
         }
 
     private sealed interface PairingParseResult {
-        data class Valid(val value: UploadPairing) : PairingParseResult
+        data class Legacy(val value: UploadPairing) : PairingParseResult
+        data class VersionTwo(val value: UploadPairingCode) : PairingParseResult
         data class Invalid(val message: String) : PairingParseResult
     }
 

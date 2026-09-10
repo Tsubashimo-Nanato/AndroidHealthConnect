@@ -1,11 +1,7 @@
 package com.example.healthconnectandroid.ui.data
 
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -38,7 +34,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -50,9 +45,6 @@ import com.example.healthconnectandroid.hc.HealthDataTypeKeys
 import com.example.healthconnectandroid.hc.InspectorCategorySummary
 import com.example.healthconnectandroid.hc.ReadableHealthRecord
 import com.example.healthconnectandroid.hc.query.HealthDataCatalogQueryService
-import com.example.healthconnectandroid.ui.StatusBadge
-import com.example.healthconnectandroid.ui.StatusMessageCard
-import com.example.healthconnectandroid.ui.StatusTone
 import com.example.healthconnectandroid.ui.animation.rowFadeIn
 import com.example.healthconnectandroid.ui.format.DisplayPreferences
 import com.example.healthconnectandroid.ui.format.MetricDisplayFormatter
@@ -66,8 +58,8 @@ fun DataCatalogScreen(
     grantedPermissions: Set<String>,
     displayPreferences: DisplayPreferences,
     onOpenDetail: (String) -> Unit,
-    dataRevision: Int = 0,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    dataRevision: Int = 0
 ) {
     var reloadVersion by remember { mutableIntStateOf(0) }
     val initialView = remember(grantedPermissions, displayPreferences.zoneId) {
@@ -115,8 +107,8 @@ fun DataCatalogScreen(
     Column(
         modifier
             .fillMaxSize()
-            .padding(horizontal = 14.dp, vertical = 10.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         DataStatusStrip(
             categories = categories,
@@ -130,7 +122,7 @@ fun DataCatalogScreen(
 
         LazyColumn(
             modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             if (loading && categories.isEmpty()) {
                 itemsIndexed(List(4) { it }, key = { _, row -> "loading-$row" }) { index, _ ->
@@ -189,54 +181,48 @@ private fun DataStatusStrip(
 ) {
     val latestSync: Instant? = remember(categories) { categories.mapNotNull { it.lastSynced }.maxOrNull() }
     val totalRecords = remember(categories) { categories.sumOf { it.recordCount } }
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 2.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 10.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (loading && categories.isEmpty()) {
-                        StatusBadge("Loading", StatusTone.Info)
-                        StatusBadge("Local cache", StatusTone.Neutral)
-                    } else {
-                        StatusBadge("${MetricDisplayFormatter.formatCount(categories.size)} types", StatusTone.Info)
-                        StatusBadge("Local cache", StatusTone.Info)
-                        StatusBadge(
-                            MetricDisplayFormatter.formatRecordCount(totalRecords),
-                            StatusTone.Neutral
-                        )
-                    }
-                }
-                Text(
-                    if (loading && categories.isEmpty()) {
-                        uiText("Loading local cache")
-                    } else {
-                        uiText("Last sync ${MetricDisplayFormatter.formatShortInstant(latestSync, displayPreferences.zoneId)}")
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(
                 if (loading && categories.isEmpty()) {
-                    LinearProgressIndicator(Modifier.fillMaxWidth())
-                }
-                if (status.startsWith("Load failed")) {
-                    StatusMessageCard(status, tone = StatusTone.Error)
-                }
-            }
-            IconButton(enabled = !loading, onClick = onRefresh) {
-                if (loading) {
-                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                    uiText("Loading local cache")
                 } else {
-                    Icon(Icons.Default.Refresh, contentDescription = uiText("Refresh local data"))
-                }
+                    "${MetricDisplayFormatter.formatCount(categories.size)} ${uiText("types")} · " +
+                        uiText(MetricDisplayFormatter.formatRecordCount(totalRecords))
+                },
+                style = MaterialTheme.typography.labelLarge
+            )
+            Text(
+                when {
+                    status.startsWith("Load failed") -> uiText(status)
+                    loading -> uiText(status)
+                    else -> uiText(
+                        "Last sync ${MetricDisplayFormatter.formatShortInstant(latestSync, displayPreferences.zoneId)}"
+                    )
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = if (status.startsWith("Load failed")) {
+                    MaterialTheme.colorScheme.error
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            if (loading) {
+                LinearProgressIndicator(Modifier.fillMaxWidth())
+            }
+        }
+        IconButton(enabled = !loading, onClick = onRefresh) {
+            if (loading) {
+                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+            } else {
+                Icon(Icons.Default.Refresh, contentDescription = uiText("Refresh local data"))
             }
         }
     }
@@ -245,7 +231,8 @@ private fun DataStatusStrip(
 @Composable
 private fun LoadingMetricPlaceholder(modifier: Modifier = Modifier) {
     Card(
-        modifier = modifier.height(148.dp),
+        modifier = modifier.height(MetricCardHeight),
+        shape = MaterialTheme.shapes.medium,
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.34f)
         )
@@ -253,7 +240,7 @@ private fun LoadingMetricPlaceholder(modifier: Modifier = Modifier) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(14.dp),
+                .padding(12.dp),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -289,35 +276,18 @@ private fun HealthMetricCard(
     clickable: Boolean,
     onClick: () -> Unit
 ) {
-    val interactionSource = remember { MutableInteractionSource() }
-    val pressed by interactionSource.collectIsPressedAsState()
     val lowPriority = DataCardInteractionPolicy.isLowPriority(summary)
-    val scale by animateFloatAsState(
-        targetValue = if (clickable && pressed) 0.98f else 1f,
-        animationSpec = tween(150),
-        label = "metric-card-press"
-    )
-    val alpha by animateFloatAsState(
-        targetValue = if (lowPriority) 0.58f else 1f,
-        animationSpec = tween(180),
-        label = "metric-card-alpha"
-    )
 
     Card(
         modifier = modifier
-            .height(148.dp)
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-            }
-            .alpha(alpha)
+            .height(MetricCardHeight)
+            .alpha(if (lowPriority) 0.58f else 1f)
             .clickable(
                 enabled = clickable,
-                interactionSource = interactionSource,
-                indication = null,
                 role = Role.Button,
                 onClick = onClick
             ),
+        shape = MaterialTheme.shapes.medium,
         colors = CardDefaults.cardColors(
             containerColor = if (lowPriority) {
                 MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.48f)
@@ -329,7 +299,7 @@ private fun HealthMetricCard(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(14.dp),
+                .padding(12.dp),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -353,13 +323,16 @@ private fun HealthMetricCard(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
-            Text(
-                uiText(cardSecondaryText(summary)),
-                style = MaterialTheme.typography.bodySmall,
-                color = cardSecondaryColor(summary),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+            val secondaryText = cardSecondaryText(summary)
+            if (secondaryText.isNotBlank()) {
+                Text(
+                    uiText(secondaryText),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = cardSecondaryColor(summary),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
         }
     }
 }
@@ -406,19 +379,15 @@ private fun cardPrimaryText(
     }
 }
 
-private fun cardSecondaryText(summary: InspectorCategorySummary): String {
+internal fun cardSecondaryText(summary: InspectorCategorySummary): String {
     DataCardInteractionPolicy.disabledReason(summary)?.let {
         return if (it == "Needs access") "Grant in Settings" else it
     }
-    if (summary.recordCount == 0) return "No data"
-    if (summary.recentRecordCount == 0) return "No recent data"
+    if (summary.recordCount == 0) return ""
     if (summary.descriptor.key == HealthDataTypeKeys.SLEEP_SESSION) {
-        return if (summary.recordCount == 1) {
-            "1 session"
-        } else {
-            "${MetricDisplayFormatter.formatCount(summary.recordCount)} sessions"
-        }
+        return if (summary.recentRecordCount == 0) "No recent sleep" else "Sleep history"
     }
+    if (summary.recentRecordCount == 0) return "No recent data"
     return MetricDisplayFormatter.formatRecordCount(summary.recordCount)
 }
 
@@ -474,3 +443,5 @@ private fun categoryLabel(category: HealthDataCategory): String =
         HealthDataCategory.EXERCISE -> "Exercise"
         HealthDataCategory.NUTRITION -> "Nutrition"
     }
+
+private val MetricCardHeight = 112.dp

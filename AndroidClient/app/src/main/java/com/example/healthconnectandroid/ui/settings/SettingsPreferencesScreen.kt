@@ -20,26 +20,30 @@ import androidx.compose.ui.unit.dp
 import com.example.healthconnectandroid.AppThemeMode
 import com.example.healthconnectandroid.AppThemePalette
 import com.example.healthconnectandroid.AppLanguagePreference
+import com.example.healthconnectandroid.LocalProfile
 import com.example.healthconnectandroid.TimeZonePreferenceMode
 import com.example.healthconnectandroid.UnitSystemPreference
 import com.example.healthconnectandroid.UserProfile
 import com.example.healthconnectandroid.UserPreferences
 import com.example.healthconnectandroid.WeekStartPreference
-import com.example.healthconnectandroid.ui.AppActionRow
 import com.example.healthconnectandroid.ui.AppSection
 import com.example.healthconnectandroid.ui.PrimaryActionButton
-import com.example.healthconnectandroid.ui.SecondaryActionButton
+import com.example.healthconnectandroid.ui.SegmentedSwitch
 import com.example.healthconnectandroid.ui.animation.rowFadeIn
 import com.example.healthconnectandroid.ui.i18n.uiText
 import java.time.ZoneId
 
 @Composable
 fun SettingsPreferencesScreen(
+    profiles: List<LocalProfile>,
+    activeProfileId: String,
     userProfile: UserProfile,
     userPreferences: UserPreferences,
     themeMode: AppThemeMode,
     themePalette: AppThemePalette,
     onUserProfileSave: (UserProfile) -> Unit,
+    onSwitchProfile: (String) -> Unit,
+    onCreateProfile: (String) -> Boolean,
     onUserPreferencesSave: (UserPreferences) -> Unit,
     onThemeModeChange: (AppThemeMode) -> Unit,
     onThemePaletteChange: (AppThemePalette) -> Unit,
@@ -52,22 +56,29 @@ fun SettingsPreferencesScreen(
             .padding(18.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
+        ProfileSwitcherSection(
+            profiles = profiles,
+            activeProfileId = activeProfileId,
+            onSwitchProfile = onSwitchProfile,
+            onCreateProfile = onCreateProfile,
+            modifier = Modifier.rowFadeIn(0)
+        )
         PreferenceDisplaySection(
             userPreferences = userPreferences,
             onUserPreferencesSave = onUserPreferencesSave,
-            modifier = Modifier.rowFadeIn(0)
+            modifier = Modifier.rowFadeIn(1)
         )
         AppearanceSettingsSection(
             themeMode = themeMode,
             themePalette = themePalette,
             onThemeModeChange = onThemeModeChange,
             onThemePaletteChange = onThemePaletteChange,
-            modifier = Modifier.rowFadeIn(1)
+            modifier = Modifier.rowFadeIn(2)
         )
         ProfileSettingsSection(
             userProfile = userProfile,
             onUserProfileSave = onUserProfileSave,
-            modifier = Modifier.rowFadeIn(2)
+            modifier = Modifier.rowFadeIn(3)
         )
     }
 }
@@ -91,85 +102,42 @@ fun PreferenceDisplaySection(
     val canSave = timeZoneMode == TimeZonePreferenceMode.SYSTEM || customTimeZoneValid
 
     AppSection(title = "Preferences", subtitle = "Display only", modifier = modifier) {
-            Text(uiText("Language"), style = MaterialTheme.typography.titleSmall)
-            AppActionRow {
-                AppLanguagePreference.values().forEach { option ->
-                    val label = when (option) {
-                        AppLanguagePreference.ENGLISH -> "English"
-                        AppLanguagePreference.CHINESE_SIMPLIFIED -> "Simplified Chinese"
-                    }
-                    if (option == language) {
-                        PrimaryActionButton(
-                            modifier = Modifier.weight(1f),
-                            label = label,
-                            onClick = { language = option }
-                        )
-                    } else {
-                        SecondaryActionButton(
-                            modifier = Modifier.weight(1f),
-                            label = label,
-                            onClick = { language = option }
-                        )
-                    }
+        Text(uiText("Language"), style = MaterialTheme.typography.titleSmall)
+        SegmentedSwitch(
+            options = AppLanguagePreference.values().toList(),
+            selected = language,
+            label = { option ->
+                when (option) {
+                    AppLanguagePreference.ENGLISH -> "English"
+                    AppLanguagePreference.CHINESE_SIMPLIFIED -> "Simplified Chinese"
                 }
-            }
+            },
+            onSelected = { language = it }
+        )
 
-            Text(uiText("Week starts on"), style = MaterialTheme.typography.titleSmall)
-            AppActionRow {
-                WeekStartPreference.values().forEach { option ->
-                    if (option == weekStart) {
-                        PrimaryActionButton(
-                            modifier = Modifier.weight(1f),
-                            label = option.label,
-                            onClick = { weekStart = option }
-                        )
-                    } else {
-                        SecondaryActionButton(
-                            modifier = Modifier.weight(1f),
-                            label = option.label,
-                            onClick = { weekStart = option }
-                        )
-                    }
-                }
-            }
+        Text(uiText("Week starts on"), style = MaterialTheme.typography.titleSmall)
+        SegmentedSwitch(
+            options = WeekStartPreference.values().toList(),
+            selected = weekStart,
+            label = { it.label },
+            onSelected = { weekStart = it }
+        )
 
-            Text(uiText("Units"), style = MaterialTheme.typography.titleSmall)
-            AppActionRow {
-                UnitSystemPreference.values().forEach { option ->
-                    if (option == unitSystem) {
-                        PrimaryActionButton(
-                            modifier = Modifier.weight(1f),
-                            label = option.label,
-                            onClick = { unitSystem = option }
-                        )
-                    } else {
-                        SecondaryActionButton(
-                            modifier = Modifier.weight(1f),
-                            label = option.label,
-                            onClick = { unitSystem = option }
-                        )
-                    }
-                }
-            }
+        Text(uiText("Units"), style = MaterialTheme.typography.titleSmall)
+        SegmentedSwitch(
+            options = UnitSystemPreference.values().toList(),
+            selected = unitSystem,
+            label = { it.label },
+            onSelected = { unitSystem = it }
+        )
 
-            Text(uiText("Timezone"), style = MaterialTheme.typography.titleSmall)
-            AppActionRow {
-                TimeZonePreferenceMode.values().forEach { option ->
-                    if (option == timeZoneMode) {
-                        PrimaryActionButton(
-                            modifier = Modifier.weight(1f),
-                            label = if (option == TimeZonePreferenceMode.SYSTEM) "System" else "Custom",
-                            onClick = { timeZoneMode = option }
-                        )
-                    } else {
-                        SecondaryActionButton(
-                            modifier = Modifier.weight(1f),
-                            label = if (option == TimeZonePreferenceMode.SYSTEM) "System" else "Custom",
-                            onClick = { timeZoneMode = option }
-                        )
-                    }
-                }
-            }
+        Text(uiText("Timezone"), style = MaterialTheme.typography.titleSmall)
+        SegmentedSwitch(
+            options = TimeZonePreferenceMode.values().toList(),
+            selected = timeZoneMode,
+            label = { if (it == TimeZonePreferenceMode.SYSTEM) "System" else "Custom" },
+            onSelected = { timeZoneMode = it }
+        )
             if (timeZoneMode == TimeZonePreferenceMode.CUSTOM) {
                 OutlinedTextField(
                     modifier = Modifier.fillMaxWidth(),

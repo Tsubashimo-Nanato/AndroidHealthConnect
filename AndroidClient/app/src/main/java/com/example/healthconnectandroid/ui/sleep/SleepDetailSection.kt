@@ -22,7 +22,6 @@ import com.example.healthconnectandroid.hc.SleepQualityMatrixModel
 import com.example.healthconnectandroid.hc.SleepSessionAnalyzer
 import com.example.healthconnectandroid.ui.AppActionRow
 import com.example.healthconnectandroid.ui.AppSection
-import com.example.healthconnectandroid.ui.EmptyStateText
 import com.example.healthconnectandroid.ui.MetricCard
 import com.example.healthconnectandroid.ui.SegmentedSwitch
 import com.example.healthconnectandroid.ui.StatusTone
@@ -51,6 +50,8 @@ fun SleepInsightSummary(
             zoneId = zoneId
         )
     }
+    if (metrics.averageSessionDuration == null) return
+
     val daySummaries = remember(inputs, startDate, endDate, zoneId) {
         SleepSessionAnalyzer.dailySummaries(inputs, startDate, endDate, zoneId)
     }
@@ -64,10 +65,6 @@ fun SleepInsightSummary(
         modifier = Modifier.rowFadeIn(1),
         title = "Summary"
     ) {
-        if (metrics.averageSessionDuration == null) {
-            EmptyStateText("No sleep sessions in this range")
-            return@AppSection
-        }
         AppActionRow {
             MetricCard(
                 modifier = Modifier.weight(1f),
@@ -110,6 +107,7 @@ fun SleepVisualizationSection(
     selectedBoxIds: Set<String>,
     onSelectedBoxIdsChange: (Set<String>) -> Unit,
     onPanCells: (Int) -> Unit,
+    canPanForward: Boolean,
     zoneId: ZoneId = ZoneId.systemDefault(),
     onGestureDiagnostic: (action: String, deltaSnap: Int?, selectedCount: Int) -> Unit = { _, _, _ -> }
 ) {
@@ -140,7 +138,10 @@ fun SleepVisualizationSection(
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1
             )
-            TextButton(onClick = { onPanCells(1) }) {
+            TextButton(
+                enabled = canPanForward,
+                onClick = { onPanCells(1) }
+            ) {
                 Text(uiText("Next"), maxLines = 1)
             }
         }

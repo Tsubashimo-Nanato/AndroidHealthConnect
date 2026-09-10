@@ -13,11 +13,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -54,14 +53,13 @@ enum class StatusTone {
 
 private data class ToneColors(
     val container: Color,
-    val content: Color,
-    val border: Color
+    val content: Color
 )
 
 private val StudioEase = CubicBezierEasing(0.16f, 1f, 0.3f, 1f)
-private val SheetShape = RoundedCornerShape(topStart = 28.dp, topEnd = 22.dp, bottomEnd = 32.dp, bottomStart = 24.dp)
-private val ControlShape = RoundedCornerShape(topStart = 22.dp, topEnd = 28.dp, bottomEnd = 18.dp, bottomStart = 24.dp)
-private val ChipShape = RoundedCornerShape(topStart = 18.dp, topEnd = 22.dp, bottomEnd = 16.dp, bottomStart = 20.dp)
+private val NoErrorText = Regex("\\bno errors?\\b")
+private val ZeroErrorCount = Regex("\\berrors?\\s*[:=]?\\s*0\\b")
+private val ZeroSkippedCount = Regex("\\bskipped\\s*[:=]?\\s*0\\b")
 
 @Composable
 private fun toneColors(tone: StatusTone): ToneColors {
@@ -69,33 +67,27 @@ private fun toneColors(tone: StatusTone): ToneColors {
     return when (tone) {
         StatusTone.Neutral -> ToneColors(
             container = scheme.surfaceVariant.copy(alpha = 0.58f),
-            content = scheme.onSurfaceVariant,
-            border = scheme.outline.copy(alpha = 0.24f)
+            content = scheme.onSurfaceVariant
         )
         StatusTone.Success -> ToneColors(
             container = scheme.secondaryContainer.copy(alpha = 0.72f),
-            content = scheme.onSecondaryContainer,
-            border = scheme.secondary.copy(alpha = 0.50f)
+            content = scheme.onSecondaryContainer
         )
         StatusTone.Warning -> ToneColors(
             container = scheme.tertiaryContainer.copy(alpha = 0.72f),
-            content = scheme.onTertiaryContainer,
-            border = scheme.tertiary.copy(alpha = 0.46f)
+            content = scheme.onTertiaryContainer
         )
         StatusTone.Info -> ToneColors(
             container = scheme.primary.copy(alpha = 0.13f),
-            content = scheme.primary,
-            border = scheme.primary.copy(alpha = 0.38f)
+            content = scheme.primary
         )
         StatusTone.Error -> ToneColors(
             container = scheme.error.copy(alpha = 0.14f),
-            content = scheme.error,
-            border = scheme.error.copy(alpha = 0.42f)
+            content = scheme.error
         )
         StatusTone.Destructive -> ToneColors(
             container = scheme.error.copy(alpha = 0.20f),
-            content = scheme.error,
-            border = scheme.error.copy(alpha = 0.55f)
+            content = scheme.error
         )
     }
 }
@@ -107,29 +99,27 @@ fun AppSection(
     subtitle: String? = null,
     content: @Composable ColumnScope.() -> Unit
 ) {
-    Card(
-        modifier = modifier.fillMaxWidth(),
-        shape = SheetShape,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.14f)),
-        elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(vertical = 2.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        Column(
-            Modifier.padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                Text(uiText(title), style = MaterialTheme.typography.titleMedium)
-                subtitle?.let {
-                    Text(
-                        uiText(it),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(
+                uiText(title),
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold
+            )
+            subtitle?.let {
+                Text(
+                    uiText(it),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
-            content()
         }
+        content()
     }
 }
 
@@ -144,12 +134,11 @@ fun MetricCard(
     val colors = toneColors(tone)
     Surface(
         modifier = modifier,
-        shape = RoundedCornerShape(topStart = 20.dp, topEnd = 16.dp, bottomEnd = 24.dp, bottomStart = 18.dp),
-        color = colors.container,
-        border = BorderStroke(1.dp, colors.border)
+        shape = MaterialTheme.shapes.medium,
+        color = colors.container
     ) {
         Column(
-            Modifier.padding(14.dp),
+            Modifier.padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             Text(uiText(label), style = MaterialTheme.typography.labelMedium, color = colors.content)
@@ -170,13 +159,12 @@ fun StatusBadge(
     val colors = toneColors(tone)
     Surface(
         modifier = modifier,
-        shape = ChipShape,
-        color = colors.container,
-        border = BorderStroke(1.dp, colors.border)
+        shape = MaterialTheme.shapes.small,
+        color = colors.container
     ) {
         Text(
             text = uiText(text),
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
             style = MaterialTheme.typography.labelMedium,
             color = colors.content,
             fontWeight = FontWeight.SemiBold
@@ -194,12 +182,11 @@ fun EmptyState(
 ) {
     Surface(
         modifier = modifier.fillMaxWidth(),
-        shape = SheetShape,
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.42f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.12f))
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.42f)
     ) {
         Column(
-            Modifier.padding(18.dp),
+            Modifier.padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Text(uiText(title), style = MaterialTheme.typography.titleMedium)
@@ -219,17 +206,19 @@ fun PrimaryActionButton(
     enabled: Boolean = true
 ) {
     Button(
-        modifier = modifier
-            .fillMaxWidth()
-            .animateContentSize(animationSpec = tween(260, easing = StudioEase)),
+        modifier = modifier.fillMaxWidth(),
         enabled = enabled,
         onClick = onClick,
-        shape = ControlShape,
+        shape = MaterialTheme.shapes.medium,
         colors = ButtonDefaults.buttonColors(
             containerColor = MaterialTheme.colorScheme.primary,
             contentColor = MaterialTheme.colorScheme.onPrimary
         ),
-        elevation = ButtonDefaults.buttonElevation(defaultElevation = 3.dp, pressedElevation = 1.dp)
+        elevation = ButtonDefaults.buttonElevation(
+            defaultElevation = 0.dp,
+            pressedElevation = 0.dp,
+            disabledElevation = 0.dp
+        )
     ) {
         Text(uiText(label))
     }
@@ -243,12 +232,10 @@ fun SecondaryActionButton(
     enabled: Boolean = true
 ) {
     OutlinedButton(
-        modifier = modifier
-            .fillMaxWidth()
-            .animateContentSize(animationSpec = tween(260, easing = StudioEase)),
+        modifier = modifier.fillMaxWidth(),
         enabled = enabled,
         onClick = onClick,
-        shape = ControlShape,
+        shape = MaterialTheme.shapes.medium,
         colors = ButtonDefaults.outlinedButtonColors(
             containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.62f),
             contentColor = MaterialTheme.colorScheme.onSurface
@@ -267,7 +254,7 @@ fun StatusMessageCard(
 ) {
     val colors = toneColors(tone)
     val expandable = message.length > 72 || message.contains('\n')
-    var expanded by remember(message, tone) { mutableStateOf(!expandable || tone == StatusTone.Error) }
+    var expanded by remember(message, tone) { mutableStateOf(!expandable) }
     val title = if (message.startsWith("Sync note:", ignoreCase = true)) "Sync note" else "Latest result"
     val busy = isBusyMessage(message)
     Surface(
@@ -275,9 +262,8 @@ fun StatusMessageCard(
             .fillMaxWidth()
             .animateContentSize(animationSpec = tween(260, easing = StudioEase))
             .clickable(enabled = expandable, role = Role.Button) { expanded = !expanded },
-        shape = RoundedCornerShape(topStart = 20.dp, topEnd = 26.dp, bottomEnd = 18.dp, bottomStart = 23.dp),
-        color = colors.container,
-        border = BorderStroke(1.dp, colors.border)
+        shape = MaterialTheme.shapes.medium,
+        color = colors.container
     ) {
         Column(
             Modifier.padding(horizontal = 12.dp, vertical = if (expanded) 12.dp else 8.dp),
@@ -324,12 +310,11 @@ fun LoadingStateCard(
 ) {
     Surface(
         modifier = modifier.fillMaxWidth(),
-        shape = SheetShape,
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.34f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.12f))
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.34f)
     ) {
         Row(
-            Modifier.padding(18.dp),
+            Modifier.padding(14.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
@@ -351,16 +336,16 @@ fun SyncProgressCard(
     modifier: Modifier = Modifier
 ) {
     if (progress == null) return
-    val progressMessage = progress.message.orEmpty()
-    val messageExpandable = progressMessage.length > 72 || progressMessage.contains('\n')
-    var messageExpanded by remember(progressMessage, progress.phase) {
-        mutableStateOf(!messageExpandable || progress.phase.name == "FAILED")
-    }
+    val fraction = progress.progressFraction
+    val animatedFraction by animateFloatAsState(
+        targetValue = fraction ?: 0f,
+        animationSpec = tween(180, easing = StudioEase),
+        label = "sync-progress"
+    )
     Surface(
         modifier = modifier.fillMaxWidth(),
-        shape = SheetShape,
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.34f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.12f))
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.34f)
     ) {
         Column(
             Modifier.padding(12.dp),
@@ -378,21 +363,19 @@ fun SyncProgressCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            progress.progressFraction?.let { fraction ->
+            fraction?.let {
                 LinearProgressIndicator(
-                    progress = { fraction },
+                    progress = { animatedFraction },
                     modifier = Modifier.fillMaxWidth()
                 )
             } ?: LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-            progress.currentType?.let {
-                Text(
-                    uiText(it),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
+            Text(
+                uiText(progress.currentType ?: progress.phase.label),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
             Text(
                 syncProgressStatsText(progress),
                 style = MaterialTheme.typography.bodySmall,
@@ -410,32 +393,14 @@ fun SyncProgressCard(
                     overflow = TextOverflow.Ellipsis
                 )
             }
-            progress.message?.takeIf { it.isNotBlank() }?.let {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .animateContentSize(animationSpec = tween(180, easing = StudioEase))
-                        .clickable(enabled = messageExpandable, role = Role.Button) {
-                            messageExpanded = !messageExpanded
-                        },
-                    verticalArrangement = Arrangement.spacedBy(2.dp)
-                ) {
-                    if (messageExpandable) {
-                        Text(
-                            uiText(if (messageExpanded) "Collapse" else "Expand"),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Text(
-                        uiText(it),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = if (messageExpanded) Int.MAX_VALUE else 2,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-            }
+            Text(
+                uiText(progress.message.orEmpty()),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                minLines = 2,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
         }
     }
 }
@@ -492,18 +457,20 @@ private fun syncProgressCounterText(
 ): String =
     when {
         progress.totalTypes <= 0 -> translateUiText(progress.phase.label, language)
-        progress.currentType != null -> translateUiText(progress.phase.label, language)
-        progress.totalTypes == 1 -> translateUiText(progress.phase.label, language)
-        else -> "${progress.completedTypes}/${progress.totalTypes}"
+        else -> "${progress.progressPercent}%"
     }
 
 fun statusToneForMessage(message: String): StatusTone {
     val lower = message.lowercase()
+    val failureText = lower
+        .replace(NoErrorText, "")
+        .replace(ZeroErrorCount, "")
+        .replace(ZeroSkippedCount, "")
     return when {
-        "failed" in lower || "error" in lower -> StatusTone.Error
-        "missing" in lower || "grant" in lower || "skipped" in lower -> StatusTone.Warning
+        "failed" in failureText || "error" in failureText -> StatusTone.Error
+        "missing" in lower || "grant" in lower || "skipped" in failureText -> StatusTone.Warning
         "cleared" in lower -> StatusTone.Destructive
-        "exported" in lower || "logged" in lower || "synced" in lower || "success" in lower -> StatusTone.Success
+        "complete" in lower || "exported" in lower || "logged" in lower || "synced" in lower || "success" in lower -> StatusTone.Success
         "syncing" in lower || "querying" in lower -> StatusTone.Info
         else -> StatusTone.Neutral
     }

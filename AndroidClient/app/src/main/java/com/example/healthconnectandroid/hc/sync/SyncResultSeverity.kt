@@ -24,7 +24,6 @@ object SyncResultSeverityPolicy {
         return when {
             anyError && usefulRows > 0 -> SyncResultSeverity.WARNING
             anyError -> SyncResultSeverity.ERROR
-            usefulRows <= 0 -> SyncResultSeverity.ERROR
             else -> SyncResultSeverity.SUCCESS
         }
     }

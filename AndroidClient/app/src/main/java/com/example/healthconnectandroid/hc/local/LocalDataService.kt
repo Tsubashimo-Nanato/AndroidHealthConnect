@@ -20,6 +20,7 @@ class LocalDataService(
     private val aggregateDao = db.healthAggregateDao()
     private val snapshotDao = db.healthCatalogSnapshotDao()
     private val retentionDao = db.healthRetentionDao()
+    private val changeTokenDao = db.healthChangeTokenDao()
 
     suspend fun removeHealthData(
         retention: LocalDataRetention,
@@ -56,11 +57,21 @@ class LocalDataService(
 
         // Deleted pages stay reusable. Physical compaction remains constrained background work.
         onProgress(LocalDataRemovalProgress(LocalDataRemovalPhase.RECLAIMING_SPACE))
-        db.openHelper.writableDatabase.execSQL("PRAGMA wal_checkpoint(PASSIVE)")
+        checkpointWriteAheadLog()
 
         val result = LocalDataRemovalResult(recordsRemoved, legacyHeartRateRowsRemoved)
         onProgress(LocalDataRemovalProgress(LocalDataRemovalPhase.COMPLETE))
         result
+    }
+
+    private fun checkpointWriteAheadLog() {
+        // wal_checkpoint returns a status row, so SQLite requires the query API even though
+        // the operation's purpose is maintenance rather than reading application data.
+        db.openHelper.writableDatabase
+            .query("PRAGMA wal_checkpoint(PASSIVE)")
+            .use { cursor ->
+                check(cursor.moveToFirst()) { "WAL checkpoint returned no status row" }
+            }
     }
 
     private suspend fun removeHealthRecords(
@@ -137,6 +148,7 @@ class LocalDataService(
                 retentionDao.clearSleepArchive()
                 syncDao.clearAll()
                 coverageDao.clearAll()
+                changeTokenDao.clearAll()
             }
             return
         }

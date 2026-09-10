@@ -1,5 +1,6 @@
 package com.example.healthconnectandroid.ui.settings
 
+import android.util.Log
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
@@ -13,6 +14,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -25,9 +27,12 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -38,6 +43,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.dp
 import com.example.healthconnectandroid.hc.local.LocalDataRetention
 import com.example.healthconnectandroid.hc.local.LocalDataRemovalPhase
@@ -153,23 +159,30 @@ private fun HoldToRemoveButton(
     enabled: Boolean,
     onConfirmed: () -> Unit
 ) {
-    var pressed by remember { mutableStateOf(false) }
+    var pointerPressed by remember { mutableStateOf(false) }
+    var keyboardPressed by remember { mutableStateOf(false) }
     val progress = remember { Animatable(0f) }
-    LaunchedEffect(pressed) {
-        if (!pressed) {
+    val currentOnConfirmed by rememberUpdatedState(onConfirmed)
+    val haptic = LocalHapticFeedback.current
+    val pressed = pointerPressed || keyboardPressed
+
+    LaunchedEffect(pressed, enabled) {
+        if (!pressed || !enabled) {
             progress.snapTo(0f)
             return@LaunchedEffect
         }
         progress.snapTo(0f)
         progress.animateTo(1f, tween(HOLD_DURATION_MILLIS.toInt(), easing = LinearEasing))
-        if (pressed) {
-            pressed = false
-            onConfirmed()
-        }
+        currentOnConfirmed()
+        performConfirmationHaptic(haptic)
+        pointerPressed = false
+        keyboardPressed = false
     }
 
     Surface(
         modifier = Modifier
+            .width(188.dp)
+            .height(58.dp)
             .semantics {
                 role = Role.Button
                 contentDescription = "Hold for three seconds to remove local data"
@@ -179,18 +192,18 @@ private fun HoldToRemoveButton(
                 if (!enabled || (event.key != Key.Enter && event.key != Key.DirectionCenter)) {
                     return@onPreviewKeyEvent false
                 }
-                pressed = event.type == KeyEventType.KeyDown
+                keyboardPressed = event.type == KeyEventType.KeyDown
                 true
             }
-            .pointerInput(enabled, onConfirmed) {
+            .pointerInput(enabled) {
                 if (!enabled) return@pointerInput
                 awaitEachGesture {
                     awaitFirstDown(requireUnconsumed = false)
-                    pressed = true
+                    pointerPressed = true
                     do {
                         val event = awaitPointerEvent()
                     } while (event.changes.any { it.pressed })
-                    pressed = false
+                    pointerPressed = false
                 }
             },
         shape = MaterialTheme.shapes.small,
@@ -203,18 +216,23 @@ private fun HoldToRemoveButton(
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             Text(uiText(if (pressed) "Keep holding..." else "Hold 3 seconds to remove"))
-            if (pressed) {
-                LinearProgressIndicator(
-                    progress = { progress.value },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(3.dp),
-                    color = MaterialTheme.colorScheme.onError,
-                    trackColor = MaterialTheme.colorScheme.onError.copy(alpha = 0.24f)
-                )
-            }
+            LinearProgressIndicator(
+                progress = { progress.value },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(3.dp)
+                    .alpha(if (pressed) 1f else 0f),
+                color = MaterialTheme.colorScheme.onError,
+                trackColor = MaterialTheme.colorScheme.onError.copy(alpha = 0.24f)
+            )
         }
     }
 }
 
 private const val HOLD_DURATION_MILLIS = 3_000L
+private const val HOLD_LOG_TAG = "LocalDataRemoval"
+
+private fun performConfirmationHaptic(haptic: androidx.compose.ui.hapticfeedback.HapticFeedback) {
+    runCatching { haptic.performHapticFeedback(HapticFeedbackType.LongPress) }
+        .onFailure { error -> Log.w(HOLD_LOG_TAG, "Delete confirmation haptic failed", error) }
+}

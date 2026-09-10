@@ -8,6 +8,7 @@ import java.time.Instant
 import java.time.ZoneOffset
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SleepSessionModelsTest {
@@ -40,6 +41,7 @@ class SleepSessionModelsTest {
         assertEquals(start, input.start)
         assertEquals(end, input.end)
         assertNotEquals(SleepQualityBand.UNKNOWN, model.analysis.qualityBand)
+        assertTrue(sleepSessionSupportingText(model, ZoneOffset.UTC).contains("Local date 2026-05-12"))
     }
 
     private fun sleepRow(

@@ -78,7 +78,7 @@ internal data class UploadBatch(
     }
 }
 
-internal fun UploadBatch.toJson(): JSONObject =
+internal fun UploadBatch.toJson(profileIdentity: UploadProfileIdentity? = null): JSONObject =
     JSONObject()
         .put("schemaVersion", schemaVersion)
         .put("deviceId", deviceId)
@@ -87,6 +87,12 @@ internal fun UploadBatch.toJson(): JSONObject =
         .put("records", records.toJsonArray { it.toUploadJson() })
         .put("values", values.toJsonArray { it.toUploadJson() })
         .put("aggregates", aggregates.toJsonArray { it.toUploadJson() })
+        .apply {
+            if (profileIdentity != null) {
+                put("profileId", profileIdentity.profileId)
+                put("installationId", profileIdentity.installationId)
+            }
+        }
 
 private inline fun <T> Iterable<T>.toJsonArray(transform: (T) -> JSONObject): JSONArray =
     JSONArray().apply {

@@ -12,6 +12,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -104,13 +105,9 @@ fun LineChart(
     var chartHeightPx by remember(points) { mutableFloatStateOf(0f) }
     val density = LocalDensity.current
     val xBounds = visibleXBounds(fullXBounds, viewportStartFraction, viewportFraction)
-    LaunchedEffect(xBounds.min, xBounds.max) {
-        onVisibleRangeChanged?.invoke(
-            ChartVisibleRange(
-                startEpochMillis = xBounds.min.roundToLong(),
-                endEpochMillis = xBounds.max.roundToLong()
-            )
-        )
+    val currentOnVisibleRangeChanged by rememberUpdatedState(onVisibleRangeChanged)
+    LaunchedEffect(points, viewportResetKey, domainStartEpochMillis, domainEndEpochMillis) {
+        currentOnVisibleRangeChanged?.invoke(xBounds.toVisibleRange())
     }
     val visiblePoints = remember(sorted, xBounds) {
         visibleChartPointWindow(sorted, xBounds)
@@ -121,18 +118,20 @@ fun LineChart(
     val visibleValues = remember(visiblePoints, sorted) {
         collectChartValues(visiblePoints).ifEmpty { collectChartValues(sorted) }
     }
-    val yBounds = if (heartRateZones != null) {
-        val bounds = HeartRateAnalysis.stableChartBounds(visibleValues, heartRateZones)
-        NumericBounds(bounds.first, bounds.second)
-    } else {
-        expandedYBounds(visibleValues)
+    val yBounds = remember(visibleValues, heartRateZones) {
+        if (heartRateZones != null) {
+            val bounds = HeartRateAnalysis.stableChartBounds(visibleValues, heartRateZones)
+            NumericBounds(bounds.first, bounds.second)
+        } else {
+            expandedYBounds(visibleValues)
+        }
     }
     val unit = sorted.firstOrNull()?.unit.orEmpty()
     val xTicks = remember(xBounds, zoneId) { lineTimeTicks(xBounds, zoneId) }
     val yTicks = remember(yBounds, heartRateZones) {
         if (heartRateZones != null) heartRateTicks(yBounds) else numericTicks(yBounds)
     }
-    val seriesStyle = adaptiveLineStyle(visiblePoints.size)
+    val seriesStyle = remember(visiblePoints.size) { adaptiveLineStyle(visiblePoints.size) }
     val plotLeftPx = with(density) { 56.dp.toPx() }
     val plotTopPx = with(density) { 18.dp.toPx() }
     val plotRightInsetPx = with(density) { 16.dp.toPx() }
@@ -194,6 +193,15 @@ fun LineChart(
                     selectedPoint = null
                     viewportFraction = newViewportFraction
                     viewportStartFraction = startFraction
+                },
+                onViewportChangeFinished = { startFraction, settledViewportFraction ->
+                    currentOnVisibleRangeChanged?.invoke(
+                        visibleXBounds(
+                            fullBounds = fullXBounds,
+                            viewportStartFraction = startFraction,
+                            viewportFraction = settledViewportFraction
+                        ).toVisibleRange()
+                    )
                 }
             ) { touchX ->
                 selectedPoint = selectNearestLinePoint(
@@ -418,6 +426,12 @@ private fun visibleXBounds(
     val start = fullBounds.min + maxStart * viewportStartFraction.coerceIn(0f, 1f)
     return NumericBounds(start, start + visibleRange)
 }
+
+private fun NumericBounds.toVisibleRange(): ChartVisibleRange =
+    ChartVisibleRange(
+        startEpochMillis = min.roundToLong(),
+        endEpochMillis = max.roundToLong()
+    )
 
 private fun preferredViewportFractions(
     fullBounds: NumericBounds,
