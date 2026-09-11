@@ -1,5 +1,7 @@
 # Health Data Sync
 
+English | [日本語](README.ja.md)
+
 [![CI](https://github.com/Tsubashimo-Nanato/AndroidHealthConnect/actions/workflows/ci.yml/badge.svg)](https://github.com/Tsubashimo-Nanato/AndroidHealthConnect/actions/workflows/ci.yml)
 ![Version](https://img.shields.io/badge/version-0.1.5-0f766e)
 ![Android](https://img.shields.io/badge/Android-Health%20Connect-3ddc84)
